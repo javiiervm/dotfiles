@@ -1,5 +1,7 @@
-
+# ==========================================
 # Clipboard command EXecution
+# Author: github.com/iikerm
+# ==========================================
 
 import os
 import sys
