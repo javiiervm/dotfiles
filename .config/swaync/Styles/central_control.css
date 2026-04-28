@@ -1,0 +1,275 @@
+/* Modern Professional Notification Center - Inspired by Caelestia & Android */
+
+@define-color text           @fg;
+@define-color background     @bg0;
+@define-color background-alt alpha(@bg1, .7);
+@define-color selected       #ffffff; /* Resalte en blanco puro */
+@define-color hover          @bg3;
+@define-color urgent         @red;
+@define-color surface        alpha(@fg, .08);
+@define-color surface-hover  alpha(@fg, .12);
+
+* {
+  color: @text;
+  all: unset;
+  font-size: 14px;
+  font-family: "JetBrains Mono Nerd Font", "Segoe UI", sans-serif;
+  transition: all 250ms cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.blank-window {  
+  background: transparent;  
+}
+  
+/* ==================== CONTROL CENTER CONTAINER ==================== */
+
+.control-center {
+  background: alpha(@background, 1);
+  border-radius: 24px;
+  border: 1px solid alpha(@text, .08);
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, .25),
+    0 0 1px rgba(0, 0, 0, .3);
+  margin: 12px;
+  padding: 4px;
+}
+
+/* ==================== MEDIA PLAYER ==================== */
+
+.widget-mpris {
+  background: @bg1; 
+  border-radius: 20px;
+  margin: 12px;
+  padding: 0; 
+  border: 1px solid alpha(@text, .05);
+  position: relative;
+  overflow: hidden; 
+}
+
+.widget-mpris-player {
+  background: transparent;
+  box-shadow: none;
+  padding: 16px; 
+  position: relative;
+  z-index: 1; 
+}
+
+.widget-mpris .widget-mpris-player .mpris-background {
+  display: block; 
+  filter: blur(30px) brightness(0.20); 
+  opacity: 1; 
+  border-radius: 20px;
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.widget-mpris-album-art {
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  min-width: 72px;
+  min-height: 72px;
+}
+
+.widget-mpris-title {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: #ffffff; 
+  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+}
+
+.widget-mpris-subtitle {
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.8); 
+}
+
+.widget-mpris button {
+  color: white;
+  background: rgba(255, 255, 255, 0.1); 
+  border-radius: 50%;
+  min-width: 42px;
+  min-height: 42px;
+  margin: 10px 4px 0 4px;
+}
+
+.widget-mpris button:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.1);
+}
+
+.widget-mpris button:nth-child(3) {
+  background: @selected; 
+  color: @bg0; 
+}
+
+/* ==================== QUICK SETTINGS (6 BOTONES) ==================== */
+
+.widget-buttons-grid {
+  padding: 0;
+  margin: 0 12px 12px 12px; 
+}
+
+.widget-buttons-grid > flowbox > flowboxchild > button {
+  margin: 0 3px;
+  background: alpha(@text, 0.08);
+  border-radius: 16px;
+  min-height: 52px; 
+  min-width: 52px;
+  text-align: center;
+}
+
+.widget-buttons-grid > flowbox > flowboxchild > button:hover {
+  background: alpha(@text, 0.15);
+}
+
+.widget-buttons-grid > flowbox > flowboxchild > button:checked {
+  background: @selected;
+  color: @bg0;
+}
+
+.widget-buttons-grid > flowbox > flowboxchild > button label {
+  font-size: 18px;
+}
+
+/* ==================== VOLUME & BACKLIGHT SLIDERS (REFINADOS) ==================== */
+
+/* ==================== VOLUME & BACKLIGHT SLIDERS ==================== */
+
+.widget-volume,
+.widget-backlight {
+  margin: 4px 12px; /* Alineado exacto con los botones */
+  padding: 6px 8px;
+  background: alpha(@text, 0.05);
+  border-radius: 16px;
+  border: 1px solid alpha(@text, 0.06);
+}
+
+/* Icono a la izquierda — visible y proporcionado */
+.widget-volume label,
+.widget-backlight label {
+  font-family: "JetBrains Mono Nerd Font";
+  font-size: 15px;
+  opacity: 0.45;
+  min-width: 24px;
+  margin-right: 4px;
+}
+
+/* Barra de fondo */
+.widget-volume scale trough,
+.widget-backlight scale trough {
+  background: alpha(@text, 0.08);
+  border-radius: 20px;
+  min-height: 6px; /* Más fina y elegante */
+}
+
+/* Progreso */
+.widget-volume scale highlight,
+.widget-backlight scale highlight {
+  background: linear-gradient(
+    to right,
+    alpha(@selected, 0.5),
+    alpha(@selected, 0.85)
+  );
+  border-radius: 20px;
+}
+
+/* Knob */
+.widget-volume scale slider,
+.widget-backlight scale slider {
+  background: @selected;
+  border-radius: 100%;
+  min-height: 20px;
+  min-width: 20px;
+  margin: -7px 0;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 0 2px alpha(@selected, 0.25); /* halo sutil */
+  transition: all 150ms ease;
+}
+
+.widget-volume scale slider:hover,
+.widget-backlight scale slider:hover {
+  min-height: 24px;
+  min-width: 24px;
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.4),
+    0 0 0 4px alpha(@selected, 0.2);
+}
+
+/* ==================== NOTIFICATIONS ==================== */
+
+.widget-title {
+  font-size: 0.9em;
+  font-weight: 800;
+  padding: 20px 12px 10px 12px; 
+  opacity: 0.7;
+}
+
+.widget-title button {
+  background: alpha(@selected, 0.15); 
+  color: @selected;
+  border-radius: 12px;
+  padding: 6px 16px;
+  font-size: 0.8em;
+  font-weight: 800;
+  border: 1px solid alpha(@selected, 0.2);
+}
+
+.widget-title button:hover {
+  background: @selected;
+  color: @bg0;
+}
+
+.control-center .notification-row {
+  margin: 8px 12px; 
+}
+
+.control-center .notification-row .notification-background {
+  background: alpha(@bg1, 0.95); 
+  border-radius: 18px;
+  border: 1px solid alpha(@text, 0.1);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.control-center .notification-row .notification-background .notification .notification-content {
+  padding: 16px; 
+}
+
+.control-center .notification-row .notification-background .close-button {
+  background: alpha(@red, 0.15);
+  color: @red;
+  border-radius: 10px;
+  margin: 10px;
+  padding: 4px;
+}
+
+/* ==================== DO NOT DISTURB ==================== */
+
+.widget-dnd {
+  padding: 12px 20px;
+  border-top: 1px solid alpha(@text, 0.05);
+}
+
+.widget-dnd > switch {
+  background: alpha(@text, 0.1);
+  border-radius: 20px;
+  padding: 2px;
+}
+
+.widget-dnd > switch:checked {
+  background: @selected; 
+}
+
+/* ==================== ANIMATIONS ==================== */
+
+@keyframes slide-in {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.notification-row {
+  animation: slide-in 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}

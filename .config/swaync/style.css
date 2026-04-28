@@ -1,0 +1,16 @@
+/* @import 'matugen/colors.css'; */
+@import 'one-dark/colors.css';
+@import 'Styles/notifications.css';
+@import 'Styles/central_control.css';
+
+* {
+    border: none;
+    border-radius: 0px;
+
+    font-family: "Adwaita Sans", "CaskaydiaCove Nerd Font Propo", sans-serif;
+    font-weight: bold;
+
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+}
