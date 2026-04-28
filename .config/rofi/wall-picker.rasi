@@ -1,0 +1,73 @@
+/**
+ * Wallpaper Gallery Layout (English)
+ **/
+
+configuration {
+    modi:                        "dmenu";
+    show-icons:                  true;
+    dmenu-display-format:        "{name}";
+}
+
+/* Redefinimos solo lo necesario para la galería */
+
+window {
+    width:                       1100px;
+    height:                      700px;
+    border:                      2px;
+    border-radius:               20px;
+    /* Las variables @bg3 y @bg0 ya vienen del tema base */
+    border-color:                @bg3;
+    background-color:            @bg0;
+}
+
+mainbox {
+    padding:                     20px;
+    background-color:            transparent;
+    children:                    [ "inputbar", "listview" ];
+}
+
+inputbar {
+    margin:                      0px 0px 20px 0px;
+    padding:                     12px;
+    border-radius:               12px;
+    background-color:            @bg1;
+    children:                    [ "prompt", "entry" ];
+}
+
+entry {
+    placeholder:                 "Search wallpaper...";
+    text-color:                  @fg;
+}
+
+listview {
+    columns:                     4;
+    lines:                       3;
+    spacing:                     20px;
+    fixed-columns:               true;
+    background-color:            transparent;
+}
+
+element {
+    orientation:                 vertical;
+    padding:                     15px;
+    border-radius:               15px;
+    background-color:            transparent;
+}
+
+element selected.normal {
+    background-color:            @bg2;
+    text-color:                  @blue;
+    border:                      1px;
+    border-color:                @blue;
+}
+
+element-icon {
+    size:                        180px;
+    horizontal-align:            0.5;
+}
+
+element-text {
+    horizontal-align:            0.5;
+    vertical-align:              0.5;
+    text-color:                  inherit;
+}
