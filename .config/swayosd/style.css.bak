@@ -1,0 +1,59 @@
+window {
+    background-color: rgba(62, 68, 81, 0.9);
+    border-radius: 999px;
+    border: 1px solid rgba(171, 178, 191, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); 
+}
+
+#osd {
+    /* Aumentamos un par de píxeles el padding lateral para que quepa el número sin apretarse */
+    padding: 2px 12px; 
+}
+
+/* 1. Estilo solo para el ICONO (Altavoz / Sol) */
+#osd image {
+    color: #ffffff !important;
+    font-size: 12px !important; 
+    margin-right: 8px !important; /* Separación entre icono y barra */
+}
+
+/* 2. Estilo solo para el TEXTO (El porcentaje) */
+#osd label {
+    color: #ffffff !important;
+    font-size: 11px !important; /* Letra un pelín más pequeña para que sea sutil */
+    font-family: "JetBrains Mono Nerd Font", monospace !important; /* Monoespaciado vital para números */
+    font-weight: bold !important;
+    margin-left: 8px !important; /* Separación entre barra y texto */
+}
+
+#osd scale {
+    margin: 0;
+    padding: 0;
+}
+
+#osd scale trough {
+    background-color: rgba(33, 37, 43, 0.6) !important;
+    background-image: none !important;
+    border-radius: 10px;
+    min-height: 3px !important; 
+    min-width: 70px !important; 
+    margin: 0;
+}
+
+#osd scale highlight {
+    background-color: #61afef !important;
+    background-image: none !important; 
+    border-radius: 10px;
+    min-height: 3px !important;
+}
+
+#osd scale slider {
+    background-color: #61afef !important; 
+    background-image: none !important; 
+    border: none !important; 
+    box-shadow: none !important;
+    border-radius: 50% !important;
+    min-width: 8px !important; 
+    min-height: 8px !important;
+    margin: -2px 0 !important; 
+}

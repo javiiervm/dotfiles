@@ -1,0 +1,41 @@
+window {
+    background-color: rgba(15, 15, 15, 0.85); /* Fondo más oscuro y elegante */
+    border-radius: 25px; /* Bordes muy redondeados */
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    min-width: 0; /* Importante: elimina cualquier ancho mínimo heredado */
+}
+
+#osd {
+    /* Reducimos el padding horizontal a lo mínimo (2px o incluso 0) */
+    padding: 12px 2px; 
+}
+
+/* El icono determina el ancho de la ventana si es más grande que la barra */
+#osd image {
+    color: #ffffff !important;
+    font-size: 12px !important; /* Icono un poco más pequeño para no ensanchar */
+    margin: 0 0 10px 0 !important; /* Margen solo abajo */
+    padding: 0 !important;
+}
+
+/* La barra vertical */
+#osd scale trough {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 10px;
+    min-height: 140px !important; /* Un poco más alta */
+    min-width: 4px !important;    /* Muy estrecha (estilo Caelestia) */
+    margin: 0 4px !important;     /* Un pequeño margen para que respire dentro de la píldora */
+}
+
+#osd scale highlight {
+    background-color: #61afef !important; /* Color azul de tu OMEN */
+    border-radius: 10px;
+}
+
+/* Ocultar el slider/bolita para que sea solo una línea que se llena */
+#osd scale slider {
+    background-color: transparent !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    border: none !important;
+}
