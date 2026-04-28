@@ -12,6 +12,7 @@ PanelWindow {
     // ==========================================
     property bool visible_state: false
     property bool isReallyVisible: false
+    property string wallpaperDir: "~/Pictures/wallpapers"
     signal requestIslandMsg(string icon, string color, string text)
     
     // Modos del menú:
@@ -110,7 +111,7 @@ PanelWindow {
     // Proceso específico para leer los wallpapers
     Process {
         id: wallLoader
-        command: ["/bin/bash", "-c", "/home/javier/.config/quickshell/scripts/provider.sh --wallpaper"]
+        command: ["/bin/bash", "-c", "/home/javier/.config/quickshell/scripts/provider.sh --wallpaper " + wallpaperDir]
         stdout: SplitParser {
             onRead: (line) => {
                 if (!line || line.trim() === "") return;
@@ -158,14 +159,20 @@ PanelWindow {
     Process {
         id: netConnectProc
         property string targetName: ""
-        property string targetType: "" // "WIFI" o "BT"
+        property string targetType: "" // "WIFI", "BT_CONNECT" o "BT_PAIR"
         
         // Usamos la función clásica para atrapar el código de salida exacto
         onExited: function(exitCode) {
             var success = (exitCode === 0);
             var icon = targetType === "WIFI" ? "" : "";
             var color = success ? "#30d158" : "#ff3b30";
-            var status = success ? "Connected to " : "Failed to connect to ";
+            
+            var status = "";
+            if (targetType === "BT_PAIR") {
+                status = success ? "Paired with " : "Failed to pair with ";
+            } else {
+                status = success ? "Connected to " : "Failed to connect to ";
+            }
             
             // Usamos la señal correcta que ya tienes declarada arriba
             launcherWindow.requestIslandMsg(icon, color, status + targetName);
@@ -766,7 +773,11 @@ PanelWindow {
         if (cmd.startsWith("qs_keep:")) {
             var keepCmd = cmd.substring(8);
             
-            // Atrapa tanto redes nuevas ("connect") como redes guardadas ("up id")
+            // 1. Resetear procesos para evitar que se queden congelados
+            execProc.running = false;
+            netConnectProc.running = false;
+
+            // 2. Wi-Fi
             if (keepCmd.indexOf("nmcli") !== -1 && (keepCmd.indexOf("connect") !== -1 || keepCmd.indexOf("up id") !== -1)) {
                 launcherWindow.requestIslandMsg("", "white", "Trying to connect to " + name + "...");
                 netConnectProc.targetName = name;
@@ -774,17 +785,28 @@ PanelWindow {
                 netConnectProc.command = ["/bin/bash", "-c", keepCmd];
                 netConnectProc.running = true;
             } 
-            else if (keepCmd.indexOf("bluetoothctl") !== -1 && keepCmd.indexOf("connect") !== -1) {
+            // 3. Bluetooth (Conectar)
+            else if (keepCmd.indexOf("bluetoothctl") !== -1 && keepCmd.indexOf("connect") !== -1 && keepCmd.indexOf("disconnect") === -1) {
                 var btDevName = (launcherWindow.currentMode === 10) ? targetBtName : name;
                 launcherWindow.requestIslandMsg("", "white", "Trying to connect to " + btDevName + "...");
-                
                 netConnectProc.targetName = btDevName;
-                netConnectProc.targetType = "BT";
-                netConnectProc.command = ["/bin/bash", "-c", keepCmd];
+                netConnectProc.targetType = "BT_CONNECT";
+                // Desbloqueamos rfkill por si el adaptador está apagado por hardware
+                netConnectProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth; " + keepCmd];
                 netConnectProc.running = true;
             }
+            // 4. Bluetooth (Emparejar) - Filtramos "pairable" para que no interfiera
+            else if (keepCmd.indexOf("bluetoothctl") !== -1 && keepCmd.indexOf("pair") !== -1 && keepCmd.indexOf("pairable") === -1) {
+                var btDevNamePair = (launcherWindow.currentMode === 10) ? targetBtName : name;
+                launcherWindow.requestIslandMsg("", "white", "Trying to pair with " + btDevNamePair + "...");
+                netConnectProc.targetName = btDevNamePair;
+                netConnectProc.targetType = "BT_PAIR";
+                netConnectProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth; " + keepCmd];
+                netConnectProc.running = true;
+            }
+            // 5. Otros (Power on/off, disconnect, trust, etc)
             else {
-                execProc.command = ["/bin/bash", "-c", keepCmd];
+                execProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth 2>/dev/null; " + keepCmd];
                 execProc.running = true;
             }
             refreshTimer.start(); 
@@ -821,7 +843,18 @@ PanelWindow {
             return; 
         }
         
-        if (cmd === "qs_wall") { launcherWindow.currentMode = 7; searchInput.text = ""; return; }
+        if (cmd === "qs_wall") { 
+            launcherWindow.currentMode = 7; 
+            searchInput.text = ""; 
+            
+            // 1. Vaciamos la caché actual de wallpapers
+            wallpaperModel.clear(); 
+            // 2. Apagamos y encendemos el lector para forzar un escaneo de la carpeta en este instante
+            wallLoader.running = false;
+            wallLoader.running = true; 
+            
+            return; 
+        }
         if (cmd === "qs_calc") { launcherWindow.currentMode = 8; searchInput.text = ""; loadTabData("--calc"); return; }
 
         // HISTORIAL DE RECIENTES
@@ -834,6 +867,7 @@ PanelWindow {
         var cleanCmd = cmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
         
         WlrLayershell.keyboardFocus = WlrLayershell.None;
+        execProc.running = false; // <-- Previene bloqueos en apps normales
         execProc.command = ["hyprctl", "dispatch", "exec", "--", "bash -c \"" + cleanCmd + " && hyprctl dispatch warpcursor 50 50\""];
         execProc.running = true;
 

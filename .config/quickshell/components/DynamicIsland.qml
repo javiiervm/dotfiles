@@ -278,12 +278,17 @@ PanelWindow {
     property bool isOverheating: globalCt > maxTemp || globalGt > maxTemp
     property bool isOverloaded: globalCu > maxLoad || sysRamUsage >= maxRam
     
-    // --- NUEVA LÓGICA DE COLORES INTERMITENTES ---
+    // --- NUEVA LÓGICA DE COLORES ---
+    property bool isBtConnected: false // Recibe el dato desde shell.qml
+    
     property string colorTemp: "#ff3b30"
     property string colorLoad: "#ff9f0a"
+    property string colorBt: "#0a84ff"   // Azul estilo Apple/Bluetooth
     
-    // Color principal a mostrar
-    property string baseAlertColor: isOverheating ? colorTemp : (isOverloaded ? colorLoad : "transparent")
+    // Color principal a mostrar (El calor y la carga tienen prioridad sobre el Bluetooth)
+    property string baseAlertColor: isOverheating ? colorTemp : 
+                                    (isOverloaded ? colorLoad : 
+                                    (isBtConnected ? colorBt : "transparent"))
     
     // Color secundario (Alterna entre Rojo/Naranja si se dan ambos, o atenúa el color base si solo se da uno)
     property string altAlertColor: (isOverheating && isOverloaded) ? colorLoad : 
@@ -438,9 +443,9 @@ PanelWindow {
         border.width: baseAlertColor !== "transparent" ? 2 : 1
         
         SequentialAnimation on border.color {
-            running: baseAlertColor !== "transparent" && !isExpanded
+            // Añadimos la condición de que solo parpadee si es una alerta de hardware (calor o carga)
+            running: baseAlertColor !== "transparent" && !isExpanded && (isOverheating || isOverloaded)
             loops: Animation.Infinite
-            // Altera dinámicamente entre el color base y el alterno
             ColorAnimation { to: altAlertColor; duration: 800 }
             ColorAnimation { to: baseAlertColor; duration: 800 }
         }

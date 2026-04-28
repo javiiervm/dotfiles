@@ -473,6 +473,13 @@ ShellRoot {
             SysMenu { title: root.activeMenuTitle; info1: root.activeMenuInfo1; info2: root.activeMenuInfo2; accent: root.activeMenuAccent; isOpen: root.isMenuOpen }
         }
 
-        DynamicIsland { id: islandWidget }
+        DynamicIsland { 
+            id: islandWidget 
+            // Filtro estricto que ignora palabras vacías o nulas devueltas por el sistema
+            isBtConnected: {
+                var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
+                return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
     }
 }
