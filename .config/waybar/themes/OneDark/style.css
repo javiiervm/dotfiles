@@ -1,0 +1,207 @@
+@import 'colors.css';
+
+* {
+    border: none;
+    border-radius: 0px;
+
+    font-family: "Adwaita Sans", "CaskaydiaCove Nerd Font Propo", sans-serif;
+    font-weight: bold;
+
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+}
+
+window#waybar {
+    background: transparent;
+}
+
+tooltip {
+    background: @bg0;
+    border: 1px solid @bg3;
+    border-radius: 12px;
+}
+
+tooltip label {
+    color: @fg;
+    padding: 6px;
+}
+
+#workspaces {
+    background-color: @bg0;
+    padding: 5px 3px;
+    margin: 0 0 0 12px;
+    border-radius: 18px;
+    border: 1px solid @bg1;
+    color: @fg;
+}
+
+#workspaces button {
+    padding: 0px 6px;
+    margin: 0px 3px;
+    border-radius: 50px;
+    /*color: transparent;*/
+    color: @grey1;
+    background-color: @bg1;
+    transition: all 0.3s ease-in-out;
+}
+
+/*#workspaces button:active {
+    background-color: @blue;
+    color: @bg0;
+    min-width: 50px;
+    transition: all 0.3s ease-in-out;
+    font-size: 13px;
+}*/
+
+#workspaces button.active {
+    background-color: @blue;
+    color: @bg0;
+    min-width: 50px;
+    transition: all 0.3s ease-in-out;
+}
+
+#workspaces button:hover {
+    background-color: @purple;
+    color: @bg0;
+    border-radius: 16px;
+    min-width: 50px;
+    background-size: 400% 400%;
+}
+
+#workspaces button.urgent {
+    background-color: @red;
+    color: @bg0;
+    border-radius: 16px;
+    min-width: 50px;
+    background-size: 400% 400%;
+    transition: all 0.3s ease-in-out;
+}
+
+#custom-arch,
+#temperature,
+#cpu,
+#battery,
+#pulseaudio,
+#network,
+#backlight,
+/*#clock,*/
+#custom-notification {
+    background-color: @bg0;
+    padding: 0 15px 0 15px;
+    margin: 0 0 0 12px;
+    border-radius: 50px;
+    border: 1px solid @bg1;
+}
+
+/* Definimos el color específico para el logo de Arch */
+#custom-arch {
+    color: @white;
+    font-size: 18px; /* Un poco más grande para que destaque */
+    padding-right: 18px; /* Ajuste fino para centrar visualmente el logo */
+}
+
+/* Extra: Efecto al pasar el ratón para que se sienta interactivo */
+#custom-arch:hover {
+    background-color: @bg2;
+    color: @blue;
+}
+
+#temperature {
+    /* Un azul más profundo que encaja con One Dark */
+    color: #518ccf; 
+}
+
+/* Opcional: Si quieres que cambie de color cuando el PC se caliente mucho */
+#temperature.critical {
+    color: @red;
+}
+
+#cpu {
+    color: @red;
+}
+
+#idle_inhibitor {
+    background-color: @bg0;
+    padding: 0 8px 0 15px; /* Más espacio a la izquierda, menos hacia el reloj */
+    margin: 0 0 0 12px;    /* Mantiene el margen general respecto a otros módulos */
+    border-radius: 50px 0 0 50px; /* Redondeado a la izquierda, plano a la derecha */
+    border: 1px solid @bg1;
+    border-right: none;    /* Oculta la unión con el reloj */
+    color: @fg;            /* Color inactivo (gris claro de tu tema) */
+    transition: all 0.3s ease;
+}
+
+#clock {
+    background-color: @bg0;
+    padding: 0 15px 0 8px; /* Menos espacio hacia el icono, más a la derecha */
+    margin: 0;             /* SIN MARGEN para que se pegue al idle_inhibitor */
+    border-radius: 0 50px 50px 0; /* Plano a la izquierda, redondeado a la derecha */
+    border: 1px solid @bg1;
+    border-left: none;     /* Oculta la unión con el icono */
+    color: @blue;          /* Mantiene el azul original de tu reloj */
+}
+
+/* Detalle extra: Que el icono cambie de color cuando lo actives */
+#idle_inhibitor.activated {
+    color: @blue; /* Se pintará del mismo azul que el reloj al activarlo */
+}
+
+#custom-notification {
+    color: @fg;
+    margin: 0 12px 0 12px;
+}
+
+#backlight {
+    color: @green;
+}
+
+#pulseaudio {
+    color: @yellow;
+}
+
+#network {
+    color: @purple;
+}
+
+#battery {
+    background-color: @grey1; /* PARTE VACÍA: Gris claro para que el número oscuro resalte */
+    color: @bg0;              /* NÚMEROS: Oscuros (como en el resto de tus módulos) */
+    font-weight: 900;
+    padding: 0 8px;
+    margin: 0 0 0 10px;
+    border-radius: 50px;
+    border: 1px solid @bg1;
+    min-width: 35px;
+    transition: all 0.3s ease;
+}
+
+/* --- RELLENO NORMAL: Blanco (@fg) --- */
+/* Cambiamos el fondo a @grey1 para que el contraste con el número @bg0 sea alto */
+#battery.p10  { background: linear-gradient(90deg, @fg 10%,  @grey1 10%); }
+#battery.p20  { background: linear-gradient(90deg, @fg 20%,  @grey1 20%); }
+#battery.p30  { background: linear-gradient(90deg, @fg 30%,  @grey1 30%); }
+#battery.p40  { background: linear-gradient(90deg, @fg 40%,  @grey1 40%); }
+#battery.p50  { background: linear-gradient(90deg, @fg 50%,  @grey1 50%); }
+#battery.p60  { background: linear-gradient(90deg, @fg 60%,  @grey1 60%); }
+#battery.p70  { background: linear-gradient(90deg, @fg 70%,  @grey1 70%); }
+#battery.p80  { background: linear-gradient(90deg, @fg 80%,  @grey1 80%); }
+#battery.p90  { background: linear-gradient(90deg, @fg 90%,  @grey1 90%); }
+#battery.full, #battery.p100 { background-color: @fg; }
+
+/* --- RELLENO CARGANDO: Verde (#2ecc71) --- */
+#battery.charging.p10  { background: linear-gradient(90deg, #2ecc71 10%,  @grey1 10%); }
+#battery.charging.p20  { background: linear-gradient(90deg, #2ecc71 20%,  @grey1 20%); }
+#battery.charging.p30  { background: linear-gradient(90deg, #2ecc71 30%,  @grey1 30%); }
+#battery.charging.p40  { background: linear-gradient(90deg, #2ecc71 40%,  @grey1 40%); }
+#battery.charging.p50  { background: linear-gradient(90deg, #2ecc71 50%,  @grey1 50%); }
+#battery.charging.p60  { background: linear-gradient(90deg, #2ecc71 60%,  @grey1 60%); }
+#battery.charging.p70  { background: linear-gradient(90deg, #2ecc71 70%,  @grey1 70%); }
+#battery.charging.p80  { background: linear-gradient(90deg, #2ecc71 80%,  @grey1 80%); }
+#battery.charging.p90  { background: linear-gradient(90deg, #2ecc71 90%,  @grey1 90%); }
+#battery.charging.full, #battery.plugged { background-color: #2ecc71; }
+
+/* Estado crítico: Rojo One UI sobre gris claro */
+#battery.critical:not(.charging) {
+    background: linear-gradient(90deg, @red 10%, @grey1 10%);
+}
