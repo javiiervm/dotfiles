@@ -618,11 +618,11 @@ PanelWindow {
                                 if (launcherWindow.currentMode === 9) {
                                     // 1. Notificamos inmediatamente por señal nativa
                                     launcherWindow.requestIslandMsg("", "white", "Trying to connect to " + targetWifiSsid + "...");
-                                    
                                     // 2. Lanzamos la conexión real
                                     netConnectProc.targetName = targetWifiSsid;
                                     netConnectProc.targetType = "WIFI";
-                                    netConnectProc.command = ["/bin/bash", "-c", "nmcli device wifi connect '" + targetWifiSsid + "' password '" + searchInput.text + "'"];
+                                    // Pasamos los argumentos limpios como array nativo
+                                    netConnectProc.command = ["nmcli", "device", "wifi", "connect", targetWifiSsid, "password", searchInput.text];
                                     netConnectProc.running = true;
 
                                     searchInput.echoMode = TextInput.Normal;
