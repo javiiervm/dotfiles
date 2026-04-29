@@ -6,6 +6,7 @@ pkill -9 -f "backend_daemon.sh"
 pkill -9 -f "sys_backend.sh"
 pkill -9 -f "backend.sh"
 pkill -9 -f "notif_daemon.py"
+pkill -f "qs -c overview"
 rm -f /tmp/qs_notif_cmd
 
 # 2. EL TRUCO MAESTRO: Crear un falso swaync-client y dunstctl
@@ -36,6 +37,7 @@ chmod +x /home/javier/.config/quickshell/scripts/*.py 2>/dev/null
 
 # 4. Lanzar Quickshell
 sleep 0.5
+qs -c overview &
 export QML_XHR_ALLOW_FILE_READ=1
 nohup quickshell > /dev/null 2>&1 &
 
