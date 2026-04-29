@@ -49,9 +49,25 @@ ShellRoot {
     property bool isMenuOpen: false
     property bool isMenuVisible: false
 
+    // --- ESTADOS PARA CAVA VISUALIZER ---
+    property bool isPlayingMedia: false
+    property bool isWorkspaceEmpty: true
+    property bool showCavaVisualizer: isPlayingMedia && isWorkspaceEmpty
+
+    property string cavaColor: Theme.blue // Color inicial
+
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
     ListModel { id: popupModel }
+    ListModel {
+        id: cavaModel
+        Component.onCompleted: {
+            // Inicializamos las 120 barras a altura 0
+            for (var i = 0; i < 120; i++) {
+                append({"barHeight": 0});
+            }
+        }
+    }
 
     function clearNotifications() { cmdProc.command = ["sh", "-c", "echo CLEAR > /tmp/qs_notif_cmd"]; cmdProc.running = true }
     function toggleDnd() { cmdProc.command = ["sh", "-c", "echo TOGGLE_DND > /tmp/qs_notif_cmd"]; cmdProc.running = true }
@@ -146,12 +162,84 @@ ShellRoot {
     }
     // ------------------------------------------------
 
+    // 1. Monitor de Escritorio y Media
+    Process {
+        id: mediaWorkspaceMonitor
+        // Verifica con hyprctl las ventanas y con playerctl la música
+        command: ["bash", "-c", "while true; do w=$(hyprctl activeworkspace -j | jq '.windows'); p=$(playerctl status 2>/dev/null | grep -q 'Playing' && echo 1 || echo 0); echo \"$w;$p\"; sleep 2; done"]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var parts = data.trim().split(";");
+                if (parts.length >= 2) {
+                    root.isWorkspaceEmpty = (parseInt(parts[0]) === 0);
+                    root.isPlayingMedia = (parts[1] === "1");
+                }
+            }
+        }
+    }
+
+    // 2. Motor de Visualización (Cava)
+    Process {
+        id: cavaVisualizerProc
+        command: [
+            "bash", "-c", 
+            "cat << 'EOF' > /tmp/qs_cava.conf\n" +
+            "[general]\n" +
+            "bars=120\n" +
+            "framerate=60\n" +
+            "[output]\n" +
+            "method=raw\n" +
+            "raw_target=/dev/stdout\n" +
+            "data_format=ascii\n" +
+            "ascii_max_range=100\n" +
+            "[smoothing]\n" +
+            "noise_reduction=80\n" +
+            "monstercat=1\n" +
+            "EOF\n" +
+            "cava -p /tmp/qs_cava.conf"
+        ]
+        running: root.showCavaVisualizer 
+        stdout: SplitParser {
+            onRead: (data) => {
+                var rawValues = data.trim().split(";");
+                for(var i = 0; i < 120; i++) {
+                    var val = parseInt(rawValues[i]);
+                    // Actualizamos exclusivamente la altura de cada barra en el modelo
+                    cavaModel.setProperty(i, "barHeight", isNaN(val) ? 0 : val);
+                }
+            }
+        }
+    }
+
     onIsMenuOpenChanged: {
         if (isMenuOpen) { 
             isMenuVisible = true
             closeTimer.stop()
         } else { 
             closeTimer.start()
+        }
+    }
+
+    Process {
+        id: colorMonitorProc
+        command: [
+            "bash", "-c", 
+            // EL SALVAVIDAS: Forzamos la creación del archivo para que inotifywait no crashee al arrancar
+            "touch /tmp/current_wallpaper; " + 
+            "if [ -s /tmp/current_wallpaper ]; then python3 /home/javier/.config/quickshell/scripts/cava_color.py \"$(cat /tmp/current_wallpaper)\"; fi; " +
+            "while inotifywait -q -e close_write,modify /tmp/current_wallpaper; do " +
+            "  python3 /home/javier/.config/quickshell/scripts/cava_color.py \"$(cat /tmp/current_wallpaper)\"; " +
+            "done"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var hexColor = data.trim();
+                if (hexColor.startsWith("#")) {
+                    root.cavaColor = hexColor;
+                }
+            }
         }
     }
 
@@ -479,6 +567,49 @@ ShellRoot {
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
+    }
+
+    PanelWindow {
+        id: cavaWindow
+        anchors { bottom: true; left: true; right: true }
+        implicitHeight: 300  
+        exclusiveZone: 0     
+        color: "transparent"
+        WlrLayershell.layer: WlrLayershell.Background 
+        visible: root.showCavaVisualizer
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 2 
+
+            Repeater {
+                model: cavaModel // Usamos el ListModel altamente reactivo
+                
+                Rectangle {
+                    Layout.alignment: Qt.AlignBottom
+                    Layout.fillWidth: true 
+                    
+                    // 'barHeight' es inyectada automáticamente por el ListModel.
+                    // Usamos implicitHeight para que el RowLayout lo respete.
+                    implicitHeight: Math.max(2, barHeight * 2.5) 
+                    
+                    radius: 4 
+
+                    // --- NUEVO: Color dinámico ---
+                    color: root.cavaColor 
+                    opacity: 0.85
+                    
+                    Behavior on implicitHeight {
+                        NumberAnimation { duration: 55; easing.type: Easing.OutCirc }
+                    }
+                    
+                    // --- NUEVO: Animación suave al cambiar de color ---
+                    Behavior on color {
+                        ColorAnimation { duration: 800; easing.type: Easing.InOutQuad }
+                    }
+                }
             }
         }
     }
