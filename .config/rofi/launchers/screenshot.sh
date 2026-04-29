@@ -16,12 +16,12 @@ notify_view() {
 case $1 in
 "--desktop")
   sleep 0.2 && hyprshot -m output -o "$dir"
-  notify_view
+  # notify_view
   exit 0
   ;;
 "--area")
   hyprshot -m region -o "$dir"
-  notify_view
+  # notify_view
   exit 0
   ;;
 esac
