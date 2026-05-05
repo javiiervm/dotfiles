@@ -16,7 +16,6 @@ Item {
         Repeater {
             model: [1, 2, 3, 4, 5]
             Rectangle {
-                // CORRECCIÓN: Eliminamos la llamada a Hyprland.workspace() para evitar el error
                 property bool isActive: Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace.id === modelData
                 property bool isHovered: mouseArea.containsMouse
                 
