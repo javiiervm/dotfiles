@@ -14,7 +14,7 @@ if [ "$MODE" = "--apps" ]; then
     echo "Bluetooth|Manage bluetooth devices|bluetooth|qs_bt|cmd" >> /tmp/qs_native.txt
 
     > /tmp/qs_apps.txt
-    directories=("/usr/share/applications" "$HOME/.local/share/applications" "$HOME/.local/share/applications/rofi-commands")
+    directories=("$HOME/.local/share/applications" "/usr/share/applications" "$HOME/.local/share/applications/rofi-commands")
     for dir in "${directories[@]}"; do
         [ ! -d "$dir" ] && continue
         find "$dir" -maxdepth 1 -name "*.desktop" 2>/dev/null | while read -r file; do

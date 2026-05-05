@@ -27,7 +27,7 @@ Rectangle {
 
     RowLayout {
         anchors.centerIn: parent; spacing: 1
-        Text { text: "󱐋"; color: Theme.bg0; font.family: Theme.fontIcons; font.pixelSize: 12; visible: charging }
+        //Text { text: "󱐋"; color: Theme.bg0; font.family: Theme.fontIcons; font.pixelSize: 12; visible: charging }
         Text { text: percentage; color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 12; font.bold: true }
     }
 }

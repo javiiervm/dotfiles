@@ -29,8 +29,16 @@ ShellRoot {
     property int memUsage: 0
 
     // Nuevos estados para el NotificationCenter
-    // property bool airplaneMode: false
+    property bool airplaneMode: false
     property bool caffeineMode: false
+
+    // --- NUEVO ESTADO: ACTUALIZACIONES ---
+    property int pendingUpdates: 0
+
+    // --- NUEVO ESTADO: APP TRAY ---
+    property bool appSpotify: false
+    property bool appDiscord: false
+    property bool appObs: false
 
     property bool isNotifOpen: false
     property string activeMenuTitle: ""
@@ -79,19 +87,86 @@ ShellRoot {
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill toggle all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
 
-    // --- MONITOR DE ESCRITORIO Y MEDIA (Basado en Eventos 0% CPU) ---
+    // --- NUEVOS PROCESOS: ACTUALIZADOR DE SISTEMA ---
+    Process { 
+        id: updateLauncherProc 
+        onRunningChanged: {
+            // Cuando 'running' pasa a false, significa que la terminal se acaba de cerrar
+            if (!running) {
+                // Apagamos y encendemos el comprobador para forzar un chequeo instantáneo
+                updateCheckerProc.running = false;
+                updateCheckerProc.running = true;
+            }
+        }
+    }
+    
+    function launchUpdater() {
+        var scriptLines = [
+            "#!/bin/bash",
+            "echo -e '\\e[1;34m::\\e[1;37m System Updater\\e[0m'",
+            "echo 'Checking packages...'",
+            "p=$(checkupdates 2>/dev/null | wc -l)",
+            "a=$(yay -Qua 2>/dev/null | wc -l)",
+            "t=$((p+a))",
+            "echo -e '\\e[1;36mPacman:\\e[0m '$p",
+            "echo -e '\\e[1;36mAUR (yay):\\e[0m '$a",
+            "echo -e '\\e[1;36mTotal:\\e[0m  '$t",
+            "echo ''",
+            "if [ $t -gt 0 ]; then",
+            "  read -p 'Do you want to update now? [Y/n] ' ans",
+            "  if [[ $ans != 'n' && $ans != 'N' ]]; then",
+            "    yay -Syu || sudo pacman -Syu",
+            "  fi",
+            "fi",
+            "echo -e '\\n\\e[1;32mDone.\\e[0m Press any key to exit...'",
+            "read -n 1 -s"
+        ];
+        var fullScript = scriptLines.join("\n");
+        // Force execution on current workspace via hyprctl
+        updateLauncherProc.command = ["bash", "-c", "cat << 'EOF' > /tmp/qs_update.sh\n" + fullScript + "\nEOF\nchmod +x /tmp/qs_update.sh && kitty bash -c /tmp/qs_update.sh"];
+        updateLauncherProc.running = true;
+    }
+
+    Process {
+        id: updateCheckerProc
+        // Se ha cambiado 'grep -c . || echo 0' por 'wc -l' para evitar errores matemáticos en Bash
+        command: ["bash", "-c", "p=$(/usr/bin/checkupdates 2>/dev/null | wc -l); a=$(/usr/bin/yay -Qua 2>/dev/null | wc -l); echo $((p+a))"]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var count = parseInt(data.trim());
+                console.log("DEBUG UPDATES: " + count); 
+                if (!isNaN(count)) {
+                    root.pendingUpdates = count;
+                }
+            }
+        }
+    }
+
+    // --- NUEVOS PROCESOS: CUSTOM APP TRAY ---
+    Process {
+        id: appTrayMonitor
+        // Verifica si los procesos existen cada 3 segundos sin gastar recursos
+        command: ["bash", "-c", "while true; do s=$(pgrep -x spotify >/dev/null && echo 1 || echo 0); d=$( (pgrep -x Discord >/dev/null || pgrep -x discord >/dev/null || pgrep -x DiscordCore >/dev/null) && echo 1 || echo 0); o=$(pgrep -x obs >/dev/null && echo 1 || echo 0); echo \"$s;$d;$o\"; sleep 3; done"]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var parts = data.trim().split(";");
+                if (parts.length >= 3) {
+                    root.appSpotify = parts[0] === "1";
+                    root.appDiscord = parts[1] === "1";
+                    root.appObs     = parts[2] === "1";
+                }
+            }
+        }
+    }
+    // ------------------------------------------------
+
+    // 1. Monitor de Escritorio y Media
     Process {
         id: mediaWorkspaceMonitor
-        command: [
-            "bash", "-c",
-            "F=/tmp/qs_media_fifo; rm -f $F; mkfifo $F; exec 3<> $F; " +
-            "playerctl status --follow 2>/dev/null >&3 & " +
-            "socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | grep --line-buffered -E '(workspace|openwindow|closewindow|movewindow)' | while read -r _; do echo 'HYPR' >&3; done & " +
-            "trap 'kill $(jobs -p) 2>/dev/null; rm -f $F' EXIT; " +
-            "check_state() { w=$(hyprctl activeworkspace -j 2>/dev/null | jq '.windows' || echo 0); p=$(playerctl status 2>/dev/null | grep -q 'Playing' && echo 1 || echo 0); echo \"$w;$p\"; }; " +
-            "check_state; " + 
-            "while read -r event <&3; do check_state; done"
-        ]
+        // Verifica con hyprctl las ventanas y con playerctl la música
+        command: ["bash", "-c", "while true; do w=$(hyprctl activeworkspace -j | jq '.windows'); p=$(playerctl status 2>/dev/null | grep -q 'Playing' && echo 1 || echo 0); echo \"$w;$p\"; sleep 2; done"]
         running: true
         stdout: SplitParser {
             onRead: (data) => {
@@ -265,25 +340,6 @@ ShellRoot {
         }
     }
 
-    // --- MONITOR DE MODO AVIÓN (Basado en Eventos 0% CPU) ---
-    Process {
-        id: airplaneMonitor
-        command: [
-            "bash", "-c",
-            // Función que lee el estado real: Si hay algún bloqueo "Soft" o "Hard", el modo avión está activo.
-            "check_airplane() { rfkill list all | grep -q -E '(Soft blocked: yes|Hard blocked: yes)' && echo 1 || echo 0; }; " +
-            "check_airplane; " + // Estado inicial
-            // Magia event-driven: 'rfkill event' frena el script hasta que tocas algo de red.
-            "rfkill event | while read -r _; do check_airplane; done"
-        ]
-        running: true
-        stdout: SplitParser {
-            onRead: (data) => {
-                root.airplaneMode = (data.trim() === "1");
-            }
-        }
-    }
-
     PanelWindow {
         id: osdWindow
         screen: Quickshell.screens[0]
@@ -345,13 +401,13 @@ ShellRoot {
             // --- CONTENEDOR IZQUIERDO (Logo Arch y Workspaces) ---
             Rectangle {
                 anchors.left: parent.left
-                anchors.leftMargin: 12 
+                anchors.leftMargin: 12 // Alineación perfecta con gaps_out = 12 de Hyprland
                 anchors.verticalCenter: parent.verticalCenter
-                height: 34 
-                width: leftRow.implicitWidth + 30 
-                radius: height / 2 
-                color: "#0a0a0a" 
-                border.color: Qt.alpha(Theme.white, 0.08) 
+                height: 34 // Misma altura que la isla (ajústalo si la tuya es distinta)
+                width: leftRow.implicitWidth + 30 // 15px de margen interno a cada lado
+                radius: height / 2 // Crea el efecto de cápsula completamente redondeada
+                color: "#0a0a0a" // Fondo oscuro (puedes cambiarlo a "#000000" si la isla es más oscura)
+                border.color: Qt.alpha(Theme.white, 0.08) // Un borde súper sutil para dar relieve
                 border.width: 1
 
                 RowLayout {
@@ -370,9 +426,10 @@ ShellRoot {
             // --- CONTENEDOR DERECHO (Iconos, bandeja, batería, notificaciones) ---
             Rectangle {
                 anchors.right: parent.right
-                anchors.rightMargin: 12 
+                anchors.rightMargin: 12 // Alineación perfecta con gaps_out = 12
                 anchors.verticalCenter: parent.verticalCenter
                 height: 34 
+                // El ancho es dinámico: crecerá o encogerá mágicamente si aparecen apps o actualizaciones
                 width: rightRow.implicitWidth + 30 
                 radius: height / 2
                 color: "#0a0a0a" 
@@ -384,16 +441,104 @@ ShellRoot {
                     anchors.centerIn: parent
                     spacing: 18
                     
-                    // --- UPDATES MODULE ENCAPSULADO ---
-                    Updates { Layout.rightMargin: 15 }
+                    // --- UPDATES MODULE (PACMAN) ---
+                    Item {
+                        id: updateModule
+                        Layout.preferredWidth: updateLayout.implicitWidth
+                        Layout.preferredHeight: 44
+                        Layout.rightMargin: 15
+                        visible: root.pendingUpdates > 0
+
+                        RowLayout {
+                            id: updateLayout
+                            anchors.fill: parent
+                            spacing: 8
+
+                            Text {
+                                text: "󰮯"
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 16
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+
+                            Text {
+                                text: root.pendingUpdates.toString()
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: launchUpdater()
+                        }
+                    }
 
                     SystemIcons { 
                         id: sysIconsModule; rootRef: root; ssid: root.wifiSsid; wifiSignal: root.wifiSig; freq: root.wifiFreq
                         btOn: root.btStat === "on"; btDev: root.btDev; perf: root.perfMode; vol: root.vol; volMute: root.volMute; volDesc: root.volDesc
                     }
 
-                    // --- CUSTOM APP TRAY ENCAPSULADO ---
-                    AppTray { Layout.alignment: Qt.AlignVCenter }
+                    // --- CUSTOM APP TRAY (Spotify, Discord, OBS) ---
+                    Item {
+                        id: appTrayModule
+                        visible: root.appSpotify || root.appDiscord || root.appObs
+                        Layout.preferredWidth: appTrayLayout.implicitWidth
+                        Layout.preferredHeight: 44
+                        Layout.alignment: Qt.AlignVCenter
+                        
+                        RowLayout {
+                            id: appTrayLayout
+                            anchors.fill: parent
+                            spacing: 12 // Un poco más ajustado para que quede cohesionado con SystemIcons
+
+                            Text {
+                                visible: root.appSpotify
+                                text: ""
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15 // Reducido para igualar el peso visual
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea { 
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                    // pkill -9 fuerza el cierre inmediato sin minimizarse
+                                    onClicked: { cmdProc.command = ["bash", "-c", "pkill -9 -x spotify"]; cmdProc.running = true; root.appSpotify = false; } 
+                                }
+                            }
+                            
+                            Text {
+                                visible: root.appDiscord
+                                text: ""
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 14 // Discord suele verse más gordo por ser muy cuadrado, 14 lo equilibra
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea { 
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                    // -ix busca "discord" ignorando mayúsculas/minúsculas para no fallar nunca
+                                    onClicked: { cmdProc.command = ["bash", "-c", "pkill -9 -ix discord || pkill -9 -x DiscordCore"]; cmdProc.running = true; root.appDiscord = false; } 
+                                }
+                            }
+                            
+                            Text {
+                                visible: root.appObs
+                                text: "󰑋"
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15 // Reducido para igualar el peso visual
+                                Layout.alignment: Qt.AlignVCenter
+                                MouseArea { 
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                    onClicked: { cmdProc.command = ["bash", "-c", "pkill -9 -x obs"]; cmdProc.running = true; root.appObs = false; } 
+                                }
+                            }
+                        }
+                    }
 
                     Battery { percentage: root.batCap; charging: (root.batStat === "Charging" || root.batStat === "Full") }
                     MouseArea {
@@ -417,12 +562,68 @@ ShellRoot {
         }
 
         // === ISLA DINÁMICA (TEMPORALMENTE COMENTADA) ===
+        /*
         DynamicIsland { 
             id: islandWidget 
             // Filtro estricto que ignora palabras vacías o nulas devueltas por el sistema
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
+        */
+
+        // === RELOJ TEMPORAL (REEMPLAZO) ===
+        PanelWindow {
+            id: islandWidget // Mantenemos el ID para que mainLauncher no falle
+            
+            anchors { top: true }
+            margins { top: -38 } // Mismo margen negativo que la isla original
+            
+            WlrLayershell.layer: WlrLayershell.Overlay
+            exclusiveZone: 0
+            color: "transparent"
+            
+            implicitWidth: 120
+            implicitHeight: 32
+
+            // Función vacía que intercepta los mensajes del Launcher para que no haya errores
+            function triggerMsg(icon, color, text) {
+                console.log("Isla desactivada. Mensaje ignorado:", text);
+            }
+
+            // Cápsula visual del reloj
+            Rectangle {
+                anchors.top: parent.top
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 120
+                height: 32
+                color: Theme.bg0 // Mismo fondo que la isla cerrada
+                radius: height / 2
+                border.color: Qt.alpha(Theme.white, 0.1) // Mismo borde sutil
+                border.width: 1
+
+                Text {
+                    id: customClock
+                    anchors.centerIn: parent
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                Timer { 
+                    interval: 2000
+                    running: true
+                    repeat: true
+                    triggeredOnStart: true
+                    onTriggered: {
+                        var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
+                        if (customClock.text !== timeStr) {
+                            customClock.text = timeStr;
+                        }
+                    }
+                }
             }
         }
     }
@@ -441,21 +642,27 @@ ShellRoot {
             spacing: 2 
 
             Repeater {
-                model: cavaModel 
+                model: cavaModel // Usamos el ListModel altamente reactivo
                 
                 Rectangle {
                     Layout.alignment: Qt.AlignBottom
                     Layout.fillWidth: true 
                     
+                    // 'barHeight' es inyectada automáticamente por el ListModel.
+                    // Usamos implicitHeight para que el RowLayout lo respete.
                     implicitHeight: Math.max(2, barHeight * 2.5) 
                     
                     radius: 4 
+
+                    // --- NUEVO: Color dinámico ---
                     color: root.cavaColor 
                     opacity: 0.85
                     
                     Behavior on implicitHeight {
                         NumberAnimation { duration: 55; easing.type: Easing.OutCirc }
                     }
+                    
+                    // --- NUEVO: Animación suave al cambiar de color ---
                     Behavior on color {
                         ColorAnimation { duration: 800; easing.type: Easing.InOutQuad }
                     }
