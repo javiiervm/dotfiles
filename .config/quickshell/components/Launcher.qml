@@ -863,8 +863,24 @@ PanelWindow {
             execProc.running = true;
         }
 
+        // >>> NUEVO: SINCRONIZAR WALLPAPER CON HYPRLOCK <<<
+        var finalCmd = cmd;
+        if (launcherWindow.currentMode === 7) {
+            // Obtenemos el modelo activo (depende de si has buscado algo o no)
+            var activeModel = (searchInput.text === "") ? wallpaperModel : filteredModel;
+            
+            if (wallGrid.currentIndex >= 0 && wallGrid.currentIndex < activeModel.count) {
+                // En tu script, el campo 'icon' almacena la ruta absoluta de la imagen
+                var wallIcon = activeModel.get(wallGrid.currentIndex).icon;
+                
+                // Creamos la carpeta por si no existe, copiamos la imagen y luego ejecutamos el comando original
+                var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + wallIcon + "' /home/javier/.cache/hyprlock/current_wallpaper.png && ";
+                finalCmd = syncCmd + cmd;
+            }
+        }
+
         // LIMPIEZA Y EJECUCIÓN VÍA HYPRLAND (Foco garantizado)
-        var cleanCmd = cmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
+        var cleanCmd = finalCmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
         
         WlrLayershell.keyboardFocus = WlrLayershell.None;
         execProc.running = false; // <-- Previene bloqueos en apps normales
