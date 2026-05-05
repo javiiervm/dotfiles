@@ -15,12 +15,12 @@ notify_view() {
 # Logic to skip menu if arguments are passed
 case $1 in
 "--desktop")
-  sleep 0.2 && hyprshot -m output -o "$dir"
+  sleep 0.2 && hyprshot --silent -m output -o "$dir"
   # notify_view
   exit 0
   ;;
 "--area")
-  hyprshot -m region -o "$dir"
+  hyprshot --silent -m region -o "$dir"
   # notify_view
   exit 0
   ;;
@@ -34,7 +34,7 @@ option_3="󰖭  Capture Window"
 chosen="$(echo -e "$option_1\n$option_2\n$option_3" | rofi -dmenu -i -theme "$theme" -p "Screenshot")"
 
 case ${chosen} in
-"$option_1") sleep 0.2 && hyprshot -m output -o "$dir" ;;
-"$option_2") hyprshot -m region -o "$dir" ;;
-"$option_3") sleep 0.2 && hyprshot -m window -o "$dir" ;;
+"$option_1") sleep 0.2 && hyprshot --silent -m output -o "$dir" ;;
+"$option_2") hyprshot --silent -m region -o "$dir" ;;
+"$option_3") sleep 0.2 && hyprshot --silent -m window -o "$dir" ;;
 esac
