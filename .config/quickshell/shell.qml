@@ -561,12 +561,69 @@ ShellRoot {
             SysMenu { title: root.activeMenuTitle; info1: root.activeMenuInfo1; info2: root.activeMenuInfo2; accent: root.activeMenuAccent; isOpen: root.isMenuOpen }
         }
 
+        // === ISLA DINÁMICA (TEMPORALMENTE COMENTADA) ===
+        /*
         DynamicIsland { 
             id: islandWidget 
             // Filtro estricto que ignora palabras vacías o nulas devueltas por el sistema
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
+        */
+
+        // === RELOJ TEMPORAL (REEMPLAZO) ===
+        PanelWindow {
+            id: islandWidget // Mantenemos el ID para que mainLauncher no falle
+            
+            anchors { top: true }
+            margins { top: -38 } // Mismo margen negativo que la isla original
+            
+            WlrLayershell.layer: WlrLayershell.Overlay
+            exclusiveZone: 0
+            color: "transparent"
+            
+            implicitWidth: 120
+            implicitHeight: 32
+
+            // Función vacía que intercepta los mensajes del Launcher para que no haya errores
+            function triggerMsg(icon, color, text) {
+                console.log("Isla desactivada. Mensaje ignorado:", text);
+            }
+
+            // Cápsula visual del reloj
+            Rectangle {
+                anchors.top: parent.top
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 120
+                height: 32
+                color: Theme.bg0 // Mismo fondo que la isla cerrada
+                radius: height / 2
+                border.color: Qt.alpha(Theme.white, 0.1) // Mismo borde sutil
+                border.width: 1
+
+                Text {
+                    id: customClock
+                    anchors.centerIn: parent
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                Timer { 
+                    interval: 2000
+                    running: true
+                    repeat: true
+                    triggeredOnStart: true
+                    onTriggered: {
+                        var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
+                        if (customClock.text !== timeStr) {
+                            customClock.text = timeStr;
+                        }
+                    }
+                }
             }
         }
     }
