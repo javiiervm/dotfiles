@@ -1,17 +1,20 @@
 # Hyprland Dotfiles
 
-A comprehensive and meticulously configured collection of dotfiles for a modern Hyprland wayland compositor setup, featuring a custom-built shell environment with advanced integrations and a responsive graphical interface.
+A professionally configured collection of dotfiles for a modern Hyprland Wayland desktop environment, featuring **Quickshell** as the primary UI framework with support for rofi-based applications.
 
 ## Overview
 
-This repository contains a fully-functional desktop environment configuration built around **Hyprland**, a dynamic tiling wayland compositor. The setup emphasizes performance, aesthetics, and developer productivity through:
+This repository contains a fully-functional desktop environment configuration built around **Hyprland**, a dynamic tiling Wayland compositor. The setup emphasizes performance, aesthetics, and developer experience through a modern QML-based interface.
 
-- **Hyprland Wayland Compositor** - Modern, high-performance window management
-- **Quickshell** - Custom QML-based panel and launcher system
-- **Waybar** - Extensible status bar with system information
+### Core Components
+
+- **Hyprland** - Dynamic tiling Wayland compositor with advanced window management
+- **Quickshell** - QML-based shell framework providing custom panel, launcher, and system integration
+- **Waybar** - Status bar with system information and modularity
 - **Kitty Terminal** - GPU-accelerated terminal emulator
-- **pywal Integration** - Dynamic color generation and theming
+- **pywal** - Dynamic color generation and unified theming
 - **Hypridle** - Lightweight idle management with suspend/lock capabilities
+- **rofi** - Application launcher and utility tool (complementary to Quickshell)
 
 ## Directory Structure
 
@@ -22,9 +25,10 @@ dotfiles/
 │   │   ├── hyprland.conf        # Main Hyprland configuration
 │   │   ├── hyprland-gui.conf    # HyprMod managed settings
 │   │   └── scripts/             # Custom shell scripts
-│   ├── quickshell/              # QML-based panel and launcher
+│   ├── quickshell/              # QML-based panel, launcher, and modules
 │   │   ├── shell.qml            # Main shell interface
 │   │   ├── components/          # Reusable QML components
+│   │   ├── overview/            # Workspace overview module
 │   │   └── scripts/             # Backend daemons
 │   ├── waybar/                  # Status bar configuration
 │   ├── wal/                     # Color scheme templates
@@ -38,35 +42,31 @@ dotfiles/
 ### Window Management
 - **Dynamic Tiling**: Hyprland's efficient window layout algorithm
 - **Multi-Monitor Support**: Automatic monitor detection and configuration
-- **Workspace Management**: 5 dedicated workspaces with visual indicators
-- **Smart Gaps**: Customizable inner and outer gaps (5px inner, 12px outer)
-- **Border Configuration**: 2px borders with dynamic color theming
+- **Workspace Management**: Workspace organization with visual indicators
+- **Smart Gaps**: Customizable inner and outer gaps
+- **Border Configuration**: Dynamic color-based window decorations
 
-### Visual Customization
-- **Dynamic Color Theming**: Integration with pywal for palette generation
-- **QML-Based UI**: Quickshell custom panel with workspace indicators and system tray
-- **Notification System**: Integrated notification daemon with slide animations
-- **Cursor Management**: Bibata Modern cursor theme at 24px size
+### Quickshell Interface
+- **Custom QML Panel**: Workspace indicators and system information display
+- **QML-Based Launcher**: Fast application launcher with backend caching
+- **System Tray Integration**: Application status icons and system controls
+- **Workspace Overview**: Visual workspace grid with live window previews and drag-and-drop
+- **System Integration**: Bluetooth, network, and audio controls via QML modules
+- **Dynamic Theming**: Automatic color synchronization with pywal
+- **Workspace Hot Keys**: Keyboard navigation and window management
 
-### Applications
-- **Terminal**: Kitty (GPU-accelerated)
-- **File Manager**: Nautilus (GNOME Files)
-- **Browser**: Firefox
-- **Editor**: Visual Studio Code
+### Additional Features
+- **rofi Integration**: Lightweight fallback launcher and utility tool
+- **Notification System**: Integrated notification daemon with animations
+- **Color Theming**: Dynamic palette generation from wallpapers
+- **GTK Integration**: Native GNOME Adwaita theme support
 - **Media Control**: playerctl integration for multimedia keys
-
-### System Integration
-- **GTK Theme**: adw-gtk3-dark with GNOME Adwaita integration
-- **Polkit Authentication**: GTK-based authentication agent
-- **Idle Management**: Hypridle with customizable suspend/lock behavior
-- **Bluetooth Support**: Full Bluetooth device management via Quickshell
-- **Network Management**: WiFi connectivity through Quickshell interface
 
 ## Installation
 
 ### Prerequisites
 
-Before installing these dotfiles, ensure you have the following packages installed:
+Ensure you have the following packages installed:
 
 ```bash
 # Core components
@@ -76,15 +76,15 @@ sudo pacman -S hyprland hyprctl wayland wayland-protocols
 sudo pacman -S zsh kitty
 
 # UI and theming
-sudo pacman -S qt5-wayland gtk3 adw-gtk3 bibata-cursor-theme
+sudo pacman -S qt5-wayland qt6-wayland gtk3 adw-gtk3 bibata-cursor-theme
 
 # System utilities
-sudo pacman -S nautilus firefox code hypridle playerctl
+sudo pacman -S nautilus firefox hypridle playerctl
 
 # Additional packages
-sudo pacman -S python pywal polkit-gnome
+sudo pacman -S python pywal polkit-gnome rofi
 
-# AUR packages (if using yay or paru)
+# AUR packages (using yay or paru)
 yay -S quickshell-git
 ```
 
@@ -96,29 +96,20 @@ yay -S quickshell-git
    cd ~/.dotfiles
    ```
 
-2. **Backup existing configurations** (optional but recommended)
+2. **Backup existing configurations** (recommended)
    ```bash
-   # Create a backup directory
    mkdir -p ~/.config_backup
-   
-   # Back up existing Hyprland config if present
    [ -d ~/.config/hypr ] && cp -r ~/.config/hypr ~/.config_backup/hypr
    [ -d ~/.config/quickshell ] && cp -r ~/.config/quickshell ~/.config_backup/quickshell
    ```
 
 3. **Create symbolic links**
    ```bash
-   # Copy or symlink the configuration directories
-   cp -r .config/* ~/.config/
-   
-   # Or use symlinks (useful for development)
    ln -sf $(pwd)/.config/hypr ~/.config/hypr
    ln -sf $(pwd)/.config/quickshell ~/.config/quickshell
    ln -sf $(pwd)/.config/waybar ~/.config/waybar
    ln -sf $(pwd)/.config/wal ~/.config/wal
    ln -sf $(pwd)/.config/kitty ~/.config/kitty
-   
-   # Link shell configuration
    ln -sf $(pwd)/.zshrc ~/.zshrc
    ```
 
@@ -133,10 +124,9 @@ yay -S quickshell-git
    mkdir -p ~/.config/hypr/scripts
    ```
 
-6. **Set up pywal color generation**
+6. **Generate initial color palette**
    ```bash
-   # Generate initial color palette
-   wal -i /path/to/your/favorite/wallpaper.png
+   wal -i /path/to/your/wallpaper.png
    ```
 
 7. **Launch Hyprland**
@@ -146,69 +136,65 @@ yay -S quickshell-git
 
 ## Configuration
 
-### Basic Hyprland Settings
+### Hyprland Configuration
 
-Edit `~/.config/hypr/hyprland.conf` to customize:
+Edit `~/.config/hypr/hyprland.conf` to customize window management, keyboard bindings, and startup behaviors.
 
-```conf
-# Monitor configuration
-monitor=eDP-1,2560x1600@60,0x0,1.33
-
-# Define default applications
-$terminal = kitty
-$fileManager = nautilus
-$browser = firefox
-$editor = code
-
-# Window gaps
-general {
-    gaps_in = 5
-    gaps_out = 2, 12, 12, 12
-    border_size = 2
-}
-```
+Key sections:
+- `monitor=` - Display configuration
+- `env=` - Environment variables
+- `general {}` - Window gaps, borders, and layout
+- `bind=` - Keyboard bindings
 
 ### Quickshell Panel Customization
 
-Edit `~/.config/quickshell/shell.qml` to modify:
-- Panel height and styling
-- Workspace indicator appearance
-- Notification behavior
-- System tray items
+The Quickshell interface is configured via QML files in `~/.config/quickshell/`.
 
-### Color Scheme
+**Main configuration file**: `~/.config/quickshell/shell.qml`
 
-Colors are dynamically generated by pywal and sourced in Hyprland:
+Common customizations:
+- Panel size and position
+- Workspace indicator style
+- System tray icons
+- Module visibility
+
+For the workspace overview module, see `.config/quickshell/overview/README.md` for detailed configuration options.
+
+### Dynamic Color Theming
+
+Colors are generated by pywal and automatically applied to all components:
 
 ```bash
 # Generate new colors from an image
 wal -i ~/Pictures/wallpaper.jpg
 
-# Colors will be automatically applied to:
-# - Hyprland (via colors-hyprland.conf)
-# - Quickshell panel
+# Colors apply to:
+# - Hyprland window decorations
+# - Quickshell QML interface
 # - Waybar status bar
-# - All GTK applications
+# - GTK applications
 ```
 
 ### Keyboard Bindings
 
-Key bindings are defined in `hyprland.conf` under the `bind` sections. Common bindings:
+Key bindings are defined in `hyprland.conf`. Common bindings:
 
 ```conf
-# Program launching
 $mainMod = SUPER
+
+# Terminal
 bind = $mainMod, RETURN, exec, $terminal
+
+# Quickshell launcher
 bind = $mainMod, SPACE, exec, quickshell_launcher
 
-# Window management
-bind = $mainMod, Q, killactive,
-bind = $mainMod, V, togglefloating,
-bind = $mainMod, F, fullscreen,
+# Workspace navigation
+bind = $mainMod, 1-5, workspace, 1-5
 
-# Workspace switching
-bind = $mainMod, 1, workspace, 1
-bind = $mainMod, 2, workspace, 2
+# Window management
+bind = $mainMod, Q, killactive
+bind = $mainMod, V, togglefloating
+bind = $mainMod, F, fullscreen
 ```
 
 ## Troubleshooting
@@ -216,95 +202,75 @@ bind = $mainMod, 2, workspace, 2
 ### Quickshell Not Starting
 
 ```bash
-# Verify QML compilation
-python3 -m compileall -q ~/.config/quickshell/scripts/
-
-# Check for errors
+# Check for compilation errors
 quickshell 2>&1 | head -20
 
-# Ensure XDG_RUNTIME_DIR is set
+# Verify environment variables
 echo $XDG_RUNTIME_DIR
+echo $QML_IMPORT_PATH
 ```
 
 ### Colors Not Updating
 
 ```bash
-# Regenerate color palette
+# Regenerate palette
 wal -i ~/Pictures/wallpaper.jpg
 
 # Verify colors were generated
 cat ~/.cache/wal/colors-hyprland.conf
 
-# Restart Hyprland or source the config
+# Reload Hyprland
 hyprctl reload
 ```
 
 ### Monitor Not Detected
 
 ```bash
-# List connected monitors
+# List monitors
 hyprctl monitors
 
 # Check Wayland output detection
 wlr-randr
 ```
 
-### Theme Not Applied
-
-```bash
-# Force GTK theme refresh
-gsettings set org.gnome.desktop.interface gtk-theme 'adw-gtk3-dark'
-gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
-
-# Restart GTK applications
-pkill -f "gnome-shell|nautilus"
-```
-
-## Customization Guide
+## Customization
 
 ### Adding Custom Scripts
 
-Place scripts in `~/.config/hypr/scripts/` and source them in `hyprland.conf`:
+Place scripts in `~/.config/hypr/scripts/` and execute in `hyprland.conf`:
 
 ```conf
-# In hyprland.conf
-exec-once = ~/.config/hypr/scripts/my-custom-script.sh
-```
-
-### Modifying Waybar Configuration
-
-Edit `~/.config/waybar/themes/OneDark/config.jsonc`:
-
-```jsonc
-{
-    "position": "top",
-    "modules-left": ["custom/arch", "cpu", "temperature"],
-    "modules-right": ["battery", "clock"]
-}
+exec-once = ~/.config/hypr/scripts/my-script.sh
 ```
 
 ### Creating Custom QML Components
 
-Add new QML files to `~/.config/quickshell/components/` and import them:
+Add QML files to `~/.config/quickshell/components/` and import them in other modules:
 
 ```qml
 import QtQuick
 import ".."
 
-// Your custom component
 Rectangle {
     // Component implementation
 }
 ```
 
-## Performance Optimization
+### Modifying Waybar
+
+Edit `~/.config/waybar/config.jsonc` to customize:
+- Module order and visibility
+- Display formatting
+- Click/scroll actions
+
+## Performance
 
 This configuration is optimized for:
 
-- **Low Memory Footprint**: Hyprland uses minimal system resources
-- **Efficient Rendering**: GPU-accelerated compositing via Wayland
-- **Fast Application Launch**: Quickshell launcher with backend caching
-- **Responsive UI**: QML-based interface with smooth animations
+- **Low Memory Footprint**: Hyprland minimizes resource usage
+- **Efficient Rendering**: GPU-accelerated Wayland compositing
+- **Fast Application Launch**: QML-based Quickshell launcher with caching
+- **Responsive UI**: Smooth animations and transitions
 
 ## Key Bindings Reference
 
@@ -312,31 +278,23 @@ This configuration is optimized for:
 |--------|---------|
 | Terminal | `Super + Return` |
 | Launcher | `Super + Space` |
+| Overview | `Super + Tab` |
 | Kill Window | `Super + Q` |
 | Toggle Float | `Super + V` |
 | Fullscreen | `Super + F` |
 | Workspace 1-5 | `Super + 1-5` |
-| Move Window | `Super + Shift + Arrow Keys` |
 
-## Dependencies
+## Contributors & Acknowledgments
 
-### Arch Linux (Pacman)
+This configuration builds upon various community projects and scripts:
 
-```bash
-hyprland hyprctl wayland wayland-protocols zsh kitty qt5-wayland gtk3 \
-adw-gtk3 bibata-cursor-theme nautilus firefox code hypridle playerctl \
-python pywal polkit-gnome
-```
+- **[Hyprland](https://github.com/hyprwm/Hyprland)** - The compositor itself
+- **[Quickshell](https://github.com/outfoxxed/quickshell)** - QML shell framework
+- **[illogical-impulse](https://github.com/end-4/dots-hyprland)** - Workspace overview module (adapted from)
+- **[pywal](https://github.com/dylanaraps/wal)** - Dynamic color generation
+- **[GTK Adwaita](https://gitlab.gnome.org/GNOME/adwaita)** - GNOME theming
 
-### AUR (Yay/Paru)
-
-```bash
-quickshell-git
-```
-
-### Other Distributions
-
-Refer to your package manager's repository for equivalent packages.
+Special thanks to the Hyprland and Quickshell communities for inspiration and support.
 
 ## License
 
@@ -344,7 +302,7 @@ This repository is provided as-is for personal and educational use. Feel free to
 
 ## Contributing
 
-While this is a personal configuration repository, suggestions and improvements are welcome. Feel free to open issues or discussions for:
+Suggestions and improvements are welcome. Feel free to open issues or discussions for:
 
 - Bug reports
 - Performance improvements
@@ -353,22 +311,14 @@ While this is a personal configuration repository, suggestions and improvements 
 
 ## Resources
 
-- [Hyprland Official Wiki](https://wiki.hypr.land/)
-- [Wayland Development](https://wayland.freedesktop.org/)
-- [QML Documentation](https://doc.qt.io/qt-6/qmlapplications.html)
+- [Hyprland Wiki](https://wiki.hypr.land/)
+- [Quickshell Documentation](https://quickshell.org/)
+- [Wayland Documentation](https://wayland.freedesktop.org/)
+- [Qt QML Documentation](https://doc.qt.io/qt-6/qmlapplications.html)
 - [pywal Documentation](https://github.com/dylanaraps/wal)
-- [GTK Adwaita](https://gitlab.gnome.org/GNOME/adwaita)
-
-## Acknowledgments
-
-Configuration built with:
-- **Hyprland** - Modern wayland compositor
-- **Quickshell** - QML shell framework
-- **pywal** - Color scheme generator
-- **GTK Adwaita** - Native GNOME theming
 
 ---
 
-**Last Updated**: April 2026
+**Last Updated**: May 2026
 
-For issues and questions, refer to the [Hyprland community](https://hyprland.org/) and configuration documentation.
+For questions and support, refer to the [Hyprland community](https://hyprland.org/) and official documentation.
