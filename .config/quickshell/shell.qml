@@ -44,7 +44,8 @@ ShellRoot {
     // --- ESTADOS PARA CAVA VISUALIZER ---
     property bool isPlayingMedia: false
     property bool isWorkspaceEmpty: true
-    property bool showCavaVisualizer: isPlayingMedia && isWorkspaceEmpty
+    //property bool showCavaVisualizer: isPlayingMedia && isWorkspaceEmpty
+    property bool showCavaVisualizer: false // isPlayingMedia && isWorkspaceEmpty
 
     property string cavaColor: Theme.blue // Color inicial
 
