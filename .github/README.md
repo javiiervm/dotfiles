@@ -32,7 +32,8 @@ dotfiles/
 │   │   └── scripts/             # Backend daemons
 │   ├── waybar/                  # Status bar configuration
 │   ├── wal/                     # Color scheme templates
-│   └── kitty/                   # Terminal emulator config
+│   ├── kitty/                   # Terminal emulator config
+│   └── rofi/                    # Customizable app launcher
 ├── .scripts/                    # Utility and setup scripts
 └── .zshrc                       # Zsh shell configuration
 ```
@@ -276,7 +277,7 @@ This configuration is optimized for:
 
 | Action | Binding |
 |--------|---------|
-| Terminal | `Super + Return` |
+| Terminal | `Super + T` |
 | Launcher | `Super + Space` |
 | Overview | `Super + Tab` |
 | Kill Window | `Super + Q` |
@@ -295,6 +296,10 @@ This configuration builds upon various community projects and scripts:
 - **[GTK Adwaita](https://gitlab.gnome.org/GNOME/adwaita)** - GNOME theming
 
 Special thanks to the Hyprland and Quickshell communities for inspiration and support.
+
+Also, special mention to the following people:
+- **[adi1090x](https://github.com/adi1090x)**: Author of the [Rofi themes repo](https://github.com/adi1090x/rofi) used for Rofi's customization.
+- **[iikerm](https://github.com/iikerm)**: Author of the [cex script](https://github.com/javiiervm/dotfiles/blob/main/.scripts/cex.py).
 
 ## License
 
@@ -316,9 +321,3 @@ Suggestions and improvements are welcome. Feel free to open issues or discussion
 - [Wayland Documentation](https://wayland.freedesktop.org/)
 - [Qt QML Documentation](https://doc.qt.io/qt-6/qmlapplications.html)
 - [pywal Documentation](https://github.com/dylanaraps/wal)
-
----
-
-**Last Updated**: May 2026
-
-For questions and support, refer to the [Hyprland community](https://hyprland.org/) and official documentation.
