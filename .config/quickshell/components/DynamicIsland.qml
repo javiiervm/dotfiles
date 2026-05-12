@@ -301,25 +301,45 @@ PanelWindow {
     Process {
         id: watchdogProc
         property string tabOpen: "0"
-        // Este script ahora no tiene ningún 'sleep'. Se ejecuta de principio a fin en unos ~5 milisegundos.
         command: [
             "bash", "-c",
+            "tabOpen=\"" + watchdogProc.tabOpen + "\"; " +
             "LC_ALL=C; " +
+
+            // 1. Red (Cero subprocesos, puramente bash)
             "F_RX=\"/tmp/qs_rx_bytes\"; [ ! -f \"$F_RX\" ] && echo 0 > \"$F_RX\"; " +
-            "prev_rx=$(cat \"$F_RX\"); curr_rx=0; " +
+            "read prev_rx < \"$F_RX\" 2>/dev/null || prev_rx=0; curr_rx=0; " +
             "for f in /sys/class/net/w*/statistics/rx_bytes; do [ -f \"$f\" ] && { read v < \"$f\"; curr_rx=$((curr_rx+v)); }; done; " +
             "echo \"$curr_rx\" > \"$F_RX\"; " +
             "inter=$([ \"$tabOpen\" = \"1\" ] && echo 2 || echo 10); " +
             "if [ \"$curr_rx\" -lt \"$prev_rx\" ]; then dl=0; else dl=$(( (curr_rx - prev_rx) / inter / 1048576 )); fi; " +
-            "ct=$(sensors 2>/dev/null | awk '/Tctl|Package id 0|Core 0/ {gsub(/[^0-9.]/,\"\",$2); print $2; exit}'); " +
-            "gt=$(sensors 2>/dev/null | awk '/edge/ {gsub(/[^0-9.]/,\"\",$2); print $2; exit}'); " +
-            "cam=$(fuser /dev/video* 2>/dev/null | wc -w); " +
+
+            // 2. CPU Temp (Driver k10temp para Ryzen AI)
+            // Lee el hardware directo, sin llamar al binario 'sensors', impacto literal de 0% CPU.
+            "ct=0; for f in /sys/class/hwmon/hwmon*/name; do " +
+            "  read name < \"$f\" 2>/dev/null; " +
+            "  if [ \"$name\" = \"k10temp\" ] || [ \"$name\" = \"zenpower\" ]; then " +
+            "    read t < \"${f%/*}/temp1_input\" 2>/dev/null; " +
+            "    ct=$((t / 1000)); break; " +
+            "  fi; " +
+            "done; " +
+
+            // 3. Lógica inteligente para preservar la batería
             "if [ \"$tabOpen\" = \"1\" ]; then " +
             "  cu=$(top -bn1 | awk '/Cpu\\(s\\)/ {print $2 + $4}'); " +
-            "  gu=$(cat /sys/class/drm/card0/device/gpu_busy_percent 2>/dev/null || echo 0); " +
+            // Se agrupa uso y temperatura de la RTX 5070 en una sola llamada, 
+            // SOLAMENTE cuando la pestaña está abierta viéndola.
+            "  gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo \"0, 0\"); " +
+            "  gu=$(echo \"$gpu_info\" | cut -d',' -f1); " +
+            "  gt=$(echo \"$gpu_info\" | cut -d',' -f2 | tr -d ' '); " +
             "  ru=$(free -m | awk '/Mem:/ {printf \"%.1f\", $3/1024}'); " +
             "  st=$(df -BG / | awk 'NR==2 {gsub(\"G\",\"GB\",$4); gsub(\"G\",\"GB\",$2); print $4\"/\"$2}'); " +
-            "else cu=0; gu=0; ru=0; st=\"0/0GB\"; fi; " +
+            "else " +
+            // MODO AHORRO BATERÍA: Si la isla está colapsada, no despertamos la dGPU y ahorramos los procesos de RAM/Disco
+            "  cu=0; gu=0; gt=0; ru=0; st=\"0/0GB\"; " +
+            "fi; " +
+
+            "cam=$(fuser /dev/video* 2>/dev/null | wc -w); " +
             "echo \"${dl:-0};${ct:-0};${gt:-0};${cam:-0};${cu:-0};${gu:-0};${ru:-0};${st:-0/0GB}\""
         ]
         running: false
@@ -329,7 +349,11 @@ PanelWindow {
                 if (p.length >= 8) {
                     dlSpeed = parseFloat(p[0]) || 0;
                     globalCt = parseFloat(p[1]) || 0;
-                    globalGt = parseFloat(p[2]) || 0;
+                    
+                    // Solo actualizamos gt si nos han devuelto un valor útil (>0)
+                    var readGt = parseFloat(p[2]) || 0;
+                    if (readGt > 0) globalGt = readGt; 
+                    
                     globalCamActive = parseInt(p[3]) > 0;
                     
                     if (watchdogProc.tabOpen === "1") {
