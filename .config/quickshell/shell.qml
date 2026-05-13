@@ -77,7 +77,7 @@ ShellRoot {
     Process { id: cmdProc }
     Process { id: wifiProc; command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"] }
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
-    Process { id: airplaneProc; command: ["sh", "-c", "rfkill toggle all"] }
+    Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
 
     // --- MONITOR DE ESCRITORIO Y MEDIA (Basado en Eventos 0% CPU) ---
@@ -272,7 +272,7 @@ ShellRoot {
         command: [
             "bash", "-c",
             // Función que lee el estado real: Si hay algún bloqueo "Soft" o "Hard", el modo avión está activo.
-            "check_airplane() { rfkill list all | grep -q -E '(Soft blocked: yes|Hard blocked: yes)' && echo 1 || echo 0; }; " +
+            "check_airplane() { rfkill list all | grep -q 'Soft blocked: no' && echo 0 || echo 1; }; " +
             "check_airplane; " + // Estado inicial
             // Magia event-driven: 'rfkill event' frena el script hasta que tocas algo de red.
             "rfkill event | while read -r _; do check_airplane; done"
