@@ -29,7 +29,7 @@ ShellRoot {
     property int memUsage: 0
 
     // Nuevos estados para el NotificationCenter
-    // property bool airplaneMode: false
+    property bool airplaneMode: false
     property bool caffeineMode: false
 
     property bool isNotifOpen: false
@@ -463,5 +463,16 @@ ShellRoot {
                 }
             }
         }
+    }
+
+    // Instancia del nuevo menú de wallpapers
+    WallpaperCarousel {
+        id: wallCarouselWidget
+    }
+
+    // Atajo global para abrirlo directamente (ej. Meta + W)
+    GlobalShortcut {
+        name: "wallpaper_menu"
+        onPressed: { wallCarouselWidget.toggle() }
     }
 }
