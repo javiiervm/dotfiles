@@ -77,10 +77,10 @@ PanelWindow {
         onExited: updateFilter()
     }
 
-    // Proceso para leer la ruta del fondo actual desde el archivo temporal
+    // Proceso para leer la ruta del fondo actual desde el archivo persistente
     Process {
         id: getCurrentWallProc
-        command: ["cat", "/tmp/current_wallpaper"]
+        command: ["bash", "-c", "cat /home/javier/.cache/qs_wall_path 2>/dev/null || cat /tmp/current_wallpaper 2>/dev/null"]
         stdout: SplitParser {
             onRead: (data) => {
                 var currentPath = data.trim().replace("~", "/home/javier");
@@ -91,7 +91,7 @@ PanelWindow {
                     var itemPath = filteredModel.get(i).icon.replace("~", "/home/javier");
                     if (itemPath === currentPath) {
                         carousel.currentIndex = i;
-                        // NUEVO: Salta instantáneamente a la imagen sin hacer la animación de scroll inicial
+                        // Salta instantáneamente a la imagen sin hacer la animación de scroll inicial
                         carousel.positionViewAtIndex(i, ListView.Center);
                         break;
                     }
@@ -134,7 +134,7 @@ PanelWindow {
 
     function executeWall(cmd, iconPath) {
         if (!cmd || cmd === "") return;
-        var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + iconPath + "' /home/javier/.cache/hyprlock/current_wallpaper.png && ";
+        var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + iconPath + "' /home/javier/.cache/hyprlock/current_wallpaper.png && echo '" + iconPath + "' > /home/javier/.cache/qs_wall_path && ";
         var finalCmd = syncCmd + cmd;
         var cleanCmd = finalCmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
 
