@@ -863,7 +863,7 @@ PanelWindow {
             execProc.running = true;
         }
 
-        // >>> NUEVO: SINCRONIZAR WALLPAPER CON HYPRLOCK <<<
+        // >>> NUEVO: SINCRONIZAR WALLPAPER CON HYPRLOCK Y CARRUSEL <<<
         var finalCmd = cmd;
         if (launcherWindow.currentMode === 7) {
             // Obtenemos el modelo activo (depende de si has buscado algo o no)
@@ -872,9 +872,8 @@ PanelWindow {
             if (wallGrid.currentIndex >= 0 && wallGrid.currentIndex < activeModel.count) {
                 // En tu script, el campo 'icon' almacena la ruta absoluta de la imagen
                 var wallIcon = activeModel.get(wallGrid.currentIndex).icon;
-                
-                // Creamos la carpeta por si no existe, copiamos la imagen y luego ejecutamos el comando original
-                var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + wallIcon + "' /home/javier/.cache/hyprlock/current_wallpaper.png && ";
+                // Creamos la carpeta, copiamos la imagen y guardamos la ruta persistente
+                var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + wallIcon + "' /home/javier/.cache/hyprlock/current_wallpaper.png && echo '" + wallIcon + "' > /home/javier/.cache/qs_wall_path && ";
                 finalCmd = syncCmd + cmd;
             }
         }
