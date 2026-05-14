@@ -1,20 +1,18 @@
-# Ignorar cachés y temporales
 .cache/
 .thumbnails/
 .npm/
 .cargo/
 
-# Ignorar sockets y archivos de estado de Hyprland/Wayland
 .serverauth.*
 .Xauthority
 .Xdefaults
 
-# Ignorar carpetas de descargas y carpetas pesadas
 Downloads/
 Documents/
 Videos/
 Pictures/
 Desktop/
 
-# Ignorar configuraciones locales de IA (Xavion/Ollama) que no quieras en GitHub
 .config/quickshell/scripts/__pycache__/
+
+~/.config/quickshell/secrets.env
