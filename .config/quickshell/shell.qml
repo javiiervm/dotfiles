@@ -643,7 +643,7 @@ ShellRoot {
                             width: 120; height: 120; radius: 60
                             anchors.centerIn: parent
                             anchors.verticalCenterOffset: -20
-                            color: tabName === "wifi" ? "#5bc0eb" : tabName === "bluetooth" ? "#cbaacb" : tabName === "audio" ? "#e74c3c" : "#f39c12"
+                            color: tabName === "wifi" ? "#5bc0eb" : tabName === "bluetooth" ? "#cbaacb" : tabName === "audio" ? "#e74c3c" : (root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white)
                             border.color: Qt.alpha(Theme.white, 0.1); border.width: 2
                             ColumnLayout {
                                 anchors.centerIn: parent; spacing: 4
@@ -719,10 +719,10 @@ ShellRoot {
                         Item {
                             width: slideWindow.width; height: parent.height; x: slideWindow.width * 3
                             Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "performance" }
-                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰻠"; item.mainText = Qt.binding(() => root.cpuUsage + "%"); item.subText = "CPU Usage" } }
-                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰍛"; item.mainText = Qt.binding(() => root.memUsage + "%"); item.subText = "Memory" } }
-                            Loader { sourceComponent: infoCard; x: 320; y: 60; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰁹"; item.mainText = Qt.binding(() => root.batCap + "%"); item.subText = "Battery Level" } }
-                            Loader { sourceComponent: infoCard; x: 320; y: 200; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰚥"; item.mainText = Qt.binding(() => root.batStat || "Unknown"); item.subText = "Power State" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = Qt.binding(() => root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white); item.iconText = "󰻠"; item.mainText = Qt.binding(() => root.cpuUsage + "%"); item.subText = "CPU Usage" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = Qt.binding(() => root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white); item.iconText = "󰍛"; item.mainText = Qt.binding(() => root.memUsage + "%"); item.subText = "Memory" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 60; onLoaded: { item.accentColor = Qt.binding(() => root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white); item.iconText = "󰁹"; item.mainText = Qt.binding(() => root.batCap + "%"); item.subText = "Battery Level" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 200; onLoaded: { item.accentColor = Qt.binding(() => root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white); item.iconText = "󰚥"; item.mainText = Qt.binding(() => root.batStat || "Unknown"); item.subText = "Power State" } }
                         }
                     }
                 }
@@ -792,7 +792,11 @@ ShellRoot {
                         Item {
                             Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
-                                Text { text: "󰓅"; font.family: Theme.fontIcons; color: root.controlCenterTab === "performance" ? "#f39c12" : Theme.grey1; font.pixelSize: 12 }
+                                Text { 
+                                    text: "󰓅"; font.family: Theme.fontIcons; 
+                                    color: root.controlCenterTab === "performance" ? (root.perfMode === "power-saver" ? "#2ecc71" : root.perfMode === "performance" ? "#f39c12" : Theme.white) : Theme.grey1; 
+                                    font.pixelSize: 12 
+                                }
                                 Text { text: "Perf"; color: Theme.white; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "performance" }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "performance" }
