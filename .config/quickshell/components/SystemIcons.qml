@@ -43,6 +43,10 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Wi-Fi Network", "SSID: " + ssid, "Signal: " + wifiSignal + "%", "#3498db", 142)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 142)
+            onClicked: {
+                rootRef.controlCenterTab = "wifi"
+                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
+            }
         }
     }
 
@@ -61,6 +65,10 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Bluetooth", btOn ? "Active" : "Off", "Device: " + btDev, "#3b82f6", 112)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 112)
+            onClicked: {
+                rootRef.controlCenterTab = "bluetooth"
+                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
+            }
         }
     }
 

@@ -49,6 +49,18 @@ ShellRoot {
 
     property string cavaColor: Theme.blue // Color inicial
 
+    // Estados para el Control Center
+    property bool isControlCenterOpen: false
+    property string controlCenterTab: "wifi" // "wifi" o "bluetooth"
+
+    // Datos avanzados para el Control Center
+    property string advIp: "N/A"
+    property string advSecurity: "N/A"
+    property string advMac: "N/A"
+    property string advBattery: "N/A"
+    property string advFreq: "N/A"      // NUEVA
+    property string advSignal: "N/A"    // NUEVA
+
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
     ListModel { id: popupModel }
@@ -285,6 +297,43 @@ ShellRoot {
         }
     }
 
+    Connections {
+        target: root
+        function onIsControlCenterOpenChanged() {
+            if (root.isControlCenterOpen) {
+                advInfoProc.running = true;
+            }
+        }
+    }
+
+    Process {
+        id: advInfoProc
+        command: [
+            "bash", "-c", 
+            "IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \\K\\S+' | head -n 1); " +
+            "WIFI=$(nmcli -t -f active,security,freq,signal dev wifi 2>/dev/null | grep -E '^(sí|yes):' | head -n 1); " +
+            "SEC=$(echo \"$WIFI\" | cut -d: -f2); " +
+            "FREQ=$(echo \"$WIFI\" | cut -d: -f3 | tr -d ' '); " +
+            "SIG=$(echo \"$WIFI\" | cut -d: -f4); " +
+            "MAC=$(bluetoothctl show 2>/dev/null | grep 'Controller' | awk '{print $2}' | head -n 1); " +
+            "BAT=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -n 1); " +
+            "echo \"${IP:-N/A}|${SEC:-N/A}|${FREQ:-N/A}|${SIG:-N/A}|${MAC:-N/A}|${BAT:-N/A}\""
+        ]
+        stdout: SplitParser {
+            onRead: (data) => {
+                var parts = data.trim().split('|');
+                if(parts.length >= 6) {
+                    root.advIp = parts[0];
+                    root.advSecurity = parts[1];
+                    root.advFreq = parts[2];
+                    root.advSignal = parts[3];
+                    root.advMac = parts[4];
+                    root.advBattery = parts[5];
+                }
+            }
+        }
+    }
+
     PanelWindow {
         id: osdWindow
         screen: Quickshell.screens[0]
@@ -294,7 +343,7 @@ ShellRoot {
         implicitHeight: popupColumn.implicitHeight
         exclusiveZone: 0
         color: "transparent"
-        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.layer: WlrLayershell.Top
         visible: popupModel.count > 0
 
         Column {
@@ -474,5 +523,174 @@ ShellRoot {
     GlobalShortcut {
         name: "wallpaper_menu"
         onPressed: { wallCarouselWidget.toggle() }
+    }
+
+    PanelWindow {
+        id: controlCenterWindow
+        screen: Quickshell.screens[0]
+
+        // Fullscreen como el NotificationCenter — el dismiss y la tarjeta van dentro
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusiveZone: 0
+        color: "transparent"
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.keyboardFocus: root.isControlCenterOpen ? WlrLayershell.OnDemand : WlrLayershell.None
+        visible: root.isControlCenterOpen
+
+        // 1. Dismiss de fondo (fullscreen, primer hijo = z inferior)
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.isControlCenterOpen = false
+        }
+
+        // 2. Contenido (segundo hijo = z superior), posicionado arriba-derecha
+        Item {
+            id: cardContainer
+            width: 460
+            height: 340
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: 1
+            anchors.rightMargin: 12
+
+            Rectangle {
+                id: mainCard
+                anchors.fill: parent
+                radius: 12
+                color: Qt.alpha("#0a0f18", 0.95)
+                border.color: Qt.alpha(Theme.white, 0.1)
+                border.width: 1
+                focus: true
+
+                Keys.onEscapePressed: root.isControlCenterOpen = false
+
+                MouseArea {
+                    anchors.fill: parent
+                    // Sin onClicked = bloqueador silencioso (igual que NotificationCenter línea 132)
+                    Timer { id: swipeCooldown; interval: 400 }
+                    onWheel: (wheel) => {
+                        if (swipeCooldown.running) return
+                        if (wheel.angleDelta.x < -40) {
+                            root.controlCenterTab = "bluetooth"
+                            swipeCooldown.restart()
+                        } else if (wheel.angleDelta.x > 40) {
+                            root.controlCenterTab = "wifi"
+                            swipeCooldown.restart()
+                        }
+                    }
+                }
+
+                Canvas {
+                    id: connectionLines
+                    anchors.fill: parent
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.2);
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        var centerX = width / 2;
+                        var centerY = height / 2 - 20;
+                        function drawNodeLine(targetX, targetY) {
+                            ctx.moveTo(centerX, centerY);
+                            ctx.bezierCurveTo(centerX + (targetX - centerX)/2, centerY,
+                                              centerX + (targetX - centerX)/2, targetY,
+                                              targetX, targetY);
+                        }
+                        if (root.controlCenterTab === "wifi") {
+                            drawNodeLine(cardIp.x + cardIp.width, cardIp.y + cardIp.height/2);
+                            drawNodeLine(cardSecurity.x + cardSecurity.width, cardSecurity.y + cardSecurity.height/2);
+                            drawNodeLine(cardBand.x, cardBand.y + cardBand.height/2);
+                            drawNodeLine(cardSignal.x, cardSignal.y + cardSignal.height/2);
+                        } else {
+                            drawNodeLine(cardMac.x + cardMac.width, cardMac.y + cardMac.height/2);
+                            drawNodeLine(cardAudio.x + cardAudio.width, cardAudio.y + cardAudio.height/2);
+                            drawNodeLine(cardBattery.x, cardBattery.y + cardBattery.height/2);
+                        }
+                        ctx.stroke();
+                    }
+                    Connections { target: root; function onControlCenterTabChanged() { connectionLines.requestPaint() } }
+                }
+
+                Rectangle {
+                    id: centerNode
+                    width: 120; height: 120; radius: 60
+                    anchors.centerIn: parent
+                    anchors.verticalCenterOffset: -20
+                    color: root.controlCenterTab === "wifi" ? "#5bc0eb" : "#cbaacb"
+                    border.color: Qt.alpha(Theme.white, 0.1); border.width: 2
+                    ColumnLayout {
+                        anchors.centerIn: parent; spacing: 4
+                        Text { text: root.controlCenterTab === "wifi" ? "" : ""; font.family: Theme.fontIcons; font.pixelSize: 32; color: "#1a1a1a"; Layout.alignment: Qt.AlignHCenter }
+                        Text { text: root.controlCenterTab === "wifi" ? (root.wifiSsid || "Desconectado") : (root.btDev || "Sin Dispositivo"); color: "#1a1a1a"; font.bold: true; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter; Layout.maximumWidth: 100; elide: Text.ElideRight }
+                        Text { text: "Connected"; color: Qt.alpha("#1a1a1a", 0.7); font.pixelSize: 9; Layout.alignment: Qt.AlignHCenter; visible: (root.wifiSsid !== "" && root.controlCenterTab === "wifi") || (root.btStat === "on" && root.controlCenterTab === "bluetooth") }
+                    }
+                }
+
+                Component {
+                    id: infoCard
+                    Rectangle {
+                        width: 120; height: 45; radius: 10
+                        color: Qt.alpha("#1e222a", 0.8)
+                        border.color: Qt.alpha(Theme.white, 0.1)
+                        property string iconText: ""; property string mainText: ""; property string subText: ""
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 8
+                            Text { text: iconText; font.family: Theme.fontIcons; color: root.controlCenterTab === "wifi" ? "#5bc0eb" : "#cbaacb"; font.pixelSize: 14 }
+                            ColumnLayout {
+                                spacing: 0
+                                Text { text: mainText; color: Theme.white; font.bold: true; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Text { text: subText; color: Theme.grey1; font.pixelSize: 8 }
+                            }
+                        }
+                    }
+                }
+
+                Loader { id: cardIp;       sourceComponent: infoCard; x: 20;  y: 60;  visible: root.controlCenterTab === "wifi"
+                         onLoaded: { item.iconText = "󰩟"; item.mainText = Qt.binding(() => root.advIp);      item.subText = "IP Address" } }
+                Loader { id: cardSecurity; sourceComponent: infoCard; x: 20;  y: 200; visible: root.controlCenterTab === "wifi"
+                         onLoaded: { item.iconText = "󰒃"; item.mainText = Qt.binding(() => root.advSecurity); item.subText = "Security" } }
+                Loader { id: cardBand;     sourceComponent: infoCard; x: 320; y: 60;  visible: root.controlCenterTab === "wifi"
+                         onLoaded: { item.iconText = "󰖩"; item.mainText = Qt.binding(() => root.advFreq);     item.subText = "Band" } }
+                Loader { id: cardSignal;   sourceComponent: infoCard; x: 320; y: 200; visible: root.controlCenterTab === "wifi"
+                         onLoaded: { item.iconText = "󰤨"; item.mainText = Qt.binding(() => root.advSignal !== "N/A" ? root.advSignal + "%" : "N/A"); item.subText = "Signal" } }
+
+                Loader { id: cardMac;     sourceComponent: infoCard; x: 20;  y: 60;  visible: root.controlCenterTab === "bluetooth"
+                         onLoaded: { item.iconText = "󰒋"; item.mainText = Qt.binding(() => root.advMac);                                              item.subText = "MAC Address" } }
+                Loader { id: cardAudio;   sourceComponent: infoCard; x: 20;  y: 200; visible: root.controlCenterTab === "bluetooth"
+                         onLoaded: { item.iconText = "󰋋"; item.mainText = Qt.binding(() => root.volDesc || "None");                                   item.subText = "Audio Profile" } }
+                Loader { id: cardBattery; sourceComponent: infoCard; x: 320; y: 130; visible: root.controlCenterTab === "bluetooth"
+                         onLoaded: { item.iconText = "󰥉"; item.mainText = Qt.binding(() => root.advBattery !== "N/A" ? root.advBattery + "%" : "N/A"); item.subText = "Battery" } }
+
+                Rectangle {
+                    anchors.bottom: parent.bottom; anchors.bottomMargin: 15
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 240; height: 35; radius: 17
+                    color: Qt.alpha("#1e222a", 0.6)
+                    border.color: Qt.alpha(Theme.white, 0.1)
+                    RowLayout {
+                        anchors.fill: parent; spacing: 0
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
+                            color: root.controlCenterTab === "wifi" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                            RowLayout { anchors.centerIn: parent; spacing: 6
+                                Text { text: ""; font.family: Theme.fontIcons; color: root.controlCenterTab === "wifi" ? "#5bc0eb" : Theme.grey1; font.pixelSize: 12 }
+                                Text { text: "Wi-Fi"; color: root.controlCenterTab === "wifi" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11 }
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "wifi" }
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
+                            color: root.controlCenterTab === "bluetooth" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                            RowLayout { anchors.centerIn: parent; spacing: 6
+                                Text { text: ""; font.family: Theme.fontIcons; color: root.controlCenterTab === "bluetooth" ? "#cbaacb" : Theme.grey1; font.pixelSize: 12 }
+                                Text { text: "Bluetooth"; color: root.controlCenterTab === "bluetooth" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11 }
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "bluetooth" }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
