@@ -86,7 +86,7 @@ PanelWindow {
     }
 
     property int currentTab: 0
-    property int totalTabs: 3
+    property int totalTabs: 4
 
     // --- ACTUALIZAR EN LAS PROPIEDADES DE LA ISLA ---
     property string todayTotalTime: "0h 0m"
@@ -96,11 +96,16 @@ PanelWindow {
     property int todayDayIndex: 0
     ListModel { id: appUsageModel }
 
+    // Variables para almacenar los datos de Notion
+    property string notionHeaderDate: "Loading..."
+    property var notionEventsData: []
+
     property int targetWidth: {
         if (isExpanded) {
             if (currentTab === 0) return isPlayerAvailable ? 420 : 210;
             if (currentTab === 1) return 420; 
-            if (currentTab === 2) return 400; // Ancho para la nueva pestaña
+            if (currentTab === 2) return 400;
+            if (currentTab === 3) return 460; // Ancho para la línea de tiempo
         }
         if (isNotifying) {
             return notifyText !== "" ? 300 : 220; 
@@ -114,7 +119,8 @@ PanelWindow {
         if (isExpanded) {
             if (currentTab === 0) return isPlayerAvailable ? 120 : 60;
             if (currentTab === 1) return 160; 
-            if (currentTab === 2) return 235; // Límite estricto adaptado a la ventana
+            if (currentTab === 2) return 235; // Actividad (La inspiración)
+            if (currentTab === 3) return 240; // Notion Timeline (AUMENTADO)
         }
         return 32;
     }
@@ -418,6 +424,29 @@ PanelWindow {
                     for (var i = 0; i < parsed.apps.length; i++) {
                         appUsageModel.append(parsed.apps[i]);
                     }
+                } catch(e) {}
+            }
+        }
+    }
+
+    Process {
+        id: notionSyncProc
+        running: islandWindow.isExpanded && currentTab === 3
+        
+        // Carga los secretos -> Ejecuta python (que decide si hacer request o no) -> Lee el JSON
+        command: [
+            "bash", "-c", 
+            "source ~/.config/quickshell/secrets.env 2>/dev/null; " +
+            "python3 ~/.config/quickshell/scripts/notion_sync.py; " +
+            "cat ~/.cache/qs_notion.json 2>/dev/null || echo '{\"header\": \"Not Configured\", \"events\": []}'"
+        ]
+        
+        stdout: SplitParser {
+            onRead: function(data) {
+                try {
+                    var parsed = JSON.parse(data.trim());
+                    islandWindow.notionHeaderDate = parsed.header;
+                    islandWindow.notionEventsData = parsed.days || [];
                 } catch(e) {}
             }
         }
@@ -1215,6 +1244,254 @@ PanelWindow {
                                                 font.pixelSize: 9
                                                 font.bold: index === todayDayIndex
                                                 horizontalAlignment: Text.AlignHCenter
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ================================
+            // TAB 3: NOTION TIMELINE
+            // ================================
+            Item {
+                width: parent.width
+                height: parent.height
+                x: (3 - currentTab) * width
+                opacity: currentTab === 3 ? 1 : 0
+                Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
+                Behavior on opacity { NumberAnimation { duration: 250 } }
+                visible: opacity > 0
+
+                // Fondo de ondas (Renderizado estático)
+                Canvas {
+                    anchors.fill: parent
+                    anchors.topMargin: 40 
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+                        ctx.lineWidth = 1;
+                        
+                        // Onda 1
+                        ctx.strokeStyle = Qt.alpha("#5bc0eb", 0.15); 
+                        ctx.beginPath(); 
+                        for(var x1 = 0; x1 <= width; x1 += 10) { 
+                            var y1 = height/2 - 10 + Math.sin(x1/60) * 15; 
+                            if(x1 === 0) { ctx.moveTo(x1, y1); } else { ctx.lineTo(x1, y1); }
+                        } 
+                        ctx.stroke();
+
+                        // Onda 2
+                        ctx.strokeStyle = Qt.alpha("#cbaacb", 0.12); 
+                        ctx.beginPath(); 
+                        for(var x2 = 0; x2 <= width; x2 += 10) { 
+                            var y2 = height/2 - 5 + Math.sin((x2+80)/45) * 20; 
+                            if(x2 === 0) { ctx.moveTo(x2, y2); } else { ctx.lineTo(x2, y2); }
+                        } 
+                        ctx.stroke();
+
+                        // Onda 3
+                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.08); 
+                        ctx.beginPath(); 
+                        for(var x3 = 0; x3 <= width; x3 += 10) { 
+                            var y3 = height/2 + Math.sin((x3+200)/80) * 10; 
+                            if(x3 === 0) { ctx.moveTo(x3, y3); } else { ctx.lineTo(x3, y3); }
+                        } 
+                        ctx.stroke();
+
+                        // Línea central
+                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.05); 
+                        ctx.beginPath(); 
+                        ctx.moveTo(0, height/2 + 5); 
+                        ctx.lineTo(width, height/2 + 5); 
+                        ctx.stroke();
+                    }
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 10
+
+                    // --- CABECERA ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        
+                        Rectangle {
+                            width: 28
+                            height: 28
+                            radius: 8
+                            color: Qt.alpha(Theme.white, 0.05)
+                            Text { 
+                                anchors.centerIn: parent
+                                text: "󰃭"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 14
+                                color: Qt.alpha(Theme.white, 0.7) 
+                            }
+                        }
+                        
+                        Text { 
+                            text: notionHeaderDate
+                            color: Qt.alpha(Theme.white, 0.6)
+                            font.family: Theme.fontMain
+                            font.pixelSize: 11
+                            Layout.fillWidth: true 
+                        }
+                        
+                        Rectangle {
+                            width: 85
+                            height: 26
+                            radius: 13
+                            color: "transparent"
+                            border.color: Qt.alpha(Theme.white, 0.2)
+                            border.width: 1
+                            
+                            RowLayout { 
+                                anchors.centerIn: parent
+                                spacing: 6
+                                Text { 
+                                    text: "Open Web"
+                                    color: Qt.alpha(Theme.white, 0.8)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 10 
+                                }
+                                Text { 
+                                    text: "󰍝"
+                                    color: Qt.alpha(Theme.white, 0.8)
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 10 
+                                } 
+                            }
+                            MouseArea { 
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: execCmd("xdg-open https://notion.so &") 
+                            }
+                        }
+                    }
+
+                    // --- LÍNEA DE TIEMPO HORIZONTAL ---
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        orientation: ListView.Horizontal
+                        spacing: 30
+                        clip: true
+                        model: islandWindow.notionEventsData
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        delegate: Item {
+                            width: 170 
+                            height: ListView.view.height
+
+                            // Guardamos el objeto del día actual
+                            property var dayData: modelData 
+
+                            // Línea separadora vertical izquierda
+                            Rectangle {
+                                width: 1; height: parent.height - 20
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.alpha(Theme.white, 0.2)
+                                anchors.left: parent.left
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 5
+
+                                // 1. Cabecera del Día (Anclada arriba)
+                                Row {
+                                    id: dayHeader
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    spacing: 6
+                                    Text {
+                                        text: dayData.day_label
+                                        color: Theme.white
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 12 
+                                        font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: dayData.date_label
+                                        color: Qt.alpha(Theme.white, 0.5)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+
+                                // 2. Área de eventos DESPLAZABLE en vertical
+                                // Forzamos su posición exacta para que jamás colapse a 0px
+                                Flickable {
+                                    id: scrollEvents
+                                    anchors.top: dayHeader.bottom
+                                    anchors.topMargin: 8
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+
+                                    contentHeight: colEvents.height 
+                                    clip: true 
+                                    flickableDirection: Flickable.VerticalFlick
+                                    boundsBehavior: Flickable.StopAtBounds
+
+                                    // Usamos Column nativo (100% fiable) en vez de ColumnLayout
+                                    Column {
+                                        id: colEvents
+                                        width: scrollEvents.width 
+                                        spacing: 8
+
+                                        Repeater {
+                                            model: dayData.events 
+                                            
+                                            delegate: Column {
+                                                width: parent.width
+                                                spacing: 2
+
+                                                // Extraemos el texto sacándolo directamente del índice del array (A prueba de fallos)
+                                                Text {
+                                                    text: dayData.events[index].title
+                                                    color: Theme.white
+                                                    font.family: Theme.fontMain
+                                                    font.pixelSize: 10 
+                                                    font.bold: true
+                                                    elide: Text.ElideRight
+                                                    maximumLineCount: 1
+                                                    width: parent.width
+                                                }
+
+                                                Row {
+                                                    width: parent.width
+                                                    spacing: 4 
+                                                    Text { 
+                                                        id: iconRef
+                                                        text: "󰥔"
+                                                        color: Qt.alpha(Theme.white, 0.5)
+                                                        font.family: Theme.fontIcons
+                                                        font.pixelSize: 8 
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                    }
+                                                    Text {
+                                                        text: dayData.events[index].location !== "" ? (dayData.events[index].time + " • " + dayData.events[index].location) : dayData.events[index].time
+                                                        color: Qt.alpha(Theme.white, 0.5)
+                                                        font.family: Theme.fontMain
+                                                        font.pixelSize: 8 
+                                                        elide: Text.ElideRight
+                                                        maximumLineCount: 1
+                                                        // Calculamos la anchura restante restándole el icono
+                                                        width: parent.width - iconRef.width - 4
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                    }
+                                                }
                                             }
                                         }
                                     }
