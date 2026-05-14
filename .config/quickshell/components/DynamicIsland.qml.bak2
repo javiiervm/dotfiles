@@ -86,38 +86,7 @@ PanelWindow {
     }
 
     property int currentTab: 0
-    property int totalTabs: 3
-
-    // --- ACTUALIZAR EN LAS PROPIEDADES DE LA ISLA ---
-    property string todayTotalTime: "0h 0m"
-    property string avgDailyTime: "0h 0m"
-    property string vsYesterdayTime: "0h 0m"
-    property var weekChartData: [0, 0, 0, 0, 0, 0, 0]
-    property int todayDayIndex: 0
-    ListModel { id: appUsageModel }
-
-    property int targetWidth: {
-        if (isExpanded) {
-            if (currentTab === 0) return isPlayerAvailable ? 420 : 210;
-            if (currentTab === 1) return 420; 
-            if (currentTab === 2) return 400; // Ancho para la nueva pestaña
-        }
-        if (isNotifying) {
-            return notifyText !== "" ? 300 : 220; 
-        }
-        var leftSideWidth = (isPlaying ? 22 : 0) + (dlSpeed >= 5 ? 18 : 0);
-        var rightSideWidth = (globalMicActive ? 12 : 0) + (globalCamActive ? 12 : 0);
-        return 120 + (Math.max(leftSideWidth, rightSideWidth) * 2);
-    }
-
-    property int targetHeight: {
-        if (isExpanded) {
-            if (currentTab === 0) return isPlayerAvailable ? 120 : 60;
-            if (currentTab === 1) return 160; 
-            if (currentTab === 2) return 235; // Límite estricto adaptado a la ventana
-        }
-        return 32;
-    }
+    property int totalTabs: 2 // Reducido a 2 pestañas
     
     property real trackPosition: 0
     property real trackLength: 1 
@@ -398,31 +367,6 @@ PanelWindow {
         }
     }
 
-    // --- ACTUALIZAR EL PROCESO DE LECTURA ---
-    Process {
-        id: appUsageProc
-        running: islandWindow.isExpanded && currentTab === 2
-        // Ahora lee de ~/.cache para tener persistencia
-        command: ["bash", "-c", "cat ~/.cache/qs_app_usage.json 2>/dev/null"]
-        stdout: SplitParser {
-            onRead: function(data) {
-                try {
-                    var parsed = JSON.parse(data.trim());
-                    islandWindow.todayTotalTime = parsed.total;
-                    islandWindow.avgDailyTime = parsed.avg_daily;
-                    islandWindow.vsYesterdayTime = parsed.vs_yesterday;
-                    islandWindow.weekChartData = parsed.chart;
-                    islandWindow.todayDayIndex = parsed.current_day_index;
-                    
-                    appUsageModel.clear();
-                    for (var i = 0; i < parsed.apps.length; i++) {
-                        appUsageModel.append(parsed.apps[i]);
-                    }
-                } catch(e) {}
-            }
-        }
-    }
-
     // --- LÍMITES CONFIGURABLES ---
     property real maxTemp: 85
     property real maxLoad: 90
@@ -441,6 +385,29 @@ PanelWindow {
 
     // --- STATES AND SIZES ---
     property bool isExpanded: hoverArea.containsMouse || islandWindow.isUserSeeking
+
+    property int targetWidth: {
+        if (isExpanded) {
+            if (currentTab === 0) return isPlayerAvailable ? 420 : 210;
+            if (currentTab === 1) return 420; 
+        }
+        if (isNotifying) {
+            return notifyText !== "" ? 300 : 220; 
+        }
+        
+        var leftSideWidth = (isPlaying ? 22 : 0) + (dlSpeed >= 5 ? 18 : 0);
+        var rightSideWidth = (globalMicActive ? 12 : 0) + (globalCamActive ? 12 : 0);
+        return 120 + (Math.max(leftSideWidth, rightSideWidth) * 2);
+    }
+
+    property int targetHeight: {
+        if (isExpanded) {
+            // Reajustado perfectamente: Altura mucho más pequeña al quitar Cava
+            if (currentTab === 0) return isPlayerAvailable ? 120 : 60;
+            if (currentTab === 1) return 160; 
+        }
+        return 32;
+    }
 
     // --- VISUAL PILL ---
     Rectangle {
@@ -987,238 +954,6 @@ PanelWindow {
                                 anchors.bottom: parent.bottom; anchors.right: parent.right; anchors.bottomMargin: 0; spacing: -2
                                 Text { text: sysStorage; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 10; font.bold: true; anchors.right: parent.right }
                                 Text { text: "Storage"; color: Qt.alpha(Theme.white, 0.6); font.family: Theme.fontMain; font.pixelSize: 9; anchors.right: parent.right } 
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ================================
-            // TAB 2: APP USAGE MONITOR (Side-by-Side Layout)
-            // ================================
-            Item {
-                width: parent.width
-                height: parent.height
-                x: (2 - currentTab) * width
-                opacity: currentTab === 2 ? 1 : 0
-                Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
-                Behavior on opacity { NumberAnimation { duration: 250 } }
-                visible: opacity > 0
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
-
-                    // --- 1. CABECERA RESUMEN ---
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 30
-                        color: Qt.alpha(Theme.white, 0.03)
-                        radius: 8
-                        border.color: Qt.alpha(Theme.white, 0.05)
-                        border.width: 1
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 12
-
-                            RowLayout {
-                                spacing: 4
-                                Text { text: "Today"; color: Qt.alpha(Theme.white, 0.5); font.family: Theme.fontMain; font.pixelSize: 10 }
-                                Text { text: todayTotalTime; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
-                            }
-                            Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; color: Qt.alpha(Theme.white, 0.08) }
-                            RowLayout {
-                                spacing: 4
-                                Text { text: "Avg."; color: Qt.alpha(Theme.white, 0.5); font.family: Theme.fontMain; font.pixelSize: 10 }
-                                Text { text: avgDailyTime; color: Qt.alpha(Theme.white, 0.8); font.family: Theme.fontMain; font.pixelSize: 11; font.bold: true }
-                            }
-                            Rectangle { Layout.preferredWidth: 1; Layout.fillHeight: true; Layout.topMargin: 6; Layout.bottomMargin: 6; color: Qt.alpha(Theme.white, 0.08) }
-                            RowLayout {
-                                spacing: 4
-                                Text { 
-                                    text: vsYesterdayTime; 
-                                    color: Theme.white; // Cambiado a blanco
-                                    font.family: Theme.fontMain; 
-                                    font.pixelSize: 11; 
-                                    font.bold: true 
-                                }
-                                Text { 
-                                    text: "vs yesterday"; 
-                                    color: Qt.alpha(Theme.white, 0.5); 
-                                    font.family: Theme.fontMain; 
-                                    font.pixelSize: 10 
-                                }
-                            }
-                        }
-                    }
-
-                    // --- 2. CUERPO PRINCIPAL (Dos Columnas) ---
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 10
-
-                        // COLUMNA IZQUIERDA: APPS (60%)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 200
-                            spacing: 6
-
-                            Text {
-                                text: "Most Used Applications"
-                                color: Qt.alpha(Theme.white, 0.7)
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                                font.bold: true
-                                Layout.leftMargin: 2
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: Qt.alpha(Theme.white, 0.02)
-                                radius: 10
-                                border.color: Qt.alpha(Theme.white, 0.04)
-                                border.width: 1
-                                clip: true
-
-                                ListView {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    model: appUsageModel
-                                    spacing: 8
-                                    clip: true
-
-                                    delegate: Item {
-                                        width: ListView.view.width
-                                        height: 24
-
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            spacing: 8
-
-                                            Image {
-                                                Layout.preferredWidth: 16; Layout.preferredHeight: 16
-                                                source: "image://icon/" + model.icon
-                                                fillMode: Image.PreserveAspectFit
-                                            }
-
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 2
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-                                                    Text { text: model.name; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 11; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
-                                                    Text { text: model.time; color: Qt.alpha(Theme.white, 0.7); font.family: Theme.fontMain; font.pixelSize: 10; font.bold: true }
-                                                }
-                                                Rectangle {
-                                                    Layout.fillWidth: true;
-                                                    height: 4; radius: 2; color: Qt.alpha(Theme.white, 0.05)
-                                                    Rectangle {
-                                                        height: parent.height; radius: 2;
-                                                        color: Theme.white // Cambiado a blanco
-                                                        width: parent.width * model.percent
-                                                        Behavior on width { NumberAnimation { duration: 600; easing.type: Easing.OutCubic } }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // COLUMNA DERECHA: GRÁFICA (40%)
-                        ColumnLayout {
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: 120
-                            spacing: 6
-
-                            Text {
-                                text: "Weekly Usage"
-                                color: Qt.alpha(Theme.white, 0.7)
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                                font.bold: true
-                                Layout.leftMargin: 2
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                color: Qt.alpha(Theme.white, 0.02)
-                                radius: 10
-                                border.color: Qt.alpha(Theme.white, 0.04)
-                                border.width: 1
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 4
-
-                                    // Contenedor de las Barras
-                                    Item {
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
-                                        
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            spacing: 6
-
-                                            Repeater {
-                                                model: weekChartData // Array de 7 valores (0.0 a 1.0)
-                                                Item {
-                                                    Layout.fillWidth: true
-                                                    Layout.fillHeight: true
-                                                    
-                                                    // Barra de fondo oscuro
-                                                    Rectangle {
-                                                        anchors.fill: parent
-                                                        radius: 4
-                                                        color: Qt.alpha(Theme.white, 0.04)
-                                                    }
-                                                    
-                                                    // Barra animada (crece desde abajo)
-                                                    Rectangle {
-                                                        anchors.bottom: parent.bottom
-                                                        anchors.left: parent.left
-                                                        anchors.right: parent.right
-                                                        radius: 4
-                                                        height: parent.height * modelData
-                                                        // Blanco si es el día actual, blanco transparente si no
-                                                        color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.3)
-                                                        
-                                                        Behavior on height { NumberAnimation { duration: 700; easing.type: Easing.OutBounce } }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Letras de los Días (L M X J V S D)
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 6
-                                        Repeater {
-                                            model: ["M", "T", "W", "T", "F", "S", "S"]
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: modelData
-                                                // Blanco si es el día actual
-                                                color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.4)
-                                                font.family: Theme.fontMain
-                                                font.pixelSize: 9
-                                                font.bold: index === todayDayIndex
-                                                horizontalAlignment: Text.AlignHCenter
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
