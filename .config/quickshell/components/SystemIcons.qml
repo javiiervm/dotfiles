@@ -94,6 +94,10 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Audio", (volMute || vol === 0) ? "Muted" : "Level: " + vol + "%", "Output: " + volDesc, "#e74c3c", 82)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 82)
+            onClicked: {
+                rootRef.controlCenterTab = "audio"
+                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
+            }            
         }
     }
 
@@ -124,6 +128,10 @@ Row {
             }
             onExited: {
                 iconsRoot.updateMenu(false, "", "", "", "#ffffff", 52);
+            }
+            onClicked: {
+                rootRef.controlCenterTab = "performance"
+                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
             }
         }
     }
