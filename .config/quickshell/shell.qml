@@ -564,15 +564,14 @@ ShellRoot {
 
                 Keys.onEscapePressed: root.isControlCenterOpen = false
 
+                // Control de gestos (rueda del ratón / touchpad)
                 MouseArea {
                     anchors.fill: parent
                     Timer { id: swipeCooldown; interval: 400 }
                     onWheel: (wheel) => {
                         if (swipeCooldown.running) return
-                        
                         var tabs = ["wifi", "bluetooth", "audio", "performance"];
                         var idx = tabs.indexOf(root.controlCenterTab);
-                        
                         if (wheel.angleDelta.x < -40 || wheel.angleDelta.y < -40) {
                             root.controlCenterTab = tabs[(idx + 1) % tabs.length];
                             swipeCooldown.restart()
@@ -583,111 +582,163 @@ ShellRoot {
                     }
                 }
 
-                Canvas {
-                    id: connectionLines
-                    anchors.fill: parent
-                    onPaint: {
-                        var ctx = getContext("2d");
-                        ctx.clearRect(0, 0, width, height);
-                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.2);
-                        ctx.lineWidth = 2;
-                        ctx.beginPath();
-                        var centerX = width / 2;
-                        var centerY = height / 2 - 20;
-                        
-                        function drawNodeLine(targetX, targetY) {
-                            ctx.moveTo(centerX, centerY);
-                            ctx.bezierCurveTo(centerX + (targetX - centerX)/2, centerY,
-                                            centerX + (targetX - centerX)/2, targetY,
-                                            targetX, targetY);
-                        }
-                        
-                        if (root.controlCenterTab === "wifi") {
-                            drawNodeLine(cardIp.x + cardIp.width, cardIp.y + cardIp.height/2);
-                            drawNodeLine(cardSecurity.x + cardSecurity.width, cardSecurity.y + cardSecurity.height/2);
-                            drawNodeLine(cardBand.x, cardBand.y + cardBand.height/2);
-                            drawNodeLine(cardSignal.x, cardSignal.y + cardSignal.height/2);
-                        } else if (root.controlCenterTab === "bluetooth") {
-                            drawNodeLine(cardMac.x + cardMac.width, cardMac.y + cardMac.height/2);
-                            drawNodeLine(cardAudio.x + cardAudio.width, cardAudio.y + cardAudio.height/2);
-                            drawNodeLine(cardBattery.x, cardBattery.y + cardBattery.height/2);
-                        } else if (root.controlCenterTab === "audio") {
-                            drawNodeLine(cardAudioDev.x + cardAudioDev.width, cardAudioDev.y + cardAudioDev.height/2);
-                            drawNodeLine(cardAudioMute.x + cardAudioMute.width, cardAudioMute.y + cardAudioMute.height/2);
-                        } else if (root.controlCenterTab === "performance") {
-                            drawNodeLine(cardPerfCpu.x + cardPerfCpu.width, cardPerfCpu.y + cardPerfCpu.height/2);
-                            drawNodeLine(cardPerfRam.x + cardPerfRam.width, cardPerfRam.y + cardPerfRam.height/2);
-                            drawNodeLine(cardPerfBat.x, cardPerfBat.y + cardPerfBat.height/2);
-                            drawNodeLine(cardPerfState.x, cardPerfState.y + cardPerfState.height/2);
-                        }
-                        ctx.stroke();
-                    }
-                    Connections { target: root; function onControlCenterTabChanged() { connectionLines.requestPaint() } }
-
+                // 1. Tarjeta base de información
+                Component {
+                    id: infoCard
                     Rectangle {
-                        id: centerNode
-                        width: 120; height: 120; radius: 60
-                        anchors.centerIn: parent
-                        anchors.verticalCenterOffset: -20
+                        width: 120; height: 45; radius: 10
+                        color: Qt.alpha("#1e222a", 0.8)
+                        border.color: Qt.alpha(Theme.white, 0.1)
+                        property string iconText: ""
+                        property string mainText: "" 
+                        property string subText: ""
+                        property color accentColor: Theme.white
                         
-                        color: {
-                            if (root.controlCenterTab === "wifi") return "#5bc0eb";
-                            if (root.controlCenterTab === "bluetooth") return "#cbaacb";
-                            if (root.controlCenterTab === "audio") return "#e74c3c";
-                            return "#f39c12"; // performance
-                        }
-                        border.color: Qt.alpha(Theme.white, 0.1); border.width: 2
-                        
-                        ColumnLayout {
-                            anchors.centerIn: parent; spacing: 4
-                            
-                            Text { 
-                                text: {
-                                    if (root.controlCenterTab === "wifi") return "";
-                                    if (root.controlCenterTab === "bluetooth") return "";
-                                    if (root.controlCenterTab === "audio") return root.volMute || root.vol === 0 ? "󰝟" : "󰕾";
-                                    return "󰓅"; // performance
-                                }
-                                font.family: Theme.fontIcons; font.pixelSize: 32; color: "#1a1a1a"; Layout.alignment: Qt.AlignHCenter 
-                            }
-                            
-                            Text { 
-                                text: {
-                                    if (root.controlCenterTab === "wifi") return root.wifiSsid || "Desconectado";
-                                    if (root.controlCenterTab === "bluetooth") return root.btDev || "Sin Dispositivo";
-                                    if (root.controlCenterTab === "audio") return root.vol + "%";
-                                    return root.perfMode.charAt(0).toUpperCase() + root.perfMode.slice(1);
-                                }
-                                color: "#1a1a1a"; font.bold: true; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter; 
-                                Layout.maximumWidth: 100; elide: Text.ElideRight 
-                            }
-                            
-                            Text { 
-                                text: {
-                                    if (root.controlCenterTab === "audio") return root.volMute ? "Muted" : "Active";
-                                    if (root.controlCenterTab === "performance") return "System Controlled";
-                                    return "Connected";
-                                }
-                                color: Qt.alpha("#1a1a1a", 0.7); font.pixelSize: 9; Layout.alignment: Qt.AlignHCenter; 
-                                visible: (root.wifiSsid !== "" && root.controlCenterTab === "wifi") || 
-                                        (root.btStat === "on" && root.controlCenterTab === "bluetooth") ||
-                                        (root.controlCenterTab === "audio") || (root.controlCenterTab === "performance")
+                        RowLayout {
+                            anchors.fill: parent; anchors.margins: 8; spacing: 8
+                            Text { text: iconText; font.family: Theme.fontIcons; color: accentColor; font.pixelSize: 14 }
+                            ColumnLayout {
+                                spacing: 0
+                                Text { text: mainText; color: Theme.white; font.bold: true; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Text { text: subText; color: Theme.grey1; font.pixelSize: 8 }
                             }
                         }
                     }
                 }
 
+                // 2. Núcleo central y líneas conectoras (Empaquetado para reutilizarlo en el slide)
+                Component {
+                    id: tabCore
+                    Item {
+                        anchors.fill: parent
+                        property string tabName: "wifi"
+
+                        Canvas {
+                            anchors.fill: parent
+                            onPaint: {
+                                var ctx = getContext("2d");
+                                ctx.clearRect(0, 0, width, height);
+                                ctx.strokeStyle = Qt.alpha(Theme.white, 0.2);
+                                ctx.lineWidth = 2;
+                                ctx.beginPath();
+                                var cx = width / 2;
+                                var cy = height / 2 - 20;
+                                function drawNodeLine(tx, ty) {
+                                    ctx.moveTo(cx, cy);
+                                    ctx.bezierCurveTo(cx + (tx - cx)/2, cy, cx + (tx - cx)/2, ty, tx, ty);
+                                }
+                                // Trazamos las líneas según la disposición de tarjetas de cada pestaña
+                                if (tabName === "bluetooth") {
+                                    drawNodeLine(140, 82.5); drawNodeLine(140, 222.5); drawNodeLine(320, 152.5);
+                                } else if (tabName === "audio") {
+                                    drawNodeLine(140, 82.5); drawNodeLine(140, 222.5);
+                                } else {
+                                    drawNodeLine(140, 82.5); drawNodeLine(140, 222.5); drawNodeLine(320, 82.5); drawNodeLine(320, 222.5);
+                                }
+                                ctx.stroke();
+                            }
+                        }
+
+                        Rectangle {
+                            width: 120; height: 120; radius: 60
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: -20
+                            color: tabName === "wifi" ? "#5bc0eb" : tabName === "bluetooth" ? "#cbaacb" : tabName === "audio" ? "#e74c3c" : "#f39c12"
+                            border.color: Qt.alpha(Theme.white, 0.1); border.width: 2
+                            ColumnLayout {
+                                anchors.centerIn: parent; spacing: 4
+                                Text { 
+                                    text: tabName === "wifi" ? "" : tabName === "bluetooth" ? "" : tabName === "audio" ? (root.volMute || root.vol === 0 ? "󰝟" : "󰕾") : "󰓅"
+                                    font.family: Theme.fontIcons; font.pixelSize: 32; color: "#1a1a1a"; Layout.alignment: Qt.AlignHCenter 
+                                }
+                                Text { 
+                                    text: tabName === "wifi" ? (root.wifiSsid || "Desconectado") : tabName === "bluetooth" ? (root.btDev || "Sin Dispositivo") : tabName === "audio" ? root.vol + "%" : root.perfMode.charAt(0).toUpperCase() + root.perfMode.slice(1)
+                                    color: "#1a1a1a"; font.bold: true; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter; Layout.maximumWidth: 100; elide: Text.ElideRight 
+                                }
+                                Text { 
+                                    text: tabName === "audio" ? (root.volMute ? "Muted" : "Active") : tabName === "performance" ? "System Controlled" : "Connected"
+                                    color: Qt.alpha("#1a1a1a", 0.7); font.pixelSize: 9; Layout.alignment: Qt.AlignHCenter; 
+                                    visible: (root.wifiSsid !== "" && tabName === "wifi") || (root.btStat === "on" && tabName === "bluetooth") || (tabName === "audio") || (tabName === "performance")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Contenedor Deslizante (La magia de la animación)
+                Item {
+                    id: slideWindow
+                    anchors.top: parent.top
+                    anchors.bottom: bottomNav.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    clip: true
+
+                    property var tabsList: ["wifi", "bluetooth", "audio", "performance"]
+                    property int currentIndex: tabsList.indexOf(root.controlCenterTab)
+
+                    Item {
+                        id: slideContainer
+                        width: slideWindow.width * 4
+                        height: slideWindow.height
+                        // Animamos la posición X basada en el índice de la pestaña activa
+                        x: -slideWindow.currentIndex * slideWindow.width
+
+                        Behavior on x {
+                            NumberAnimation { duration: 400; easing.type: Easing.OutQuart }
+                        }
+
+                        // --- PESTAÑA WIFI (x: 0) ---
+                        Item {
+                            width: slideWindow.width; height: parent.height; x: 0
+                            Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "wifi" }
+                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = "#5bc0eb"; item.iconText = "󰩟"; item.mainText = Qt.binding(() => root.advIp); item.subText = "IP Address" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#5bc0eb"; item.iconText = "󰒃"; item.mainText = Qt.binding(() => root.advSecurity); item.subText = "Security" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 60; onLoaded: { item.accentColor = "#5bc0eb"; item.iconText = "󰖩"; item.mainText = Qt.binding(() => root.advFreq); item.subText = "Band" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 200; onLoaded: { item.accentColor = "#5bc0eb"; item.iconText = "󰤨"; item.mainText = Qt.binding(() => root.advSignal !== "N/A" ? root.advSignal + "%" : "N/A"); item.subText = "Signal" } }
+                        }
+
+                        // --- PESTAÑA BLUETOOTH (x: ancho * 1) ---
+                        Item {
+                            width: slideWindow.width; height: parent.height; x: slideWindow.width
+                            Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "bluetooth" }
+                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = "#cbaacb"; item.iconText = "󰒋"; item.mainText = Qt.binding(() => root.advMac); item.subText = "MAC Address" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#cbaacb"; item.iconText = "󰋋"; item.mainText = Qt.binding(() => root.volDesc || "None"); item.subText = "Audio Profile" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 130; onLoaded: { item.accentColor = "#cbaacb"; item.iconText = "󰥉"; item.mainText = Qt.binding(() => root.advBattery !== "N/A" ? root.advBattery + "%" : "N/A"); item.subText = "Battery" } }
+                        }
+
+                        // --- PESTAÑA AUDIO (x: ancho * 2) ---
+                        Item {
+                            width: slideWindow.width; height: parent.height; x: slideWindow.width * 2
+                            Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "audio" }
+                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = "#e74c3c"; item.iconText = "󰋋"; item.mainText = Qt.binding(() => root.volDesc || "Built-in Audio"); item.subText = "Output Device" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#e74c3c"; item.iconText = Qt.binding(() => root.volMute ? "󰝟" : "󰕾"); item.mainText = Qt.binding(() => root.volMute ? "Muted" : "Unmuted"); item.subText = "Audio State" } }
+                        }
+
+                        // --- PESTAÑA PERFORMANCE (x: ancho * 3) ---
+                        Item {
+                            width: slideWindow.width; height: parent.height; x: slideWindow.width * 3
+                            Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "performance" }
+                            Loader { sourceComponent: infoCard; x: 20; y: 60;  onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰻠"; item.mainText = Qt.binding(() => root.cpuUsage + "%"); item.subText = "CPU Usage" } }
+                            Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰍛"; item.mainText = Qt.binding(() => root.memUsage + "%"); item.subText = "Memory" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 60; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰁹"; item.mainText = Qt.binding(() => root.batCap + "%"); item.subText = "Battery Level" } }
+                            Loader { sourceComponent: infoCard; x: 320; y: 200; onLoaded: { item.accentColor = "#f39c12"; item.iconText = "󰚥"; item.mainText = Qt.binding(() => root.batStat || "Unknown"); item.subText = "Power State" } }
+                        }
+                    }
+                }
+
+                // 4. Barra de navegación inferior
                 Rectangle {
+                    id: bottomNav
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 15
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 360; height: 35; radius: 17 // Ancho ampliado para 4 botones
+                    width: 360; height: 35; radius: 17
                     color: Qt.alpha("#1e222a", 0.6)
                     border.color: Qt.alpha(Theme.white, 0.1)
                     
                     RowLayout {
                         anchors.fill: parent; spacing: 0
                         
-                        // 1. Wi-Fi
                         Rectangle {
                             Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
                             color: root.controlCenterTab === "wifi" ? Qt.alpha(Theme.white, 0.15) : "transparent"
@@ -698,7 +749,6 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "wifi" }
                         }
                         
-                        // 2. Bluetooth
                         Rectangle {
                             Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
                             color: root.controlCenterTab === "bluetooth" ? Qt.alpha(Theme.white, 0.15) : "transparent"
@@ -709,7 +759,6 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "bluetooth" }
                         }
                         
-                        // 3. Audio
                         Rectangle {
                             Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
                             color: root.controlCenterTab === "audio" ? Qt.alpha(Theme.white, 0.15) : "transparent"
@@ -720,7 +769,6 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "audio" }
                         }
                         
-                        // 4. Performance
                         Rectangle {
                             Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
                             color: root.controlCenterTab === "performance" ? Qt.alpha(Theme.white, 0.15) : "transparent"
@@ -732,61 +780,6 @@ ShellRoot {
                         }
                     }
                 }
-
-                Component {
-                    id: infoCard
-                    Rectangle {
-                        width: 120; height: 45; radius: 10
-                        color: Qt.alpha("#1e222a", 0.8)
-                        border.color: Qt.alpha(Theme.white, 0.1)
-                        property string iconText: ""; property string mainText: ""; property string subText: ""
-                        RowLayout {
-                            anchors.fill: parent; anchors.margins: 8; spacing: 8
-                            Text { text: iconText; font.family: Theme.fontIcons; color: root.controlCenterTab === "wifi" ? "#5bc0eb" : "#cbaacb"; font.pixelSize: 14 }
-                            ColumnLayout {
-                                spacing: 0
-                                Text { text: mainText; color: Theme.white; font.bold: true; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
-                                Text { text: subText; color: Theme.grey1; font.pixelSize: 8 }
-                            }
-                        }
-                    }
-                }
-
-                Loader { id: cardIp;       sourceComponent: infoCard; x: 20;  y: 60;  visible: root.controlCenterTab === "wifi"
-                         onLoaded: { item.iconText = "󰩟"; item.mainText = Qt.binding(() => root.advIp);      item.subText = "IP Address" } }
-                Loader { id: cardSecurity; sourceComponent: infoCard; x: 20;  y: 200; visible: root.controlCenterTab === "wifi"
-                         onLoaded: { item.iconText = "󰒃"; item.mainText = Qt.binding(() => root.advSecurity); item.subText = "Security" } }
-                Loader { id: cardBand;     sourceComponent: infoCard; x: 320; y: 60;  visible: root.controlCenterTab === "wifi"
-                         onLoaded: { item.iconText = "󰖩"; item.mainText = Qt.binding(() => root.advFreq);     item.subText = "Band" } }
-                Loader { id: cardSignal;   sourceComponent: infoCard; x: 320; y: 200; visible: root.controlCenterTab === "wifi"
-                         onLoaded: { item.iconText = "󰤨"; item.mainText = Qt.binding(() => root.advSignal !== "N/A" ? root.advSignal + "%" : "N/A"); item.subText = "Signal" } }
-
-                Loader { id: cardMac;     sourceComponent: infoCard; x: 20;  y: 60;  visible: root.controlCenterTab === "bluetooth"
-                         onLoaded: { item.iconText = "󰒋"; item.mainText = Qt.binding(() => root.advMac);                                              item.subText = "MAC Address" } }
-                Loader { id: cardAudio;   sourceComponent: infoCard; x: 20;  y: 200; visible: root.controlCenterTab === "bluetooth"
-                         onLoaded: { item.iconText = "󰋋"; item.mainText = Qt.binding(() => root.volDesc || "None");                                   item.subText = "Audio Profile" } }
-                Loader { id: cardBattery; sourceComponent: infoCard; x: 320; y: 130; visible: root.controlCenterTab === "bluetooth"
-                         onLoaded: { item.iconText = "󰥉"; item.mainText = Qt.binding(() => root.advBattery !== "N/A" ? root.advBattery + "%" : "N/A"); item.subText = "Battery" } }
-
-                // --- TARJETAS AUDIO ---
-                Loader { id: cardAudioDev; sourceComponent: infoCard; x: 20; y: 60; visible: root.controlCenterTab === "audio"
-                        onLoaded: { item.iconText = "󰋋"; item.mainText = Qt.binding(() => root.volDesc || "Built-in Audio"); item.subText = "Output Device" } }
-
-                Loader { id: cardAudioMute; sourceComponent: infoCard; x: 20; y: 200; visible: root.controlCenterTab === "audio"
-                        onLoaded: { item.iconText = Qt.binding(() => root.volMute ? "󰝟" : "󰕾"); item.mainText = Qt.binding(() => root.volMute ? "Muted" : "Unmuted"); item.subText = "Audio State" } }
-
-                // --- TARJETAS PERFORMANCE ---
-                Loader { id: cardPerfCpu; sourceComponent: infoCard; x: 20; y: 60; visible: root.controlCenterTab === "performance"
-                        onLoaded: { item.iconText = "󰻠"; item.mainText = Qt.binding(() => root.cpuUsage + "%"); item.subText = "CPU Usage" } }
-
-                Loader { id: cardPerfRam; sourceComponent: infoCard; x: 20; y: 200; visible: root.controlCenterTab === "performance"
-                        onLoaded: { item.iconText = "󰍛"; item.mainText = Qt.binding(() => root.memUsage + "%"); item.subText = "Memory" } }
-
-                Loader { id: cardPerfBat; sourceComponent: infoCard; x: 320; y: 60; visible: root.controlCenterTab === "performance"
-                        onLoaded: { item.iconText = "󰁹"; item.mainText = Qt.binding(() => root.batCap + "%"); item.subText = "Battery Level" } }
-
-                Loader { id: cardPerfState; sourceComponent: infoCard; x: 320; y: 200; visible: root.controlCenterTab === "performance"
-                        onLoaded: { item.iconText = "󰚥"; item.mainText = Qt.binding(() => root.batStat || "Unknown"); item.subText = "Power State" } }
             }
         }
     }
