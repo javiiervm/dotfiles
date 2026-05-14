@@ -727,7 +727,7 @@ ShellRoot {
                     }
                 }
 
-                // 4. Barra de navegación inferior
+                // 4. Barra de navegación inferior con indicador animado
                 Rectangle {
                     id: bottomNav
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 15
@@ -735,46 +735,65 @@ ShellRoot {
                     width: 360; height: 35; radius: 17
                     color: Qt.alpha("#1e222a", 0.6)
                     border.color: Qt.alpha(Theme.white, 0.1)
-                    
+
+                    readonly property var tabs: ["wifi", "bluetooth", "audio", "performance"]
+                    readonly property int currentIndex: tabs.indexOf(root.controlCenterTab)
+                    readonly property real stepWidth: width / 4
+
+                    // --- EL INDICADOR MÓVIL ---
+                    Rectangle {
+                        id: activeIndicator
+                        width: bottomNav.stepWidth - 4; height: 31
+                        radius: 15; y: 2
+                        // Calculamos la X basándonos en el índice actual
+                        x: 2 + (bottomNav.currentIndex * bottomNav.stepWidth)
+                        color: Qt.alpha(Theme.white, 0.15)
+
+                        // Esta es la clave: misma duración y easing que el slide de arriba
+                        Behavior on x {
+                            NumberAnimation { duration: 400; easing.type: Easing.OutQuart }
+                        }
+                    }
+
                     RowLayout {
                         anchors.fill: parent; spacing: 0
                         
-                        Rectangle {
-                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
-                            color: root.controlCenterTab === "wifi" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                        // 1. Botón Wi-Fi
+                        Item {
+                            Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
                                 Text { text: ""; font.family: Theme.fontIcons; color: root.controlCenterTab === "wifi" ? "#5bc0eb" : Theme.grey1; font.pixelSize: 12 }
-                                Text { text: "Wi-Fi"; color: root.controlCenterTab === "wifi" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "wifi" }
+                                Text { text: "Wi-Fi"; color: Theme.white; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "wifi" }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "wifi" }
                         }
                         
-                        Rectangle {
-                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
-                            color: root.controlCenterTab === "bluetooth" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                        // 2. Botón Bluetooth
+                        Item {
+                            Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
                                 Text { text: ""; font.family: Theme.fontIcons; color: root.controlCenterTab === "bluetooth" ? "#cbaacb" : Theme.grey1; font.pixelSize: 12 }
-                                Text { text: "Bluetooth"; color: root.controlCenterTab === "bluetooth" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "bluetooth" }
+                                Text { text: "Bluetooth"; color: Theme.white; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "bluetooth" }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "bluetooth" }
                         }
                         
-                        Rectangle {
-                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
-                            color: root.controlCenterTab === "audio" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                        // 3. Botón Audio
+                        Item {
+                            Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
                                 Text { text: "󰕾"; font.family: Theme.fontIcons; color: root.controlCenterTab === "audio" ? "#e74c3c" : Theme.grey1; font.pixelSize: 12 }
-                                Text { text: "Audio"; color: root.controlCenterTab === "audio" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "audio" }
+                                Text { text: "Audio"; color: Theme.white; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "audio" }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "audio" }
                         }
                         
-                        Rectangle {
-                            Layout.fillWidth: true; Layout.fillHeight: true; radius: 17
-                            color: root.controlCenterTab === "performance" ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                        // 4. Botón Performance
+                        Item {
+                            Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
                                 Text { text: "󰓅"; font.family: Theme.fontIcons; color: root.controlCenterTab === "performance" ? "#f39c12" : Theme.grey1; font.pixelSize: 12 }
-                                Text { text: "Perf"; color: root.controlCenterTab === "performance" ? Theme.white : Theme.grey1; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "performance" }
+                                Text { text: "Perf"; color: Theme.white; font.bold: true; font.pixelSize: 11; visible: root.controlCenterTab === "performance" }
                             }
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "performance" }
                         }
