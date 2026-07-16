@@ -116,7 +116,7 @@ PanelWindow {
         if (isExpanded) {
             if (currentTab === 0) return isPlayerAvailable ? 420 : 210;
             if (currentTab === 1) return 420; 
-            if (currentTab === 2) return 400;
+            if (currentTab === 2) return 460;
             if (currentTab === 3) return 460; // Ancho para la línea de tiempo
         }
         if (isNotifying) {
@@ -129,7 +129,7 @@ PanelWindow {
 
     property int targetHeight: {
         if (isExpanded) {
-            if (currentTab === 0) return isPlayerAvailable ? 120 : 60;
+            if (currentTab === 0) return isPlayerAvailable ? 160 : 60;
             if (currentTab === 1) return 160; 
             if (currentTab === 2) return 235; // Actividad (La inspiración)
             if (currentTab === 3) return 240; // Notion Timeline (AUMENTADO)
@@ -708,20 +708,21 @@ PanelWindow {
 
                 ColumnLayout {
                     anchors.centerIn: parent
+                    anchors.verticalCenterOffset: -8
                     width: parent.width * 0.90
                     height: parent.height * 0.85
-                    spacing: 10
-                    anchors.verticalCenterOffset: -5 
+                    spacing: 12
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 14
+                        spacing: 18 // Separar un poco más la portada de los textos
 
+                        // 1. CARÁTULA DEL ÁLBUM
                         Rectangle {
-                            Layout.preferredWidth: 70
-                            Layout.preferredHeight: 70
+                            Layout.preferredWidth: 85 // Subimos de 70 a 85
+                            Layout.preferredHeight: 85
                             Layout.alignment: Qt.AlignVCenter
-                            radius: 12
+                            radius: 14 // Curvatura ligeramente mayor
                             color: Theme.bg1
                             clip: true
                             visible: islandWindow.isPlayerAvailable
@@ -737,21 +738,22 @@ PanelWindow {
                                 text: "󰎈"
                                 font.family: Theme.fontIcons
                                 color: Theme.white
-                                font.pixelSize: 30
+                                font.pixelSize: 34 // Icono por defecto más grande
                                 visible: parent.children[0].source == "" 
                             }
                         }
 
+                        // 2. TEXTOS Y CONTROLES
                         ColumnLayout {
                             Layout.fillWidth: true
-                            spacing: 2
+                            spacing: 4 // Más separación entre título y artista
                             Layout.alignment: Qt.AlignVCenter
                             
                             Text { 
                                 text: islandWindow.songTitle
                                 color: Theme.white
                                 font.family: Theme.fontMain
-                                font.pixelSize: 15
+                                font.pixelSize: 16 // Subimos de 15 a 16
                                 font.bold: true
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
@@ -761,32 +763,33 @@ PanelWindow {
                                 text: islandWindow.songArtist
                                 color: Theme.grey1
                                 font.family: Theme.fontMain
-                                font.pixelSize: 12
+                                font.pixelSize: 13 // Subimos de 12 a 13
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignHCenter 
                             }
 
+                            // CONTROLES DE REPRODUCCIÓN
                             RowLayout {
                                 Layout.alignment: Qt.AlignHCenter
-                                Layout.topMargin: 5
-                                spacing: 14
+                                Layout.topMargin: 10 // Mayor margen respecto al artista
+                                spacing: 18 // Botones más separados entre sí
                                 visible: islandWindow.isPlayerAvailable
                                 
                                 Text { 
                                     text: "󰒟"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 17
+                                    font.pixelSize: 18 
                                     color: islandWindow.isShuffle ? Theme.white : Qt.alpha(Theme.white, 0.4)
                                     MouseArea { 
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.shuffle = !islandWindow.activePlayer.shuffle;
+                                        onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.shuffle = !islandWindow.activePlayer.shuffle; 
                                     } 
                                 }
                                 Text { 
                                     text: "󰒮"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 20
+                                    font.pixelSize: 22 // Icono más grande
                                     color: Theme.white
                                     MouseArea { 
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -794,8 +797,8 @@ PanelWindow {
                                     } 
                                 }
                                 Rectangle {
-                                    width: 30
-                                    height: 30
+                                    width: 36 // Botón Play/Pause crecido a 36x36
+                                    height: 36
                                     radius: width / 2
                                     color: Theme.white
                                     Layout.alignment: Qt.AlignVCenter
@@ -803,7 +806,7 @@ PanelWindow {
                                         anchors.centerIn: parent
                                         text: islandWindow.isPlaying ? "󰏤" : "󰐊"
                                         font.family: Theme.fontIcons
-                                        font.pixelSize: 16
+                                        font.pixelSize: 18
                                         color: Theme.bg0 
                                     }
                                     MouseArea { 
@@ -818,7 +821,7 @@ PanelWindow {
                                 Text { 
                                     text: "󰒭"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 20
+                                    font.pixelSize: 22 // Icono más grande
                                     color: Theme.white
                                     MouseArea { 
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -828,15 +831,15 @@ PanelWindow {
                                 Text { 
                                     text: islandWindow.loopStatus === "Track" ? "󰑘" : "󰑖"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 17
+                                    font.pixelSize: 18
                                     color: islandWindow.loopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.4)
                                     MouseArea { 
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                         onClicked: { 
-                                            if (!islandWindow.isPlayerAvailable) return; 
+                                            if (!islandWindow.isPlayerAvailable) return;
                                             let current = islandWindow.activePlayer.loopStatus;
                                             if (current === 0) islandWindow.activePlayer.loopStatus = 2; 
-                                            else if (current === 2) islandWindow.activePlayer.loopStatus = 1; 
+                                            else if (current === 2) islandWindow.activePlayer.loopStatus = 1;
                                             else islandWindow.activePlayer.loopStatus = 0;
                                         } 
                                     } 
@@ -845,9 +848,10 @@ PanelWindow {
                         }
                     }
 
+                    // 3. BARRA DE PROGRESO
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.topMargin: 2
+                        Layout.topMargin: 0
                         visible: islandWindow.isPlayerAvailable
                         spacing: 8
                         
@@ -874,7 +878,6 @@ PanelWindow {
                                 if (islandWindow.activePlayer) islandWindow.activePlayer.position = islandWindow.trackPosition; 
                             }
                             onCanceled: islandWindow.isUserSeeking = false;
-                            
                             function seekToMouse() { 
                                 if (!islandWindow.isPlayerAvailable || islandWindow.trackLength <= 0) return;
                                 var percent = Math.max(0, Math.min(1, mouseX / width)); 
