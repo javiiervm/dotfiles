@@ -1193,7 +1193,7 @@ PanelWindow {
                             }
 
                             Rectangle {
-                                id: chartBg // Añadimos un ID para referenciar la lista de días
+                                id: chartBg
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 color: Qt.alpha(Theme.white, 0.02)
@@ -1201,10 +1201,18 @@ PanelWindow {
                                 border.color: Qt.alpha(Theme.white, 0.04)
                                 border.width: 1
 
-                                // Declaramos los días aquí para que el Repeater pueda leerlos
-                                property var dayLabels: ["M", "T", "W", "T", "F", "S", "S"]
+                                // Generamos dinámicamente los últimos 7 días (número del mes)
+                                property var dayLabels: {
+                                    var arr = [];
+                                    var today = new Date();
+                                    // Bucle inverso: de hace 6 días a hoy (0)
+                                    for (var i = 6; i >= 0; i--) {
+                                        var d = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+                                        arr.push(d.getDate().toString());
+                                    }
+                                    return arr;
+                                }
 
-                                // Usamos un solo RowLayout para todo
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10
@@ -1213,7 +1221,6 @@ PanelWindow {
                                     Repeater {
                                         model: weekChartData 
                                         
-                                        // Cada elemento es una columna con la barra arriba y la letra abajo
                                         ColumnLayout {
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
@@ -1228,7 +1235,7 @@ PanelWindow {
                                                     anchors.top: parent.top
                                                     anchors.bottom: parent.bottom
                                                     anchors.horizontalCenter: parent.horizontalCenter
-                                                    width: 12 // Anchura fija de la barra
+                                                    width: 12
                                                     radius: 4
                                                     color: Qt.alpha(Theme.white, 0.04)
                                                 }
@@ -1236,23 +1243,24 @@ PanelWindow {
                                                 Rectangle {
                                                     anchors.bottom: parent.bottom
                                                     anchors.horizontalCenter: parent.horizontalCenter
-                                                    width: 12 // Anchura fija de la barra
+                                                    width: 12 
                                                     radius: 4
                                                     height: parent.height * modelData
-                                                    color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.3)
+                                                    // El día actual ahora siempre es el último (índice 6)
+                                                    color: index === 6 ? Theme.white : Qt.alpha(Theme.white, 0.3)
                                                     
                                                     Behavior on height { NumberAnimation { duration: 700; easing.type: Easing.OutBounce } }
                                                 }
                                             }
 
-                                            // 2. LETRA DEL DÍA
+                                            // 2. NÚMERO DEL DÍA
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: chartBg.dayLabels[index] // Cogemos la letra basada en el índice actual
-                                                color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.4)
+                                                text: chartBg.dayLabels[index] // Muestra el número calculado
+                                                color: index === 6 ? Theme.white : Qt.alpha(Theme.white, 0.4)
                                                 font.family: Theme.fontMain
                                                 font.pixelSize: 9
-                                                font.bold: index === todayDayIndex
+                                                font.bold: index === 6 // Negrita solo para el último (hoy)
                                                 horizontalAlignment: Text.AlignHCenter
                                             }
                                         }
