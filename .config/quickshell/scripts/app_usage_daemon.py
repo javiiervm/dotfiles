@@ -68,15 +68,20 @@ def save_data():
     all_secs = list(history_data.values())
     avg_sec = (sum(all_secs) / len(all_secs)) if all_secs else today_total_sec
     
-    # Datos para la gráfica semanal (Lunes = 0, Domingo = 6)
-    start_of_week = current_day - timedelta(days=current_day.weekday())
+    # --- GRÁFICA SEMANAL (Ventana móvil de 7 días) ---
     week_secs = []
-    for i in range(7):
-        d = start_of_week + timedelta(days=i)
+    week_times = []
+    
+    # Bucle inverso: desde hace 6 días hasta hoy (hoy es el último, índice 6)
+    for i in range(6, -1, -1):
+        d = current_day - timedelta(days=i)
         if d == current_day:
-            week_secs.append(today_total_sec)
+            sec = today_total_sec
         else:
-            week_secs.append(history_data.get(d.isoformat(), 0))
+            sec = history_data.get(d.isoformat(), 0)
+            
+        week_secs.append(sec)
+        week_times.append(format_time(sec))
             
     max_week_sec = max(week_secs) if max(week_secs) > 0 else 1
     chart_data = [round(s / max_week_sec, 3) for s in week_secs]
@@ -97,7 +102,8 @@ def save_data():
         "avg_daily": format_time(avg_sec),
         "vs_yesterday": vs_yesterday,
         "chart": chart_data,
-        "current_day_index": current_day.weekday(),
+        "chart_times": week_times,     # <-- NUEVO: Los tiempos exactos para el Tooltip
+        "current_day_index": 6,        # <-- Fijo a 6 porque el día actual siempre es el último
         "apps": apps_list
     }
     with open(OUT_FILE, "w") as f:
