@@ -13,6 +13,57 @@ PanelWindow {
     property bool isReallyVisible: false
     property bool dndState: false
     property ListModel modelData
+
+    // --- LÓGICA DE NOTION (Extraída de la Isla Dinámica) ---
+    property var notionEventsData: []
+    property var selectedDateObj: new Date()
+    property string selectedDateString: Qt.formatDateTime(selectedDateObj, "dd MMMM yyyy")
+    property var selectedEvents: []
+
+    // Función para cruzar fechas del calendario con el JSON
+    function getEventsForDate(date) {
+        if (!notionEventsData || notionEventsData.length === 0) return [];
+        // Formateamos la fecha al estilo de tu Notion (ej: "16 Jul" o "17 Jul")
+        var formatStr1 = Qt.formatDate(date, "d MMM");  
+        var formatStr2 = Qt.formatDate(date, "dd MMM"); 
+        
+        for (var i = 0; i < notionEventsData.length; i++) {
+            var dLabel = notionEventsData[i].date_label || "";
+            var dayLabel = notionEventsData[i].day_label || "";
+            
+            // Si el texto del JSON contiene nuestra fecha, devolvemos sus eventos
+            if (dLabel.indexOf(formatStr1) !== -1 || dLabel.indexOf(formatStr2) !== -1 ||
+                dayLabel.indexOf(formatStr1) !== -1 || dayLabel.indexOf(formatStr2) !== -1) {
+                return notionEventsData[i].events;
+            }
+        }
+        return [];
+    }
+
+    // Motor que lee el JSON en segundo plano (solo cuando se abre el panel)
+    Process {
+        id: notionSyncProc
+        running: ncWindow.visible_state
+        command: [
+            "bash", "-c", 
+            "source ~/.config/quickshell/secrets.env 2>/dev/null; " +
+            "python3 ~/.config/quickshell/scripts/notion_sync.py; " +
+            "cat ~/.cache/qs_notion.json 2>/dev/null || echo '{\"header\": \"Not Configured\", \"events\": []}'"
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                try {
+                    var parsed = JSON.parse(data.trim());
+                    ncWindow.notionEventsData = parsed.days || [];
+                    
+                    // Refrescar los eventos del día seleccionado (hoy) en cuanto llegan los datos
+                    if (ncWindow.selectedDateString !== "") {
+                        ncWindow.selectedEvents = ncWindow.getEventsForDate(ncWindow.selectedDateObj);
+                    }
+                } catch(e) {}
+            }
+        }
+    }
     
     // Estados para los botones del panel superior
     property bool wifiState: false
@@ -74,6 +125,11 @@ PanelWindow {
         if (visible_state) {
             closeTimer.stop()
             isReallyVisible = true
+            
+            // Seleccionar automáticamente el día de hoy al abrir
+            selectedDateObj = new Date();
+            selectedDateString = Qt.formatDateTime(selectedDateObj, "dd MMMM yyyy");
+            selectedEvents = getEventsForDate(selectedDateObj);
         } else {
             displayMonth = new Date().getMonth()
             displayYear = new Date().getFullYear()
@@ -331,32 +387,193 @@ PanelWindow {
                 }
             }
 
-            // CALENDARIO (Blanco)
+            // CALENDARIO Y AGENDA
             Rectangle {
-                width: parent.width; height: 400; radius: 10
-                color: Qt.alpha(Theme.bg0, 0.9); border.color: Qt.alpha(Theme.white, 0.1); border.width: 1
+                width: parent.width
+                // Altura dinámica: se expande si hay ALGÚN día seleccionado
+                height: ncWindow.selectedDateString !== "" ? 520 : 400 
+                Behavior on height { NumberAnimation { duration: 300; easing.type: Easing.OutQuart } }
+                radius: 10
+                color: Qt.alpha(Theme.bg0, 0.9)
+                border.color: Qt.alpha(Theme.white, 0.1)
+                border.width: 1
+                clip: true
                 
                 ColumnLayout {
-                    anchors.fill: parent; anchors.margins: 25; spacing: 15
+                    anchors.fill: parent
+                    anchors.margins: 25
+                    spacing: 15
+                    
+                    // Controles del Mes (Limpiamos la selección al cambiar de mes manualmente)
                     RowLayout {
-                        Layout.fillWidth: true; spacing: 15
-                        Text { text: "󰅖"; font.family: Theme.fontIcons; font.pixelSize: 22; color: Theme.grey1; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (displayMonth === 0) { displayMonth = 11; displayYear--; } else { displayMonth--; } } } }
-                        Text { text: Qt.formatDateTime(new Date(displayYear, displayMonth, 1), "MMMM yyyy"); color: Theme.white; font.bold: true; font.pixelSize: 18; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { displayMonth = new Date().getMonth(); displayYear = new Date().getFullYear(); } } }
-                        Text { text: "󰅂"; font.family: Theme.fontIcons; font.pixelSize: 22; color: Theme.grey1; MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (displayMonth === 11) { displayMonth = 0; displayYear++; } else { displayMonth++; } } } }
-                    }
-                    DayOfWeekRow {
-                        Layout.fillWidth: true; locale: Qt.locale("en_GB") 
-                        delegate: Text { text: model.shortName; color: Theme.white; font.bold: true; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter }
-                    }
-                    MonthGrid {
-                        id: grid; Layout.fillWidth: true; Layout.fillHeight: true; locale: Qt.locale("en_GB"); month: displayMonth; year: displayYear
-                        delegate: Text {
-                            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; opacity: model.month === grid.month ? 1 : 0.2
-                            text: model.day; font.pixelSize: 14; font.bold: model.today; color: model.today ? Theme.white : Theme.grey1
-                            Rectangle { anchors.centerIn: parent; width: 30; height: 30; radius: 15; color: Theme.white; opacity: 0.1; visible: model.today; z: -1 }
+                        Layout.fillWidth: true
+                        spacing: 15
+                        Text { 
+                            text: "󰅁"; font.family: Theme.fontIcons; font.pixelSize: 22; color: Theme.grey1; // CAMBIADO: Ahora es flecha izquierda
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (displayMonth === 0) { displayMonth = 11; displayYear--; } else { displayMonth--; }; ncWindow.selectedDateString = ""; ncWindow.selectedEvents = []; } } 
+                        }
+                        Text { 
+                            text: Qt.formatDateTime(new Date(displayYear, displayMonth, 1), "MMMM yyyy");
+                            color: Theme.white; font.bold: true; font.pixelSize: 18; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; 
+                            MouseArea { 
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                onClicked: { 
+                                    displayMonth = new Date().getMonth(); 
+                                    displayYear = new Date().getFullYear(); 
+                                    // SOLUCIÓN 1: Al volver a hoy, forzamos la selección del día actual para que no se pliegue
+                                    ncWindow.selectedDateObj = new Date();
+                                    ncWindow.selectedDateString = Qt.formatDateTime(ncWindow.selectedDateObj, "dd MMMM yyyy");
+                                    ncWindow.selectedEvents = ncWindow.getEventsForDate(ncWindow.selectedDateObj);
+                                } 
+                            } 
+                        }
+                        Text { 
+                            text: "󰅂"; font.family: Theme.fontIcons; font.pixelSize: 22; color: Theme.grey1; 
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (displayMonth === 11) { displayMonth = 0; displayYear++; } else { displayMonth++; }; ncWindow.selectedDateString = ""; ncWindow.selectedEvents = []; } } 
                         }
                     }
-                    Item { Layout.preferredHeight: 5 }
+
+                    // Días de la semana
+                    DayOfWeekRow {
+                        Layout.fillWidth: true
+                        locale: Qt.locale("en_GB") 
+                        delegate: Text { text: model.shortName; color: Theme.white; font.bold: true; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter }
+                    }
+
+                    // El Grid del Mes
+                    MonthGrid {
+                        id: grid
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 220
+                        locale: Qt.locale("en_GB")
+                        month: displayMonth
+                        year: displayYear
+                        
+                        delegate: Item {
+                            implicitWidth: 30
+                            implicitHeight: 30
+                            opacity: model.month === grid.month ? 1 : 0.2
+                            
+                            property var dayEvents: ncWindow.getEventsForDate(model.date)
+                            property bool hasEvents: dayEvents.length > 0
+                            property bool isSelected: Qt.formatDateTime(model.date, "dd MMMM yyyy") === ncWindow.selectedDateString
+
+                            // Círculo de selección / hoy
+                            Rectangle { 
+                                anchors.centerIn: parent
+                                width: 30; height: 30; radius: 15
+                                color: isSelected ? Theme.blue : Theme.white
+                                opacity: isSelected ? 0.3 : (dayMouseArea.containsMouse ? 0.2 : (model.today ? 0.1 : 0))
+                                Behavior on opacity { NumberAnimation { duration: 150 } }
+                                z: -1 
+                            }
+                            
+                            // Número del día
+                            Text {
+                                anchors.centerIn: parent
+                                text: model.day
+                                font.pixelSize: 14
+                                font.bold: model.today || hasEvents || isSelected
+                                color: isSelected ? Theme.white : (model.today ? Theme.white : (hasEvents ? Theme.blue : Theme.grey1))
+                            }
+
+                            // Puntito indicador de eventos
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 2
+                                width: 4; height: 4; radius: 2
+                                color: isSelected ? Theme.white : Theme.blue
+                                visible: hasEvents
+                            }
+
+                            MouseArea {
+                                id: dayMouseArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (isSelected) {
+                                        ncWindow.selectedDateString = "";
+                                        ncWindow.selectedEvents = [];
+                                    } else {
+                                        ncWindow.selectedDateObj = model.date;
+                                        ncWindow.selectedDateString = Qt.formatDateTime(model.date, "dd MMMM yyyy");
+                                        ncWindow.selectedEvents = dayEvents;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Separador animado
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Qt.alpha(Theme.white, 0.1)
+                        visible: ncWindow.selectedDateString !== ""
+                    }
+
+                    // Texto para días seleccionados SIN eventos
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        text: "No events today"
+                        color: Qt.alpha(Theme.white, 0.5)
+                        font.family: Theme.fontMain
+                        font.pixelSize: 13
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        visible: ncWindow.selectedDateString !== "" && ncWindow.selectedEvents.length === 0
+                    }
+
+                    // Lista de Eventos del día seleccionado
+                    ListView {
+                        id: eventList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 8
+                        model: ncWindow.selectedEvents
+                        visible: ncWindow.selectedEvents.length > 0
+                        boundsBehavior: Flickable.StopAtBounds
+
+                        delegate: RowLayout {
+                            width: ListView.view.width
+                            spacing: 12
+
+                            Text { 
+                                text: modelData.time
+                                color: Theme.blue
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    text: modelData.title
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+                                Text {
+                                    text: modelData.location || ""
+                                    color: Qt.alpha(Theme.white, 0.5)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 10
+                                    visible: modelData.location !== undefined && modelData.location !== ""
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
