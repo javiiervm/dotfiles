@@ -61,7 +61,8 @@ elif [ "$MODE" = "--wallpaper" ]; then
     [ ! -d "$WALL_DIR" ] && exit 1
     ls -1 "$WALL_DIR" | while read -r wall; do
         # EL CAMBIO ESTÁ AQUÍ ABAJO: Hemos añadido && echo \"$WALL_DIR/$wall\" > /tmp/current_wallpaper
-        echo "${wall%.*}|Apply wallpaper|$WALL_DIR/$wall|echo '$WALL_DIR/$wall' > /tmp/current_wallpaper; awww img \"$WALL_DIR/$wall\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$WALL_DIR/$wall\" -n -q && cp \"$WALL_DIR/$wall\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$WALL_DIR/$wall\"|cmd"
+        #echo "${wall%.*}|Apply wallpaper|$WALL_DIR/$wall|echo '$WALL_DIR/$wall' > /tmp/current_wallpaper; awww img \"$WALL_DIR/$wall\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$WALL_DIR/$wall\" -n -q && cp \"$WALL_DIR/$wall\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$WALL_DIR/$wall\"|cmd"
+        echo "${wall%.*}|Apply wallpaper|$WALL_DIR/$wall|echo '$WALL_DIR/$wall' > /tmp/current_wallpaper; awww img \"$WALL_DIR/$wall\" --resize crop --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$WALL_DIR/$wall\" -n -q && cp \"$WALL_DIR/$wall\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$WALL_DIR/$wall\"|cmd"
     done
 
 elif [ "$MODE" = "--system" ]; then

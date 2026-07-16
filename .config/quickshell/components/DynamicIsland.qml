@@ -88,6 +88,18 @@ PanelWindow {
     property int currentTab: 0
     property int totalTabs: 4
 
+    onIsExpandedChanged: {
+        if (isExpanded && currentTab === 1) {
+            watchdogTimer.restart()
+        }
+    }
+
+    onCurrentTabChanged: {
+        if (isExpanded && currentTab === 1) {
+            watchdogTimer.restart()
+        }
+    }
+
     // --- ACTUALIZAR EN LAS PROPIEDADES DE LA ISLA ---
     property string todayTotalTime: "0h 0m"
     property string avgDailyTime: "0h 0m"
@@ -324,8 +336,8 @@ PanelWindow {
 
     Timer {
         id: watchdogTimer
-        // 2s abierto, 10s cerrado
-        interval: (islandWindow.isExpanded && currentTab === 1) ? 2000 : 10000
+        // 1s abierto, 10s cerrado
+        interval: (islandWindow.isExpanded && currentTab === 1) ? 1000 : 10000
         running: true
         repeat: true
         triggeredOnStart: true
@@ -348,7 +360,7 @@ PanelWindow {
             "read prev_rx < \"$F_RX\" 2>/dev/null || prev_rx=0; curr_rx=0; " +
             "for f in /sys/class/net/w*/statistics/rx_bytes; do [ -f \"$f\" ] && { read v < \"$f\"; curr_rx=$((curr_rx+v)); }; done; " +
             "echo \"$curr_rx\" > \"$F_RX\"; " +
-            "inter=$([ \"$tabOpen\" = \"1\" ] && echo 2 || echo 10); " +
+            "inter=$([ \"$tabOpen\" = \"1\" ] && echo 1 || echo 10); " +
             "if [ \"$curr_rx\" -lt \"$prev_rx\" ]; then dl=0; else dl=$(( (curr_rx - prev_rx) / inter / 1048576 )); fi; " +
 
             // 2. CPU Temp (Driver k10temp para Ryzen AI)
