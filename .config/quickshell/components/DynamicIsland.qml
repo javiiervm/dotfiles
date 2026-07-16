@@ -1233,26 +1233,6 @@ PanelWindow {
                                                 Layout.fillWidth: true
                                                 Layout.fillHeight: true
 
-                                                // --- Lógica del Tooltip ---
-                                                property bool showTip: false
-
-                                                Timer {
-                                                    id: tipTimer
-                                                    interval: 500 // Retardo de 0.5 segundos
-                                                    onTriggered: parent.showTip = true
-                                                }
-
-                                                MouseArea {
-                                                    id: barMouseArea
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    onEntered: tipTimer.start()
-                                                    onExited: {
-                                                        tipTimer.stop()
-                                                        parent.showTip = false
-                                                    }
-                                                }
-
                                                 // Barra de fondo oscuro
                                                 Rectangle {
                                                     anchors.top: parent.top
@@ -1270,37 +1250,10 @@ PanelWindow {
                                                     width: 12 
                                                     radius: 4
                                                     height: parent.height * modelData
+                                                    // El día actual ahora siempre es el último (índice 6)
                                                     color: index === 6 ? Theme.white : Qt.alpha(Theme.white, 0.3)
                                                     
                                                     Behavior on height { NumberAnimation { duration: 700; easing.type: Easing.OutBounce } }
-                                                }
-
-                                                // --- Tooltip Visual ---
-                                                Rectangle {
-                                                    anchors.bottom: parent.top
-                                                    anchors.bottomMargin: 4
-                                                    anchors.horizontalCenter: parent.horizontalCenter
-                                                    width: tipText.implicitWidth + 12
-                                                    height: 18
-                                                    radius: 4
-                                                    color: "#1e222a" // Fondo oscuro estilo Quickshell
-                                                    border.color: Qt.alpha(Theme.white, 0.1)
-                                                    border.width: 1
-                                                    
-                                                    opacity: parent.showTip ? 1 : 0
-                                                    visible: opacity > 0
-                                                    Behavior on opacity { NumberAnimation { duration: 150 } }
-
-                                                    Text {
-                                                        id: tipText
-                                                        anchors.centerIn: parent
-                                                        // Si el backend envía los tiempos los usa, si no, usa un % por defecto
-                                                        text: islandWindow.weekChartTimes[index] || (Math.round(modelData * 100) + "%")
-                                                        color: Theme.white
-                                                        font.family: Theme.fontMain
-                                                        font.pixelSize: 9
-                                                        font.bold: true
-                                                    }
                                                 }
                                             }
 
