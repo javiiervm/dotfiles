@@ -120,7 +120,6 @@ source $ZSH/oh-my-zsh.sh
 alias ls="lsd -lag"
 alias cex="python3 ~/.scripts/cex.py"
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.mis-dotfiles/ --work-tree=$HOME'
-alias nvm='nvim'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
