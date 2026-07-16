@@ -1193,6 +1193,7 @@ PanelWindow {
                             }
 
                             Rectangle {
+                                id: chartBg // Añadimos un ID para referenciar la lista de días
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 color: Qt.alpha(Theme.white, 0.02)
@@ -1200,60 +1201,54 @@ PanelWindow {
                                 border.color: Qt.alpha(Theme.white, 0.04)
                                 border.width: 1
 
-                                ColumnLayout {
+                                // Declaramos los días aquí para que el Repeater pueda leerlos
+                                property var dayLabels: ["M", "T", "W", "T", "F", "S", "S"]
+
+                                // Usamos un solo RowLayout para todo
+                                RowLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10
-                                    spacing: 4
+                                    spacing: 6
 
-                                    // Contenedor de las Barras
-                                    Item {
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
+                                    Repeater {
+                                        model: weekChartData 
                                         
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            spacing: 6
+                                        // Cada elemento es una columna con la barra arriba y la letra abajo
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            spacing: 4
 
-                                            Repeater {
-                                                model: weekChartData // Array de 7 valores (0.0 a 1.0)
-                                                Item {
-                                                    Layout.fillWidth: true
-                                                    Layout.fillHeight: true
+                                            // 1. ÁREA DE LA BARRA
+                                            Item {
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                                
+                                                Rectangle {
+                                                    anchors.top: parent.top
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                    width: 12 // Anchura fija de la barra
+                                                    radius: 4
+                                                    color: Qt.alpha(Theme.white, 0.04)
+                                                }
+                                                
+                                                Rectangle {
+                                                    anchors.bottom: parent.bottom
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                    width: 12 // Anchura fija de la barra
+                                                    radius: 4
+                                                    height: parent.height * modelData
+                                                    color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.3)
                                                     
-                                                    // Barra de fondo oscuro
-                                                    Rectangle {
-                                                        anchors.fill: parent
-                                                        radius: 4
-                                                        color: Qt.alpha(Theme.white, 0.04)
-                                                    }
-                                                    
-                                                    // Barra animada (crece desde abajo)
-                                                    Rectangle {
-                                                        anchors.bottom: parent.bottom
-                                                        anchors.left: parent.left
-                                                        anchors.right: parent.right
-                                                        radius: 4
-                                                        height: parent.height * modelData
-                                                        // Blanco si es el día actual, blanco transparente si no
-                                                        color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.3)
-                                                        
-                                                        Behavior on height { NumberAnimation { duration: 700; easing.type: Easing.OutBounce } }
-                                                    }
+                                                    Behavior on height { NumberAnimation { duration: 700; easing.type: Easing.OutBounce } }
                                                 }
                                             }
-                                        }
-                                    }
 
-                                    // Letras de los Días (L M X J V S D)
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 6
-                                        Repeater {
-                                            model: ["M", "T", "W", "T", "F", "S", "S"]
+                                            // 2. LETRA DEL DÍA
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: modelData
-                                                // Blanco si es el día actual
+                                                text: chartBg.dayLabels[index] // Cogemos la letra basada en el índice actual
                                                 color: index === todayDayIndex ? Theme.white : Qt.alpha(Theme.white, 0.4)
                                                 font.family: Theme.fontMain
                                                 font.pixelSize: 9
