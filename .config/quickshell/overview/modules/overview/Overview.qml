@@ -100,8 +100,8 @@ Scope {
                     id: backdropLayer
                     anchors.fill: parent
                     visible: root.backdropEnabled
-                    color: "#000000"
-                    opacity: root.backdropOpacity
+                    // Accedemos a la propiedad global de forma segura
+                    color: root.theme.bgGlass 
                     z: 0
                 }
 

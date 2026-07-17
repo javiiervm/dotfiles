@@ -10,6 +10,8 @@ import "components"
 ShellRoot {
     id: root
 
+    readonly property var theme: Theme
+
     property int batCap: 0
     property string batStat: ""
     property int vol: 0

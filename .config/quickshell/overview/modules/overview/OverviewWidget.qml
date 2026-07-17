@@ -371,19 +371,12 @@ Item {
         implicitHeight: contentLayout.implicitHeight + padding * 2
         radius: Appearance.rounding.screenRounding * root.scale + padding
         clip: true
-        color: ColorUtils.applyAlpha(
-            root.glassMode
-                ? ColorUtils.mix(Appearance.colors.colLayer0, Appearance.colors.colLayer1, 0.78 - root.glassTintStrength * 0.35)
-                : Appearance.colors.colLayer0,
-            root.effectivePanelOpacity
-        )
+        
+        // --- TUS NUEVOS COLORES ---
+        color: Qt.rgba(30/255, 30/255, 36/255, 0.6)
         border.width: 1
-        border.color: ColorUtils.applyAlpha(
-            root.glassMode
-                ? ColorUtils.mix(Appearance.colors.colLayer0Border, Appearance.m3colors.m3outline, 0.52)
-                : Appearance.colors.colLayer0Border,
-            root.glassMode ? root.glassBorderOpacity : root.effectivePanelOpacity
-        )
+        border.color: Qt.alpha("#FFFFFF", 0.15)
+        // --------------------------
 
         MouseArea {
             anchors.fill: parent
@@ -447,17 +440,14 @@ Item {
 
                             implicitWidth: root.workspaceImplicitWidth
                             implicitHeight: root.workspaceImplicitHeight
-                            color: showWallpaper ? "transparent" : ColorUtils.applyAlpha(
-                                root.glassMode
-                                    ? ColorUtils.mix(hoveredWhileDragging ? hoveredWorkspaceColor : defaultWorkspaceColor, Appearance.colors.colLayer0, 0.46)
-                                    : (hoveredWhileDragging ? hoveredWorkspaceColor : defaultWorkspaceColor),
-                                root.effectiveWorkspaceOpacity
-                            )
+                            
+                            // --- TUS NUEVOS COLORES ---
+                            color: showWallpaper ? "transparent" : Qt.rgba(30/255, 30/255, 36/255, 0.4)
                             radius: Appearance.rounding.screenRounding * root.scale
-                            border.width: 2
-                            border.color: hoveredWhileDragging
-                                ? ColorUtils.applyAlpha(hoveredBorderColor, root.glassMode ? root.glassBorderOpacity : 1)
-                                : "transparent"
+                            border.width: 1
+                            // Hacemos que el borde brille un poco más si arrastras una ventana encima
+                            border.color: hoveredWhileDragging ? Qt.alpha("#FFFFFF", 0.4) : Qt.alpha("#FFFFFF", 0.15)
+                            // --------------------------
 
                             Image {
                                 id: workspaceWallpaper
@@ -588,14 +578,12 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: Appearance.rounding.normal * root.scale
-                    color: ColorUtils.applyAlpha(
-                        root.glassMode
-                            ? ColorUtils.mix(Appearance.colors.colLayer0, Appearance.colors.colLayer1, 0.70)
-                            : Appearance.colors.colLayer1,
-                        root.glassMode ? Math.min(0.74, root.effectivePanelOpacity) : root.effectiveWorkspaceOpacity
-                    )
+                    
+                    // --- TUS NUEVOS COLORES ---
+                    color: Qt.rgba(30/255, 30/255, 36/255, 0.6)
                     border.width: 1
-                    border.color: ColorUtils.applyAlpha(Appearance.colors.colLayer2Border, root.glassMode ? root.glassBorderOpacity : 0.65)
+                    border.color: Qt.alpha("#FFFFFF", 0.15)
+                    // --------------------------
 
                     Rectangle {
                         anchors.left: parent.left
@@ -651,14 +639,11 @@ Item {
                                 implicitHeight: root.specialWorkspaceTileHeight
                                 radius: Appearance.rounding.screenRounding * root.scale
                                 clip: true
-                                color: showWallpaper ? "transparent" : ColorUtils.applyAlpha(
-                                    root.glassMode
-                                        ? ColorUtils.mix(baseColor, Appearance.colors.colLayer0, 0.44)
-                                        : baseColor,
-                                    root.effectiveWorkspaceOpacity
-                                )
+                                // --- TUS NUEVOS COLORES ---
+                                color: showWallpaper ? "transparent" : Qt.rgba(30/255, 30/255, 36/255, 0.4)
                                 border.width: 1
-                                border.color: ColorUtils.applyAlpha(Appearance.colors.colLayer2Border, root.glassMode ? root.glassBorderOpacity : 0.75)
+                                border.color: Qt.alpha("#FFFFFF", 0.15)
+                                // --------------------------
 
                                 Image {
                                     visible: specialWorkspaceTile.showWallpaper
