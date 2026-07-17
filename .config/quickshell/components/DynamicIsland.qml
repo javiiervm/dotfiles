@@ -465,11 +465,11 @@ PanelWindow {
         width: targetWidth
         height: targetHeight
         
-        color: Theme.bg0
+        color: Theme.bgGlass
         radius: isExpanded ? 28 : height / 2
         clip: true
 
-        border.color: baseAlertColor !== "transparent" ? baseAlertColor : Qt.alpha(Theme.white, 0.1)
+        border.color: baseAlertColor !== "transparent" ? baseAlertColor : Qt.alpha(Theme.white, 0.15)
         border.width: baseAlertColor !== "transparent" ? 2 : 1
         
         SequentialAnimation on border.color {

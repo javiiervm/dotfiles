@@ -355,7 +355,7 @@ ShellRoot {
                 delegate: Rectangle {
                     id: popupItem
                     width: 360; height: 80; radius: 15
-                    color: Qt.alpha(Theme.bg0, 0.95); border.color: Qt.alpha(Theme.white, 0.1); border.width: 1
+                    color: Theme.bgGlass; border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
                     transform: Translate { id: slideTrans; x: 400 }
                     Component.onCompleted: { slideIn.start(); hideTimer.start(); }
                     NumberAnimation { id: slideIn; target: slideTrans; property: "x"; to: 0; duration: 400; easing.type: Easing.OutBack }
@@ -400,8 +400,8 @@ ShellRoot {
                 height: 34 
                 width: leftRow.implicitWidth + 30 
                 radius: height / 2 
-                color: "#0a0a0a" 
-                border.color: Qt.alpha(Theme.white, 0.08) 
+                color: Theme.bgGlass 
+                border.color: Qt.alpha(Theme.white, 0.15) // Borde un poco más visible
                 border.width: 1
 
                 RowLayout {
@@ -425,8 +425,8 @@ ShellRoot {
                 height: 34 
                 width: rightRow.implicitWidth + 30 
                 radius: height / 2
-                color: "#0a0a0a" 
-                border.color: Qt.alpha(Theme.white, 0.08)
+                color: Theme.bgGlass 
+                border.color: Qt.alpha(Theme.white, 0.15)
                 border.width: 1
 
                 RowLayout {
@@ -557,8 +557,8 @@ ShellRoot {
                 id: mainCard
                 anchors.fill: parent
                 radius: 12
-                color: Qt.alpha("#0a0f18", 0.95)
-                border.color: Qt.alpha(Theme.white, 0.1)
+                color: Theme.bgGlass
+                border.color: Qt.alpha(Theme.white, 0.15)
                 border.width: 1
                 focus: true
 

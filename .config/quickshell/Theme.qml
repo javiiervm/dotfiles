@@ -4,6 +4,7 @@ pragma Singleton
 QtObject {
     readonly property color bg0: "#050505" 
     readonly property color bg1: "#121212"
+    readonly property color bgGlass: Qt.alpha("#1e1e24", 0.60)
     readonly property color fg: "#abb2bf"
     readonly property color blue: "#61afef"
     readonly property color red: "#e08c75"

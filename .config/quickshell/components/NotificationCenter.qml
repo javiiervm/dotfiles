@@ -181,8 +181,8 @@ PanelWindow {
                 width: parent.width
                 height: 480
                 radius: 10
-                color: Qt.alpha(Theme.bg0, 0.9)
-                border.color: Qt.alpha(Theme.white, 0.1)
+                color: Theme.bgGlass 
+                border.color: Qt.alpha(Theme.white, 0.15) 
                 border.width: 1
 
                 MouseArea { anchors.fill: parent }
@@ -394,8 +394,8 @@ PanelWindow {
                 height: ncWindow.selectedDateString !== "" ? 520 : 400 
                 Behavior on height { NumberAnimation { duration: 300; easing.type: Easing.OutQuart } }
                 radius: 10
-                color: Qt.alpha(Theme.bg0, 0.9)
-                border.color: Qt.alpha(Theme.white, 0.1)
+                color: Theme.bgGlass 
+                border.color: Qt.alpha(Theme.white, 0.15) 
                 border.width: 1
                 clip: true
                 
