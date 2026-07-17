@@ -14,14 +14,16 @@ PanelWindow {
     property bool isReallyVisible: false
     property string calcResult: "" 
     
-    // Propiedades de red
-    property int currentMode: 0 // 0: Apps, 5: Wi-Fi, 9: Password
+    property int currentMode: 0 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
+    property bool isBtEnabled: false
     
-    // Navegación de teclado para la cabecera Wi-Fi
-    // 0: Lista, 1: Back, 2: Rescan, 3: Toggle
-    property int activeWifiButton: 0 
+    // ESTADOS DE CARGA (Para botones grises)
+    property bool isWifiLoading: false
+    property bool isBtLoading: false
+    
+    property int activeHeaderButton: 0 
     
     signal requestIslandMsg(string icon, string color, string text)
 
@@ -45,7 +47,7 @@ PanelWindow {
         onTriggered: {
             isReallyVisible = false;
             launcherWindow.currentMode = 0;
-            launcherWindow.activeWifiButton = 0;
+            launcherWindow.activeHeaderButton = 0;
             searchInput.text = "";
             searchInput.echoMode = TextInput.Normal;
             loadTabData("--apps"); 
@@ -54,8 +56,11 @@ PanelWindow {
 
     Timer {
         id: refreshTimer
-        interval: 3000
-        onTriggered: { if (launcherWindow.currentMode === 5) loadTabData("--wifi"); }
+        interval: 1500
+        onTriggered: { 
+            if (launcherWindow.currentMode === 5) loadTabData("--wifi"); 
+            else if (launcherWindow.currentMode === 6) loadTabData("--bt");
+        }
     }
 
     Process {
@@ -73,19 +78,6 @@ PanelWindow {
     Process { id: execProc }
 
     Process {
-        id: wifiMonitorProc
-        command: ["bash", "-c", "nmcli monitor | grep --line-buffered -iE 'connected|disconnected|unavailable|active'"]
-        running: launcherWindow.currentMode === 5
-        stdout: SplitParser {
-            onRead: (data) => {
-                if (launcherWindow.currentMode === 5) {
-                    loadTabData("--wifi");
-                }
-            }
-        }
-    }
-
-    Process {
         id: netConnectProc
         property string targetName: ""
         onExited: function(exitCode) {
@@ -97,6 +89,18 @@ PanelWindow {
         }
     }
 
+    Process {
+        id: btConnectProc
+        property string targetName: ""
+        onExited: function(exitCode) {
+            var success = (exitCode === 0);
+            var color = success ? "#30d158" : "#ff3b30";
+            var status = success ? "Connected to " : "Failed to connect to ";
+            launcherWindow.requestIslandMsg("", color, status + targetName);
+            if (launcherWindow.currentMode === 6) loadTabData("--bt");
+        }
+    }
+
     // ==========================================
     // INTERFAZ VISUAL (UI)
     // ==========================================
@@ -104,17 +108,15 @@ PanelWindow {
         id: mainCard
         
         property int targetWidth: {
-            if (launcherWindow.currentMode === 5) return 420; 
+            if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420; 
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
 
         width: targetWidth
         height: contentColumn.height + 40 
-        
         anchors.centerIn: parent
         transformOrigin: Item.Center 
-        
         radius: 20
         color: Theme.bgGlass
         border.color: Qt.alpha(Theme.white, 0.15)
@@ -161,7 +163,7 @@ PanelWindow {
                     Behavior on opacity { NumberAnimation { duration: 250 } }
                 }
 
-                // A) BUSCADOR Y CONTRASEÑA (Modo 0 y 9)
+                // A) BUSCADOR Y CONTRASEÑA
                 Rectangle {
                     anchors.bottom: parent.bottom
                     anchors.left: parent.left
@@ -229,8 +231,8 @@ PanelWindow {
                                 if (event.key === Qt.Key_Backspace && searchInput.text === "") {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
-                                    } else if (launcherWindow.currentMode === 5) {
-                                        launcherWindow.currentMode = 0; launcherWindow.activeWifiButton = 0; loadTabData("--apps");
+                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                        launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps");
                                     }
                                     event.accepted = true;
                                 }
@@ -238,11 +240,12 @@ PanelWindow {
                                 if (event.key === Qt.Key_Down && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
                                         appGrid.moveCurrentIndexDown(); 
-                                    } else if (launcherWindow.currentMode === 5) {
-                                        if (launcherWindow.activeWifiButton > 0) {
-                                            launcherWindow.activeWifiButton = 0; 
+                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                        if (launcherWindow.activeHeaderButton > 0) {
+                                            launcherWindow.activeHeaderButton = 0; 
                                         } else {
-                                            do { wifiList.incrementCurrentIndex(); } while (filteredModel.count > 0 && filteredModel.get(wifiList.currentIndex).type === "dummy" && wifiList.currentIndex < filteredModel.count - 1);
+                                            var targetListDown = launcherWindow.currentMode === 5 ? wifiList : btList;
+                                            do { targetListDown.incrementCurrentIndex(); } while (filteredModel.count > 0 && filteredModel.get(targetListDown.currentIndex).type === "dummy" && targetListDown.currentIndex < filteredModel.count - 1);
                                         }
                                     }
                                     event.accepted = true; 
@@ -251,12 +254,13 @@ PanelWindow {
                                 if (event.key === Qt.Key_Up && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
                                         appGrid.moveCurrentIndexUp(); 
-                                    } else if (launcherWindow.currentMode === 5) {
-                                        if (launcherWindow.activeWifiButton === 0) {
-                                            if (wifiList.currentIndex <= 1) { 
-                                                launcherWindow.activeWifiButton = 1; 
+                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                        if (launcherWindow.activeHeaderButton === 0) {
+                                            var targetListUp = launcherWindow.currentMode === 5 ? wifiList : btList;
+                                            if (targetListUp.currentIndex <= 1) { 
+                                                launcherWindow.activeHeaderButton = 1; 
                                             } else {
-                                                do { wifiList.decrementCurrentIndex(); } while (filteredModel.get(wifiList.currentIndex).type === "dummy" && wifiList.currentIndex > 0);
+                                                do { targetListUp.decrementCurrentIndex(); } while (filteredModel.get(targetListUp.currentIndex).type === "dummy" && targetListUp.currentIndex > 0);
                                             }
                                         }
                                     }
@@ -265,25 +269,44 @@ PanelWindow {
                                 
                                 if (event.key === Qt.Key_Right) {
                                     if (launcherWindow.currentMode === 0) { appGrid.moveCurrentIndexRight(); }
-                                    else if (launcherWindow.currentMode === 5 && launcherWindow.activeWifiButton > 0) {
-                                        launcherWindow.activeWifiButton = Math.min(3, launcherWindow.activeWifiButton + 1);
+                                    else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                        launcherWindow.activeHeaderButton = Math.min(3, launcherWindow.activeHeaderButton + 1);
                                     }
                                     event.accepted = true;
                                 }
                                 
                                 if (event.key === Qt.Key_Left) {
                                     if (launcherWindow.currentMode === 0) { appGrid.moveCurrentIndexLeft(); }
-                                    else if (launcherWindow.currentMode === 5 && launcherWindow.activeWifiButton > 0) {
-                                        launcherWindow.activeWifiButton = Math.max(1, launcherWindow.activeWifiButton - 1);
+                                    else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                        launcherWindow.activeHeaderButton = Math.max(1, launcherWindow.activeHeaderButton - 1);
                                     }
                                     event.accepted = true;
                                 }
 
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                    if (launcherWindow.currentMode === 5 && launcherWindow.activeWifiButton > 0) {
-                                        if (launcherWindow.activeWifiButton === 1) { launcherWindow.currentMode = 0; launcherWindow.activeWifiButton = 0; loadTabData("--apps"); }
-                                        else if (launcherWindow.activeWifiButton === 2) { execProc.command = ["nmcli", "device", "wifi", "rescan"]; execProc.running = true; refreshTimer.start(); }
-                                        else if (launcherWindow.activeWifiButton === 3) { var cmdToggle = launcherWindow.isWifiEnabled ? "off" : "on"; execProc.command = ["nmcli", "radio", "wifi", cmdToggle]; execProc.running = true; }
+                                    if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                        if (launcherWindow.activeHeaderButton === 1) { 
+                                            launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); 
+                                        }
+                                        else if (launcherWindow.activeHeaderButton === 2) { 
+                                            execProc.command = launcherWindow.currentMode === 5 ? ["nmcli", "device", "wifi", "rescan"] : ["bluetoothctl", "scan", "on"]; 
+                                            execProc.running = true; refreshTimer.start(); 
+                                        }
+                                        else if (launcherWindow.activeHeaderButton === 3) { 
+                                            if (launcherWindow.currentMode === 5) {
+                                                launcherWindow.isWifiLoading = true;
+                                                var cmdWifi = launcherWindow.isWifiEnabled ? "off" : "on"; 
+                                                execProc.command = ["nmcli", "radio", "wifi", cmdWifi]; 
+                                                execProc.running = true;
+                                                refreshTimer.start();
+                                            } else {
+                                                launcherWindow.isBtLoading = true;
+                                                var cmdBt = launcherWindow.isBtEnabled ? "off" : "on"; 
+                                                execProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth; bluetoothctl power " + cmdBt]; 
+                                                execProc.running = true; 
+                                                refreshTimer.start();
+                                            }
+                                        }
                                         event.accepted = true;
                                         return;
                                     }
@@ -299,7 +322,7 @@ PanelWindow {
                                         execProc.command = ["/bin/bash", "-c", "wl-copy '" + launcherWindow.calcResult + "' && notify-send 'Calculator' 'Copied: " + launcherWindow.calcResult + "' -i accessories-calculator"];
                                         execProc.running = true; toggle();
                                     } else {
-                                        var activeIndex = launcherWindow.currentMode === 5 ? wifiList.currentIndex : appGrid.currentIndex;
+                                        var activeIndex = launcherWindow.currentMode === 5 ? wifiList.currentIndex : (launcherWindow.currentMode === 6 ? btList.currentIndex : appGrid.currentIndex);
                                         if (filteredModel.count > 0 && activeIndex >= 0) {
                                             var item = filteredModel.get(activeIndex);
                                             executeApp(item.exec, item.name);
@@ -312,50 +335,113 @@ PanelWindow {
                     }
                 }
 
-                // B) CONTROLES DE WI-FI (Modo 5)
+                // B) CONTROLES DE WI-FI
                 Item {
                     width: parent.width; height: parent.height
                     visible: launcherWindow.currentMode === 5
 
                     Rectangle {
-                        id: backBtn
+                        id: backBtnWifi
                         width: 40; height: 40; radius: 20
-                        color: launcherWindow.activeWifiButton === 1 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
-                        border.color: launcherWindow.activeWifiButton === 1 ? Theme.white : "transparent"
+                        color: launcherWindow.activeHeaderButton === 1 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
+                        border.color: launcherWindow.activeHeaderButton === 1 ? Theme.white : "transparent"
                         border.width: 1
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeWifiButton = 0; loadTabData("--apps"); } }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); } }
                     }
 
                     Text {
                         text: "Wi-Fi Networks"
                         color: Theme.white; font.pixelSize: 16; font.bold: true
-                        anchors.left: backBtn.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: backBtnWifi.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
 
                     Row {
-                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                        spacing: 10
-                        
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 10
                         Rectangle {
                             width: 40; height: 40; radius: 20
-                            color: launcherWindow.activeWifiButton === 2 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
-                            border.color: launcherWindow.activeWifiButton === 2 ? Theme.white : "transparent"
+                            color: launcherWindow.activeHeaderButton === 2 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
+                            border.color: launcherWindow.activeHeaderButton === 2 ? Theme.white : "transparent"
                             border.width: 1
                             Text { anchors.centerIn: parent; text: "󰑐"; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { execProc.command = ["nmcli", "device", "wifi", "rescan"]; execProc.running = true; refreshTimer.start(); } }
                         }
-
+                        
                         Rectangle {
                             width: 40; height: 40; radius: 20
-                            color: launcherWindow.isWifiEnabled ? Theme.white : (launcherWindow.activeWifiButton === 3 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08))
-                            border.color: launcherWindow.activeWifiButton === 3 ? (launcherWindow.isWifiEnabled ? Theme.blue : Theme.white) : "transparent"
+                            color: launcherWindow.isWifiLoading ? Qt.alpha(Theme.white, 0.4) : (launcherWindow.isWifiEnabled ? Theme.white : (launcherWindow.activeHeaderButton === 3 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)))
+                            border.color: launcherWindow.activeHeaderButton === 3 ? (launcherWindow.isWifiEnabled ? Theme.blue : Theme.white) : "transparent"
                             border.width: 2
-                            Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: launcherWindow.isWifiEnabled ? Theme.bg0 : Theme.white; font.pixelSize: 16 }
+                            Text { 
+                                anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; font.pixelSize: 16 
+                                color: launcherWindow.isWifiLoading ? Theme.white : (launcherWindow.isWifiEnabled ? Theme.bg0 : Theme.white); 
+                            }
                             MouseArea { 
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                onClicked: { var cmd = launcherWindow.isWifiEnabled ? "off" : "on"; execProc.command = ["nmcli", "radio", "wifi", cmd]; execProc.running = true; } 
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                onClicked: { 
+                                    launcherWindow.isWifiLoading = true;
+                                    var cmd = launcherWindow.isWifiEnabled ? "off" : "on"; 
+                                    execProc.command = ["nmcli", "radio", "wifi", cmd]; 
+                                    execProc.running = true; 
+                                    refreshTimer.start();
+                                } 
+                            }
+                        }
+                    }
+                }
+
+                // C) CONTROLES DE BLUETOOTH
+                Item {
+                    width: parent.width; height: parent.height
+                    visible: launcherWindow.currentMode === 6
+
+                    Rectangle {
+                        id: backBtnBt
+                        width: 40; height: 40; radius: 20
+                        color: launcherWindow.activeHeaderButton === 1 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
+                        border.color: launcherWindow.activeHeaderButton === 1 ? Theme.white : "transparent"
+                        border.width: 1
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); } }
+                    }
+
+                    Text {
+                        text: "Bluetooth Devices"
+                        color: Theme.white; font.pixelSize: 16; font.bold: true
+                        anchors.left: backBtnBt.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Row {
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 10
+                        Rectangle {
+                            width: 40; height: 40; radius: 20
+                            color: launcherWindow.activeHeaderButton === 2 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
+                            border.color: launcherWindow.activeHeaderButton === 2 ? Theme.white : "transparent"
+                            border.width: 1
+                            Text { anchors.centerIn: parent; text: "󰑐"; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { execProc.command = ["bluetoothctl", "scan", "on"]; execProc.running = true; refreshTimer.start(); } }
+                        }
+                        
+                        Rectangle {
+                            width: 40; height: 40; radius: 20
+                            color: launcherWindow.isBtLoading ? Qt.alpha(Theme.white, 0.4) : (launcherWindow.isBtEnabled ? Theme.white : (launcherWindow.activeHeaderButton === 3 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)))
+                            border.color: launcherWindow.activeHeaderButton === 3 ? (launcherWindow.isBtEnabled ? Theme.blue : Theme.white) : "transparent"
+                            border.width: 2
+                            Text { 
+                                anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; font.pixelSize: 16 
+                                color: launcherWindow.isBtLoading ? Theme.white : (launcherWindow.isBtEnabled ? Theme.bg0 : Theme.white); 
+                            }
+                            MouseArea { 
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
+                                onClicked: { 
+                                    launcherWindow.isBtLoading = true;
+                                    var cmd = launcherWindow.isBtEnabled ? "off" : "on"; 
+                                    execProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth; bluetoothctl power " + cmd]; 
+                                    execProc.running = true; 
+                                    refreshTimer.start();
+                                } 
                             }
                         }
                     }
@@ -363,7 +449,7 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 2. CUADRÍCULA DE APLICACIONES (Modo 0)
+            // 2. CUADRÍCULA DE APLICACIONES
             // ------------------------------------------
             GridView {
                 id: appGrid
@@ -387,19 +473,18 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 3. LISTA VERTICAL DE REDES WI-FI (Modo 5)
+            // 3. LISTA DE WI-FI
             // ------------------------------------------
             ListView {
                 id: wifiList
-                width: parent.width
-                model: filteredModel
+                width: parent.width; model: filteredModel
                 height: Math.min(count * 55, 440)
                 currentIndex: 0; clip: true; spacing: 0
                 visible: launcherWindow.currentMode === 5 && count > 0
 
                 delegate: Rectangle {
                     width: wifiList.width; height: type === "dummy" ? 40 : 55; radius: 12
-                    color: (type !== "dummy" && ListView.isCurrentItem && launcherWindow.activeWifiButton === 0) ? Qt.alpha(Theme.white, 0.1) : "transparent"
+                    color: (type !== "dummy" && ListView.isCurrentItem && launcherWindow.activeHeaderButton === 0) ? Qt.alpha(Theme.white, 0.1) : "transparent"
 
                     Item {
                         anchors.fill: parent; visible: type === "dummy"
@@ -408,40 +493,76 @@ PanelWindow {
 
                     Item {
                         anchors.fill: parent; anchors.margins: 10; visible: type !== "dummy"
-                        
                         Text {
                             id: wifiIcon
                             anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                            text: ""
-                            font.family: Theme.fontIcons; font.pixelSize: 18
+                            text: ""; font.family: Theme.fontIcons; font.pixelSize: 18
                             color: type === "wifi_current" ? "#30d158" : Theme.white
                         }
-
                         Text {
-                            id: checkIcon
+                            id: checkIconWifi
                             anchors.right: parent.right; anchors.rightMargin: 5; anchors.verticalCenter: parent.verticalCenter
                             text: "󰄬"; font.family: Theme.fontIcons; color: "#30d158"; font.pixelSize: 20
                             visible: type === "wifi_current"
                         }
-
                         Column {
                             anchors.left: wifiIcon.right; anchors.leftMargin: 15
-                            anchors.right: checkIcon.visible ? checkIcon.left : parent.right; anchors.rightMargin: 15
+                            anchors.right: checkIconWifi.visible ? checkIconWifi.left : parent.right; anchors.rightMargin: 15
                             anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                            
                             Text { width: parent.width; text: name; color: type === "wifi_current" ? "#30d158" : Theme.white; font.pixelSize: 15; font.bold: true; elide: Text.ElideRight }
                             Text { width: parent.width; text: comment; color: Theme.grey1; font.pixelSize: 11; elide: Text.ElideRight }
                         }
                     }
-                    MouseArea { 
-                        anchors.fill: parent; enabled: type !== "dummy"; 
-                        onClicked: { launcherWindow.activeWifiButton = 0; wifiList.currentIndex = index; executeApp(exec, name); } 
-                    }
+                    MouseArea { anchors.fill: parent; enabled: type !== "dummy"; onClicked: { launcherWindow.activeHeaderButton = 0; wifiList.currentIndex = index; executeApp(exec, name); } }
                 }
             }
 
             // ------------------------------------------
-            // 4. TARJETAS DE RESULTADO / VACÍO
+            // 4. LISTA DE BLUETOOTH
+            // ------------------------------------------
+            ListView {
+                id: btList
+                width: parent.width; model: filteredModel
+                height: Math.min(count * 55, 440)
+                currentIndex: 0; clip: true; spacing: 0
+                visible: launcherWindow.currentMode === 6 && count > 0
+
+                delegate: Rectangle {
+                    width: btList.width; height: type === "dummy" ? 40 : 55; radius: 12
+                    color: (type !== "dummy" && ListView.isCurrentItem && launcherWindow.activeHeaderButton === 0) ? Qt.alpha(Theme.white, 0.1) : "transparent"
+
+                    Item {
+                        anchors.fill: parent; visible: type === "dummy"
+                        Text { anchors.left: parent.left; anchors.leftMargin: 5; anchors.verticalCenter: parent.verticalCenter; text: name; color: Qt.alpha(Theme.white, 0.5); font.pixelSize: 11; font.bold: true }
+                    }
+
+                    Item {
+                        anchors.fill: parent; anchors.margins: 10; visible: type !== "dummy"
+                        Text {
+                            id: btIcon
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            text: ""; font.family: Theme.fontIcons; font.pixelSize: 18
+                            color: type === "bt_current" ? "#30d158" : Theme.white
+                        }
+                        Text {
+                            id: checkIconBt
+                            anchors.right: parent.right; anchors.rightMargin: 5; anchors.verticalCenter: parent.verticalCenter
+                            text: "󰄬"; font.family: Theme.fontIcons; color: "#30d158"; font.pixelSize: 20
+                            visible: type === "bt_current"
+                        }
+                        Text { 
+                            anchors.left: btIcon.right; anchors.leftMargin: 15
+                            anchors.right: checkIconBt.visible ? checkIconBt.left : parent.right; anchors.rightMargin: 15
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: name; color: type === "bt_current" ? "#30d158" : Theme.white; font.pixelSize: 15; font.bold: true; elide: Text.ElideRight 
+                        }
+                    }
+                    MouseArea { anchors.fill: parent; enabled: type !== "dummy"; onClicked: { launcherWindow.activeHeaderButton = 0; btList.currentIndex = index; executeApp(exec, name); } }
+                }
+            }
+
+            // ------------------------------------------
+            // 5. TARJETAS DE RESULTADO / VACÍO
             // ------------------------------------------
             Rectangle {
                 width: parent.width; height: 75; radius: 16; color: Qt.alpha(Theme.white, 0.05); border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
@@ -462,8 +583,12 @@ PanelWindow {
 
             Item {
                 width: parent.width; height: 60
-                visible: launcherWindow.currentMode === 5 && filteredModel.count === 0
-                Text { anchors.centerIn: parent; text: launcherWindow.isWifiEnabled ? "Scanning networks..." : "Wi-Fi is disabled"; color: Theme.grey1; font.pixelSize: 15 }
+                visible: (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && filteredModel.count === 0
+                Text { 
+                    anchors.centerIn: parent
+                    text: launcherWindow.currentMode === 5 ? (launcherWindow.isWifiEnabled ? "Scanning networks..." : "Wi-Fi is disabled") : (launcherWindow.isBtEnabled ? "Scanning devices..." : "Bluetooth is disabled")
+                    color: Theme.grey1; font.pixelSize: 15 
+                }
             }
         }
     }
@@ -484,26 +609,44 @@ PanelWindow {
         launcherWindow.calcResult = "";
 
         if (launcherWindow.currentMode === 5) {
-            var current = [], saved = [], newNets = [];
-            for (var i = 0; i < rawModel.count; i++) {
-                var itm = rawModel.get(i);
-                if (itm.type === "state") { launcherWindow.isWifiEnabled = (itm.name === "enabled"); continue; }
-                if (itm.type === "wifi_current") current.push(itm);
-                else if (itm.type === "wifi_saved") saved.push(itm);
-                else if (itm.type === "wifi_new") newNets.push(itm);
+            launcherWindow.isWifiLoading = false; 
+            var currentW = [], savedW = [], newNetsW = [];
+            for (var w = 0; w < rawModel.count; w++) {
+                var itmW = rawModel.get(w);
+                if (itmW.type === "state") { launcherWindow.isWifiEnabled = (itmW.name === "enabled"); continue; }
+                if (itmW.type === "wifi_current") currentW.push(itmW);
+                else if (itmW.type === "wifi_saved") savedW.push(itmW);
+                else if (itmW.type === "wifi_new") newNetsW.push(itmW);
             }
             if (launcherWindow.isWifiEnabled) {
-                if (current.length > 0) { filteredModel.append({name: "Connected", comment: "", icon: "", exec: "", type: "dummy"}); for(var c of current) filteredModel.append(c); }
-                if (saved.length > 0) { filteredModel.append({name: "Saved Networks", comment: "", icon: "", exec: "", type: "dummy"}); for(var s of saved) filteredModel.append(s); }
-                if (newNets.length > 0) { filteredModel.append({name: "Available Networks", comment: "", icon: "", exec: "", type: "dummy"}); for(var n of newNets) filteredModel.append(n); }
+                if (currentW.length > 0) { filteredModel.append({name: "Connected", comment: "", icon: "", exec: "", type: "dummy"}); for(var cw of currentW) filteredModel.append(cw); }
+                if (savedW.length > 0) { filteredModel.append({name: "Saved Networks", comment: "", icon: "", exec: "", type: "dummy"}); for(var sw of savedW) filteredModel.append(sw); }
+                if (newNetsW.length > 0) { filteredModel.append({name: "Available Networks", comment: "", icon: "", exec: "", type: "dummy"}); for(var nw of newNetsW) filteredModel.append(nw); }
             }
-            
-            if (launcherWindow.activeWifiButton === 0) {
-                for (var m = 0; m < filteredModel.count; m++) {
-                    if (filteredModel.get(m).type !== "dummy") {
-                        wifiList.currentIndex = m;
-                        break;
-                    }
+            if (launcherWindow.activeHeaderButton === 0) {
+                for (var mw = 0; mw < filteredModel.count; mw++) {
+                    if (filteredModel.get(mw).type !== "dummy") { wifiList.currentIndex = mw; break; }
+                }
+            }
+            return;
+        }
+
+        if (launcherWindow.currentMode === 6) {
+            launcherWindow.isBtLoading = false; 
+            var currentB = [], savedB = [];
+            for (var b = 0; b < rawModel.count; b++) {
+                var itmB = rawModel.get(b);
+                if (itmB.type === "state") { launcherWindow.isBtEnabled = (itmB.name === "enabled"); continue; }
+                if (itmB.type === "bt_current") currentB.push(itmB);
+                else if (itmB.type === "bt_saved") savedB.push(itmB);
+            }
+            if (launcherWindow.isBtEnabled) {
+                if (currentB.length > 0) { filteredModel.append({name: "Connected Devices", comment: "", icon: "", exec: "", type: "dummy"}); for(var cb of currentB) filteredModel.append(cb); }
+                if (savedB.length > 0) { filteredModel.append({name: "Paired Devices", comment: "", icon: "", exec: "", type: "dummy"}); for(var sb of savedB) filteredModel.append(sb); }
+            }
+            if (launcherWindow.activeHeaderButton === 0) {
+                for (var mb = 0; mb < filteredModel.count; mb++) {
+                    if (filteredModel.get(mb).type !== "dummy") { btList.currentIndex = mb; break; }
                 }
             }
             return;
@@ -521,7 +664,7 @@ PanelWindow {
         for (var j = 0; j < rawModel.count; j++) {
             var item = rawModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_wifi") continue; 
+                if (item.exec !== "qs_wifi" && item.exec !== "qs_bt") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -541,7 +684,8 @@ PanelWindow {
     function executeApp(cmd, name) {
         if (!cmd || cmd === "") return;
 
-        if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeWifiButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
+        if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
+        if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
         
         if (cmd.startsWith("qs_wifi_pass:")) { 
             targetWifiSsid = cmd.substring(13); 
@@ -560,7 +704,22 @@ PanelWindow {
                 netConnectProc.targetName = name; 
                 netConnectProc.command = ["/bin/bash", "-c", keepCmd]; 
                 netConnectProc.running = true;
+            } else if (keepCmd.indexOf("bluetoothctl") !== -1) {
+                if (keepCmd.indexOf("connect") !== -1 && keepCmd.indexOf("disconnect") === -1) {
+                    launcherWindow.requestIslandMsg("", "white", "Trying to connect to " + name + "...");
+                    btConnectProc.targetName = name;
+                    btConnectProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth; " + keepCmd];
+                    btConnectProc.running = true;
+                } else if (keepCmd.indexOf("disconnect") !== -1) {
+                    launcherWindow.requestIslandMsg("", "white", "Disconnecting " + name + "...");
+                    execProc.command = ["/bin/bash", "-c", keepCmd];
+                    execProc.running = true;
+                } else {
+                    execProc.command = ["/bin/bash", "-c", "rfkill unblock bluetooth 2>/dev/null; " + keepCmd];
+                    execProc.running = true;
+                }
             }
+            refreshTimer.start(); 
             return;
         }
 
