@@ -14,6 +14,7 @@ PanelWindow {
     property bool isReallyVisible: false
     property string calcResult: "" 
     
+    // 0: Apps, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password
     property int currentMode: 0 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
@@ -108,7 +109,7 @@ PanelWindow {
         id: mainCard
         
         property int targetWidth: {
-            if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420; 
+            if (launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420; 
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -231,7 +232,7 @@ PanelWindow {
                                 if (event.key === Qt.Key_Backspace && searchInput.text === "") {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
-                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                    } else if (launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps");
                                     }
                                     event.accepted = true;
@@ -240,11 +241,11 @@ PanelWindow {
                                 if (event.key === Qt.Key_Down && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
                                         appGrid.moveCurrentIndexDown(); 
-                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                    } else if (launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton > 0) {
                                             launcherWindow.activeHeaderButton = 0; 
                                         } else {
-                                            var targetListDown = launcherWindow.currentMode === 5 ? wifiList : btList;
+                                            var targetListDown = launcherWindow.currentMode === 4 ? sysList : (launcherWindow.currentMode === 5 ? wifiList : btList);
                                             do { targetListDown.incrementCurrentIndex(); } while (filteredModel.count > 0 && filteredModel.get(targetListDown.currentIndex).type === "dummy" && targetListDown.currentIndex < filteredModel.count - 1);
                                         }
                                     }
@@ -254,10 +255,10 @@ PanelWindow {
                                 if (event.key === Qt.Key_Up && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
                                         appGrid.moveCurrentIndexUp(); 
-                                    } else if (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                    } else if (launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton === 0) {
-                                            var targetListUp = launcherWindow.currentMode === 5 ? wifiList : btList;
-                                            if (targetListUp.currentIndex <= 1) { 
+                                            var targetListUp = launcherWindow.currentMode === 4 ? sysList : (launcherWindow.currentMode === 5 ? wifiList : btList);
+                                            if (targetListUp.currentIndex === 0 || (targetListUp.currentIndex === 1 && filteredModel.get(0).type === "dummy")) { 
                                                 launcherWindow.activeHeaderButton = 1; 
                                             } else {
                                                 do { targetListUp.decrementCurrentIndex(); } while (filteredModel.get(targetListUp.currentIndex).type === "dummy" && targetListUp.currentIndex > 0);
@@ -284,7 +285,7 @@ PanelWindow {
                                 }
 
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                    if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                    if ((launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         if (launcherWindow.activeHeaderButton === 1) { 
                                             launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); 
                                         }
@@ -322,7 +323,7 @@ PanelWindow {
                                         execProc.command = ["/bin/bash", "-c", "wl-copy '" + launcherWindow.calcResult + "' && notify-send 'Calculator' 'Copied: " + launcherWindow.calcResult + "' -i accessories-calculator"];
                                         execProc.running = true; toggle();
                                     } else {
-                                        var activeIndex = launcherWindow.currentMode === 5 ? wifiList.currentIndex : (launcherWindow.currentMode === 6 ? btList.currentIndex : appGrid.currentIndex);
+                                        var activeIndex = launcherWindow.currentMode === 4 ? sysList.currentIndex : (launcherWindow.currentMode === 5 ? wifiList.currentIndex : (launcherWindow.currentMode === 6 ? btList.currentIndex : appGrid.currentIndex));
                                         if (filteredModel.count > 0 && activeIndex >= 0) {
                                             var item = filteredModel.get(activeIndex);
                                             executeApp(item.exec, item.name);
@@ -446,6 +447,29 @@ PanelWindow {
                         }
                     }
                 }
+
+                // D) CONTROLES DE SISTEMA (Modo 4)
+                Item {
+                    width: parent.width; height: parent.height
+                    visible: launcherWindow.currentMode === 4
+
+                    Rectangle {
+                        id: backBtnSys
+                        width: 40; height: 40; radius: 20
+                        color: launcherWindow.activeHeaderButton === 1 ? Qt.alpha(Theme.white, 0.2) : Qt.alpha(Theme.white, 0.08)
+                        border.color: launcherWindow.activeHeaderButton === 1 ? Theme.white : "transparent"
+                        border.width: 1
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); } }
+                    }
+
+                    Text {
+                        text: "System Options"
+                        color: Theme.white; font.pixelSize: 16; font.bold: true
+                        anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
             }
 
             // ------------------------------------------
@@ -473,7 +497,41 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 3. LISTA DE WI-FI
+            // 3. LISTA DE SISTEMA (Modo 4)
+            // ------------------------------------------
+            ListView {
+                id: sysList
+                width: parent.width; model: filteredModel
+                height: Math.min(count * 55, 440)
+                currentIndex: 0; clip: true; spacing: 0
+                visible: launcherWindow.currentMode === 4 && count > 0
+
+                delegate: Rectangle {
+                    width: sysList.width; height: 55; radius: 12
+                    color: (ListView.isCurrentItem && launcherWindow.activeHeaderButton === 0) ? Qt.alpha(Theme.white, 0.1) : "transparent"
+
+                    Item {
+                        anchors.fill: parent; anchors.margins: 10
+                        Image {
+                            id: sysIcon
+                            width: 24; height: 24
+                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                            source: icon.startsWith("/") ? "file://" + icon : "image://icon/" + icon
+                        }
+                        Column {
+                            anchors.left: sysIcon.right; anchors.leftMargin: 15
+                            anchors.right: parent.right; anchors.rightMargin: 15
+                            anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                            Text { width: parent.width; text: name; color: Theme.white; font.pixelSize: 15; font.bold: true; elide: Text.ElideRight }
+                            Text { width: parent.width; text: comment; color: Theme.grey1; font.pixelSize: 11; elide: Text.ElideRight }
+                        }
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: { launcherWindow.activeHeaderButton = 0; sysList.currentIndex = index; executeApp(exec, name); } }
+                }
+            }
+
+            // ------------------------------------------
+            // 4. LISTA DE WI-FI
             // ------------------------------------------
             ListView {
                 id: wifiList
@@ -518,7 +576,7 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 4. LISTA DE BLUETOOTH
+            // 5. LISTA DE BLUETOOTH
             // ------------------------------------------
             ListView {
                 id: btList
@@ -562,7 +620,7 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 5. TARJETAS DE RESULTADO / VACÍO
+            // 6. TARJETAS DE RESULTADO / VACÍO
             // ------------------------------------------
             Rectangle {
                 width: parent.width; height: 75; radius: 16; color: Qt.alpha(Theme.white, 0.05); border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
@@ -607,6 +665,14 @@ PanelWindow {
         var search = searchInput.text.toLowerCase().trim();
         filteredModel.clear();
         launcherWindow.calcResult = "";
+
+        if (launcherWindow.currentMode === 4) {
+            for (var s = 0; s < rawModel.count; s++) {
+                filteredModel.append(rawModel.get(s));
+            }
+            if (launcherWindow.activeHeaderButton === 0 && filteredModel.count > 0) sysList.currentIndex = 0;
+            return;
+        }
 
         if (launcherWindow.currentMode === 5) {
             launcherWindow.isWifiLoading = false; 
@@ -664,7 +730,7 @@ PanelWindow {
         for (var j = 0; j < rawModel.count; j++) {
             var item = rawModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_wifi" && item.exec !== "qs_bt") continue; 
+                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -684,6 +750,7 @@ PanelWindow {
     function executeApp(cmd, name) {
         if (!cmd || cmd === "") return;
 
+        if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
         

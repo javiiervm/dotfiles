@@ -3,27 +3,43 @@
 MODE=$1
 
 if [ "$MODE" = "--apps" ]; then
-    # Inyectamos comandos virtuales para abrir los menús de red
+    # Inyectamos comandos virtuales para abrir los submenús
     echo "Wi-Fi Settings|Manage wireless networks|network-wireless|qs_wifi|cmd"
-    echo "Bluetooth Settings|Manage bluetooth devices|bluetooth|qs_bt|cmd"
+    echo "Bluetooth Settings|Manage bluetooth devices|preferences-system-bluetooth|qs_bt|cmd"
+    echo "System Options|Power off, reboot, suspend...|preferences-system-power|qs_sys|cmd"
     
     # Listado de aplicaciones (Lógica original restaurada)
     directories=("$HOME/.local/share/applications" "/usr/share/applications" "$HOME/.local/share/applications/rofi-commands")
     for dir in "${directories[@]}"; do
         [ ! -d "$dir" ] && continue
         find "$dir" -maxdepth 1 -name "*.desktop" 2>/dev/null | while read -r file; do
+            # Extracción más limpia, ignorando mayúsculas/minúsculas en los booleanos
+            nodisplay=$(grep -m1 -i "^NoDisplay=" "$file" | cut -d= -f2- | tr -d '\r' | tr -d ' ')
+            [ "$nodisplay" = "true" ] && continue
+            
+            # Filtrar aplicaciones que explícitamente no quieren mostrarse en Hyprland/wlroots
+            notshowin=$(grep -m1 "^NotShowIn=" "$file" | cut -d= -f2- | tr -d '\r')
+            if [[ "$notshowin" == *"Hyprland"* || "$notshowin" == *"wlroots"* ]]; then continue; fi
+
+            # Filtrar aplicaciones exclusivas de otros entornos (GNOME, KDE, etc.)
+            onlyshowin=$(grep -m1 "^OnlyShowIn=" "$file" | cut -d= -f2- | tr -d '\r')
+            if [ -n "$onlyshowin" ] && [[ "$onlyshowin" != *"Hyprland"* && "$onlyshowin" != *"wlroots"* ]]; then continue; fi
+            
+            # Lista negra manual: Bloquea ejecutables o utilidades de sistema que estorban
+            filename=$(basename "$file")
+            case "$filename" in
+                *avahi*|*lstopo*|*btrfs-assistant*|*kvantum*|*gtk3-widget-factory*|*micro.desktop*)
+                    continue ;;
+            esac
+
             name=$(grep -m1 "^Name=" "$file" | cut -d= -f2-)
             [ -z "$name" ] && continue
-            
-            # Filtro para ignorar apps ocultas
-            nodisplay=$(grep -m1 "^NoDisplay=" "$file" | cut -d= -f2- | tr -d '\r')
-            [ "$nodisplay" = "true" ] || [ "$nodisplay" = "True" ] && continue
             
             comment=$(grep -m1 "^Comment=" "$file" | cut -d= -f2- | tr -d '\r')
             icon=$(grep -m1 "^Icon=" "$file" | cut -d= -f2- | tr -d '\r')
             exec=$(grep -m1 "^Exec=" "$file" | cut -d= -f2- | sed 's/ %[a-zA-Z]//g' | tr -d '\r')
             
-            # Icono por defecto si no tiene
+            # Fallback a nivel de backend
             [ -z "$icon" ] && icon="application-x-executable"
             
             if [ -n "$name" ] && [ -n "$exec" ]; then
@@ -65,25 +81,16 @@ elif [ "$MODE" = "--bt" ]; then
     if bluetoothctl show | grep -q "Powered: yes"; then
         echo "enabled||||state"
 
-        # Si no hay un escaneo ya en curso, lanzamos uno breve para que
-        # también aparezcan dispositivos nuevos (no solo los ya emparejados)
         if ! bluetoothctl show | grep -q "Discovering: yes"; then
             bluetoothctl --timeout 4 scan on >/dev/null 2>&1
         fi
 
-        # Archivo temporal para recolectar resultados sin lag
         > /tmp/qs_bt_out.txt
 
-        # IMPORTANTE: usamos process substitution (< <(...)) en vez de un pipe
-        # ("comando | while ...") porque un pipe ejecuta el "while" en una
-        # subshell aparte; los "&" lanzados ahí dentro no quedan registrados
-        # en el shell principal, así que el "wait" de más abajo no esperaba
-        # realmente a que terminasen y el archivo se leía siempre vacío.
         while read -r line; do
             mac=$(echo "$line" | cut -d ' ' -f 2)
             name=$(echo "$line" | cut -d ' ' -f 3-)
 
-            # Subshell paralela (&) para preguntar a todos simultáneamente sin congelar la interfaz
             (
                 if bluetoothctl info "$mac" | grep -q "Connected: yes"; then
                     echo "$name|$mac|bluetooth-active|qs_keep:bluetoothctl disconnect $mac|bt_current" >> /tmp/qs_bt_out.txt
@@ -106,4 +113,14 @@ elif [ "$MODE" = "--wallpaper" ]; then
     ls -1 "$WALL_DIR" | while read -r wall; do
         echo "${wall%.}|Apply wallpaper|$WALL_DIR/$wall|echo '$WALL_DIR/$wall' > /tmp/current_wallpaper; awww img \"$WALL_DIR/$wall\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$WALL_DIR/$wall\" -n -q && cp \"$WALL_DIR/$wall\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$WALL_DIR/$wall\"|cmd"
     done
+
+# =================================================================
+# NUEVO: MENÚ DE SISTEMA
+# =================================================================
+elif [ "$MODE" = "--system" ]; then
+    echo "Lock|Lock the current session|system-lock-screen|hyprlock|sys"
+    echo "Suspend|Suspend the system|system-suspend|systemctl suspend|sys"
+    echo "Logout|Exit current session|system-log-out|hyprctl dispatch exit|sys"
+    echo "Reboot|Restart the system|system-reboot|systemctl reboot|sys"
+    echo "Shutdown|Power off the system|system-shutdown|systemctl poweroff|sys"
 fi
