@@ -16,3 +16,4 @@ Desktop/
 .config/quickshell/scripts/__pycache__/
 
 ~/.config/quickshell/secrets.env
+.config/quickshell/secrets.env
