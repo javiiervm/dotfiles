@@ -22,6 +22,7 @@ PanelWindow {
     
     property bool isWifiLoading: false
     property bool isBtLoading: false
+    property bool isFileLoading: false
     
     property int activeHeaderButton: 0 
     
@@ -72,7 +73,10 @@ PanelWindow {
                 if (f.length >= 5) { rawModel.append({ name: f[0], comment: f[1], icon: f[2], exec: f[3], type: f[4] }); }
             }
         }
-        onExited: updateFilter()
+        onExited: {
+            launcherWindow.isFileLoading = false;
+            updateFilter();
+        }
     }
 
     Process { id: execProc }
@@ -212,14 +216,23 @@ PanelWindow {
                             clip: true
 
                             Text {
-                                text: launcherWindow.currentMode === 9 ? "Password" : "Search Applications..."
+                                text: launcherWindow.currentMode === 9 ? "Password" : "Search"
                                 color: Theme.grey1
                                 font.pixelSize: 16
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: searchInput.text === ""
                             }
 
-                            onTextChanged: updateFilter()
+                            onTextChanged: {
+                                // Si escribe/borra algo mientras está en la vista de archivos, lo devolvemos a la vista general
+                                // y recargamos el modelo de apps (si no, quedan los resultados de archivos "pegados").
+                                if (launcherWindow.currentMode === 1) {
+                                    launcherWindow.currentMode = 0;
+                                    loadTabData("--apps");
+                                    return;
+                                }
+                                updateFilter();
+                            }
 
                             Keys.onPressed: (event) => {
                                 if (event.key === Qt.Key_Escape) {
@@ -287,7 +300,9 @@ PanelWindow {
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                                     // 1. FORZAR BÚSQUEDA DE ARCHIVOS (Ctrl + Enter)
                                     if (event.modifiers & Qt.ControlModifier && searchInput.text !== "" && launcherWindow.currentMode === 0) {
-                                        launcherWindow.currentMode = 1; loadTabData("--search-files", searchInput.text);
+                                        launcherWindow.isFileLoading = true;
+                                        launcherWindow.currentMode = 1; 
+                                        loadTabData("--search-files", searchInput.text);
                                         event.accepted = true; return;
                                     }
                                     
@@ -627,17 +642,26 @@ PanelWindow {
                     }
                     MouseArea { 
                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
-                        onClicked: { launcherWindow.currentMode = 1; loadTabData("--search-files", searchInput.text); } 
+                        onClicked: { 
+                            launcherWindow.isFileLoading = true;
+                            launcherWindow.currentMode = 1; 
+                            loadTabData("--search-files", searchInput.text); 
+                        } 
                     }
                 }
             }
 
             Item {
                 width: parent.width; height: 60
-                visible: (launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && filteredModel.count === 0
+                visible: ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6 || launcherWindow.currentMode === 1) && filteredModel.count === 0) || launcherWindow.isFileLoading
                 Text { 
                     anchors.centerIn: parent
-                    text: launcherWindow.currentMode === 5 ? (launcherWindow.isWifiEnabled ? "Scanning networks..." : "Wi-Fi is disabled") : (launcherWindow.isBtEnabled ? "Scanning devices..." : "Bluetooth is disabled")
+                    text: {
+                        if (launcherWindow.currentMode === 1) return launcherWindow.isFileLoading ? "Searching files in ~/... " : "No files found";
+                        if (launcherWindow.currentMode === 5) return launcherWindow.isWifiEnabled ? "Scanning networks..." : "Wi-Fi is disabled";
+                        if (launcherWindow.currentMode === 6) return launcherWindow.isBtEnabled ? "Scanning devices..." : "Bluetooth is disabled";
+                        return "";
+                    }
                     color: Theme.grey1; font.pixelSize: 15 
                 }
             }
