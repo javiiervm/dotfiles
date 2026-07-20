@@ -124,3 +124,23 @@ elif [ "$MODE" = "--system" ]; then
     echo "Reboot|Restart the system|system-reboot|systemctl reboot|sys"
     echo "Shutdown|Power off the system|system-shutdown|systemctl poweroff|sys"
 fi
+
+# =================================================================
+# NUEVO: BÚSQUEDA DE ARCHIVOS (Profundidad controlada para 0 lag)
+# =================================================================
+elif [ "$MODE" = "--search-files" ]; then
+    QUERY="$2"
+    # Busca en tu $HOME, baja máximo 4 carpetas de profundidad para no congelarse
+    # y devuelve los primeros 15 resultados
+    find "$HOME" -maxdepth 4 -type f -iname "*$QUERY*" 2>/dev/null | head -n 15 | while read -r path; do
+        name=$(basename "$path")
+        # Cambiamos /home/javier por ~ para que quede más estético en la UI
+        clean_path="${path/#$HOME/\~}"
+        echo "$name|$clean_path|text-x-generic|xdg-open \"$path\"|file"
+    done
+    
+    # Si no encuentra nada, envía un dummy para avisar al usuario
+    if [ $(find "$HOME" -maxdepth 4 -type f -iname "*$QUERY*" 2>/dev/null | head -n 1 | wc -l) -eq 0 ]; then
+         echo "No files found matching '$QUERY'||||empty"
+    fi
+fi
