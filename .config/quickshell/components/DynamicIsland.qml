@@ -54,6 +54,7 @@ PanelWindow {
     }
     
     property bool isPlayerAvailable: activePlayer !== null
+    onActivePlayerChanged: pollLoopStatus()
     
     property string songTitle: {
         if (!activePlayer) return "No music playing";
@@ -136,6 +137,33 @@ PanelWindow {
     property real trackLength: 1 
     property bool isUserSeeking: false 
 
+    // --- ESTADO REAL DEL LOOP (via playerctl, no confiamos en la propiedad MPRIS de Quickshell) ---
+    property string liveLoopStatus: "None"
+
+    function playerBusShort() {
+        if (!islandWindow.activePlayer || !islandWindow.activePlayer.busName) return "";
+        return islandWindow.activePlayer.busName.replace("org.mpris.MediaPlayer2.", "");
+    }
+
+    Process {
+        id: loopStatusProc
+        stdout: SplitParser {
+            onRead: function(data) {
+                var s = data.trim();
+                if (s === "Track" || s === "Playlist" || s === "None") {
+                    islandWindow.liveLoopStatus = s;
+                }
+            }
+        }
+    }
+
+    function pollLoopStatus() {
+        var bus = islandWindow.playerBusShort();
+        if (bus === "") return;
+        loopStatusProc.command = ["bash", "-c", "playerctl -p " + bus + " loop 2>/dev/null"];
+        loopStatusProc.running = true;
+    }
+
     Timer {
         id: positionPoller
         interval: 500 
@@ -147,6 +175,7 @@ PanelWindow {
                 islandWindow.trackPosition = islandWindow.activePlayer.position || 0;
                 islandWindow.trackLength = islandWindow.activePlayer.length || 1;
             }
+            islandWindow.pollLoopStatus();
         }
     }
 
@@ -802,18 +831,28 @@ PanelWindow {
                                     } 
                                 }
                                 Text { 
-                                    text: islandWindow.loopStatus === "Track" ? "󰑘" : "󰑖"
+                                    text: islandWindow.liveLoopStatus === "Track" ? "󰑘" : "󰑖"
                                     font.family: Theme.fontIcons
                                     font.pixelSize: 18
-                                    color: islandWindow.loopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.4)
+                                    color: islandWindow.liveLoopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.4)
                                     MouseArea { 
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                         onClicked: { 
                                             if (!islandWindow.isPlayerAvailable) return;
-                                            let current = islandWindow.activePlayer.loopStatus;
-                                            if (current === 0) islandWindow.activePlayer.loopStatus = 2; 
-                                            else if (current === 2) islandWindow.activePlayer.loopStatus = 1;
-                                            else islandWindow.activePlayer.loopStatus = 0;
+                                            
+                                            let current = islandWindow.liveLoopStatus; 
+                                            let next = "None";
+                                            if (current === "None") next = "Playlist";
+                                            else if (current === "Playlist") next = "Track";
+                                            else next = "None";
+                                            
+                                            // Actualización optimista: refleja el cambio en el ícono al instante
+                                            islandWindow.liveLoopStatus = next;
+                                            
+                                            // Escribimos directamente en el objeto MPRIS que ya maneja Quickshell
+                                            // (misma vía que usa el shuffle), en vez de un subproceso playerctl
+                                            // que puede no heredar DBUS_SESSION_BUS_ADDRESS correctamente.
+                                            islandWindow.activePlayer.loopStatus = next;
                                         } 
                                     } 
                                 }

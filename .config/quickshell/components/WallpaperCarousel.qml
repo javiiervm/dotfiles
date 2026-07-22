@@ -12,6 +12,9 @@ PanelWindow {
     property bool isReallyVisible: false
     property string wallpaperDir: "~/Pictures/wallpapers"
     
+    // Almacena el wallpaper actual para volver a él al limpiar filtros
+    property string currentWallPath: ""
+    
     // VARIABLES DE BÚSQUEDA Y FILTRO
     property string activeColorFilter: ""
     property var colorNames: {
@@ -35,9 +38,13 @@ PanelWindow {
     visible: isReallyVisible
     color: "transparent"
 
+    // FONDO: Panel de vidrio translúcido con contorno
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(0, 0, 0, 0.25)
+        color: Theme.bgGlass
+        radius: 20
+        border.color: Qt.alpha(Theme.white, 0.1)
+        border.width: 2
         opacity: wallCarouselWindow.visible_state ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
     }
@@ -74,10 +81,11 @@ PanelWindow {
                 }
             }
         }
-        onExited: updateFilter()
+        onExited: {
+            getCurrentWallProc.running = true;
+        }
     }
 
-    // Proceso para leer la ruta del fondo actual desde el archivo persistente
     Process {
         id: getCurrentWallProc
         command: ["bash", "-c", "cat /home/javier/.cache/qs_wall_path 2>/dev/null || cat /tmp/current_wallpaper 2>/dev/null"]
@@ -85,17 +93,10 @@ PanelWindow {
             onRead: (data) => {
                 var currentPath = data.trim().replace("~", "/home/javier");
                 if (currentPath === "") return;
+                wallCarouselWindow.currentWallPath = currentPath;
 
-                // Buscamos en el modelo filtrado qué índice coincide con esta ruta
-                for (var i = 0; i < filteredModel.count; i++) {
-                    var itemPath = filteredModel.get(i).icon.replace("~", "/home/javier");
-                    if (itemPath === currentPath) {
-                        carousel.currentIndex = i;
-                        // Salta instantáneamente a la imagen sin hacer la animación de scroll inicial
-                        carousel.positionViewAtIndex(i, ListView.Center);
-                        break;
-                    }
-                }
+                // Reevaluar filtros tras actualizar la ruta para asegurar el índice correcto
+                updateFilter();
             }
         }
     }
@@ -106,34 +107,52 @@ PanelWindow {
         filteredModel.clear();
         var searchStr = searchInput.text.toLowerCase().trim();
         var colorName = activeColorFilter !== "" ? colorNames[activeColorFilter] : "";
+        var isFilterEmpty = (searchStr === "" && activeColorFilter === "");
+        var targetIndex = 0;
 
         for (var i = 0; i < wallpaperModel.count; i++) {
             var item = wallpaperModel.get(i);
-            var itemName = item.name.toLowerCase();
-            var itemComment = item.comment.toLowerCase();
-            var itemType = item.type ? item.type.toLowerCase() : "";
+            // Tolerancia a nulos para evitar roturas silenciosas del script
+            var itemName = (item.name || "").toLowerCase();
+            var itemComment = (item.comment || "").toLowerCase();
+            var itemType = (item.type || "").toLowerCase();
 
-            // 1. EL BUSCADOR DE TEXTO SOLO MIRA EL NOMBRE
             var matchText = (searchStr === "") || itemName.includes(searchStr);
             
-            // 2. EL FILTRO DE COLOR SOLO MIRA EL COMENTARIO O TIPO (Ignora el nombre del archivo)
             var matchColor = true;
             if (activeColorFilter !== "") {
+                // Validación estricta que ahora INCLUYE el nombre del archivo para fallbacks lógicos
                 matchColor = itemComment.includes(colorName) || itemComment.includes(activeColorFilter) ||
-                             itemType.includes(colorName) || itemType.includes(activeColorFilter);
+                             itemType.includes(colorName) || itemType.includes(activeColorFilter) ||
+                             itemName.includes(colorName);
             }
 
             if (matchText && matchColor) {
                 filteredModel.append({
                     name: item.name, comment: item.comment, icon: item.icon, exec: item.exec, type: item.type
                 });
+                
+                // Buscar si este fondo filtrado es el actual para restaurar la vista
+                var currentItemPath = (item.icon || "").replace("~", "/home/javier");
+                if (isFilterEmpty && wallCarouselWindow.currentWallPath !== "" && currentItemPath === wallCarouselWindow.currentWallPath) {
+                    targetIndex = filteredModel.count - 1;
+                }
             }
         }
-        carousel.currentIndex = 0;
+        
+        carousel.currentIndex = targetIndex;
+        // Solo desplazamos la vista físicamente si hemos limpiado los filtros y encontrado la coincidencia
+        if (isFilterEmpty && targetIndex !== 0) {
+            carousel.positionViewAtIndex(targetIndex, ListView.Center);
+        }
     }
 
     function executeWall(cmd, iconPath) {
         if (!cmd || cmd === "") return;
+        
+        // Actualizamos la ruta actual en memoria instantáneamente
+        wallCarouselWindow.currentWallPath = (iconPath || "").replace("~", "/home/javier");
+
         var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + iconPath + "' /home/javier/.cache/hyprlock/current_wallpaper.png && echo '" + iconPath + "' > /home/javier/.cache/qs_wall_path && ";
         var finalCmd = syncCmd + cmd;
         var cleanCmd = finalCmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
@@ -155,16 +174,13 @@ PanelWindow {
             visible_state = true;
             WlrLayershell.keyboardFocus = WlrLayershell.OnDemand;
             
-            // 1. Reseteamos filtros
             searchInput.text = "";
             activeColorFilter = "";
-            updateFilter();
             
-            // 2. Buscamos y seleccionamos el fondo actual
+            // Forzar recarga del último wallpaper y aplicar filtros
             getCurrentWallProc.running = false;
             getCurrentWallProc.running = true;
             
-            // 3. El foco inicial siempre es el carrusel (Modo flechas)
             carousel.forceActiveFocus(); 
         }
     }
@@ -184,7 +200,7 @@ PanelWindow {
             width: parent.width
             height: 320 
             orientation: ListView.Horizontal
-            spacing: -81 
+            spacing: -40 
             
             model: filteredModel
             clip: false
@@ -193,10 +209,8 @@ PanelWindow {
             preferredHighlightEnd: parent.width / 2 + 150
             highlightRangeMode: ListView.StrictlyEnforceRange
 
-            // NUEVO: Acelera drásticamente el tiempo de scroll entre elementos (150ms en vez del defecto)
             highlightMoveDuration: 150
             
-            // GESTIÓN DEL TECLADO DEL CARRUSEL (Modo Flechas Activo)
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Left) { decrementCurrentIndex(); event.accepted = true; }
                 else if (event.key === Qt.Key_Right) { incrementCurrentIndex(); event.accepted = true; }
@@ -206,7 +220,6 @@ PanelWindow {
                     if (item) executeWall(item.exec, item.icon);
                     event.accepted = true;
                 }
-                // Si pulsas una letra/número, salta al buscador y escribe la letra
                 else if (event.text !== "" && event.key !== Qt.Key_Space && event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backspace) {
                     searchInput.text = event.text;
                     searchInput.forceActiveFocus();
@@ -258,8 +271,8 @@ PanelWindow {
 
                     Rectangle {
                         anchors.fill: parent
-                        color: "black"
-                        opacity: carousel.currentIndex === index ? 0.0 : 0.65
+                        color: Qt.alpha(Theme.bgGlass, 0.4)
+                        opacity: carousel.currentIndex === index ? 0.0 : 1.0
                         Behavior on opacity { NumberAnimation { duration: 300 } }
                     }
                     
@@ -292,17 +305,29 @@ PanelWindow {
             width: pillRow.implicitWidth + 40
             height: 44 
             radius: 22
-            color: Qt.rgba(0.08, 0.08, 0.08, 0.85)
-            border.color: Qt.rgba(1, 1, 1, 0.1)
+            color: Theme.bgGlass
+            border.color: Qt.alpha(Theme.white, 0.1)
             border.width: 1
+            
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 3
+                radius: 1.5
+                color: activeColorFilter !== "" ? activeColorFilter : "transparent"
+                opacity: activeColorFilter !== "" ? 0.6 : 0
+                Behavior on color { ColorAnimation { duration: 200 } }
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+            }
 
             RowLayout {
                 id: pillRow
                 anchors.centerIn: parent
                 spacing: 12
 
-                Text { text: "󰀻"; color: "white"; font.pixelSize: 18; font.family: "Symbols Nerd Font" }
-                Text { text: "▶"; color: "gray"; font.pixelSize: 12 }
+                Text { text: "󰀻"; color: Theme.grey1; font.pixelSize: 18; font.family: Theme.fontIcons }
+                Text { text: "▶"; color: Theme.grey1; font.pixelSize: 12; font.family: Theme.fontIcons }
                 
                 Row {
                     spacing: 8
@@ -311,7 +336,7 @@ PanelWindow {
                         Rectangle { 
                             width: 18; height: 18; radius: 9; color: modelData 
                             
-                            border.color: "white"
+                            border.color: Theme.white
                             border.width: activeColorFilter === modelData ? 2 : 0
                             scale: activeColorFilter === modelData ? 1.2 : 1.0
                             Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
@@ -328,26 +353,27 @@ PanelWindow {
                     }
                 }
                 
-                Text { text: ""; color: "gray"; font.pixelSize: 14; font.family: "Symbols Nerd Font"; Layout.leftMargin: 8 }
+                Text { text: ""; color: Theme.grey1; font.pixelSize: 14; font.family: Theme.fontIcons; Layout.leftMargin: 8 }
                 
                 TextInput {
                     id: searchInput
                     Layout.preferredWidth: 150
                     Layout.alignment: Qt.AlignVCenter
-                    color: "white"
+                    color: Theme.fg
                     font.pixelSize: 15
+                    font.family: Theme.fontMain
                     clip: true
-                    selectionColor: "#007aff"
+                    selectionColor: Theme.blue
 
                     Text {
                         text: "Search..."
-                        color: "gray"
+                        color: Theme.grey1
                         font.pixelSize: 15
+                        font.family: Theme.fontMain
                         anchors.verticalCenter: parent.verticalCenter
                         visible: searchInput.text === ""
                     }
 
-                    // Magia del foco: si se vacía la caja, devolvemos el foco al carrusel
                     onTextChanged: {
                         updateFilter();
                         if (text === "" && activeFocus) {
@@ -361,7 +387,6 @@ PanelWindow {
                             carousel.forceActiveFocus();
                             event.accepted = true;
                         }
-                        // Navegar con flechas por el carrusel aunque estés editando el texto
                         if (event.key === Qt.Key_Down || event.key === Qt.Key_Right) { 
                             carousel.incrementCurrentIndex(); 
                             event.accepted = true; 
@@ -391,9 +416,10 @@ PanelWindow {
                 return item ? item.name : "";
             }
             
-            color: filteredModel.count === 0 ? "gray" : "white"
+            color: filteredModel.count === 0 ? Theme.grey1 : Theme.fg
             font.pixelSize: 20
             font.bold: true
+            font.family: Theme.fontMain
             
             style: Text.Outline
             styleColor: Qt.rgba(0,0,0, 0.5)

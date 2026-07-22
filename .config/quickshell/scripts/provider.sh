@@ -110,8 +110,48 @@ elif [ "$MODE" = "--bt" ]; then
 elif [ "$MODE" = "--wallpaper" ]; then
     WALL_DIR="$2"
     [ ! -d "$WALL_DIR" ] && exit 1
+    
+    CACHE_FILE="/home/javier/.cache/qs_wallpaper_colors.txt"
+    mkdir -p "$(dirname "$CACHE_FILE")"
+    touch "$CACHE_FILE"
+
     ls -1 "$WALL_DIR" | while read -r wall; do
-        echo "${wall%.}|Apply wallpaper|$WALL_DIR/$wall|echo '$WALL_DIR/$wall' > /tmp/current_wallpaper; awww img \"$WALL_DIR/$wall\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$WALL_DIR/$wall\" -n -q && cp \"$WALL_DIR/$wall\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$WALL_DIR/$wall\"|cmd"
+        img_path="$WALL_DIR/$wall"
+        
+        # 1. Comprobar si la imagen ya fue procesada y está en caché
+        cached_data=$(grep "^$img_path|" "$CACHE_FILE" | cut -d'|' -f2-)
+        
+        if [ -z "$cached_data" ]; then
+            # 2. Generar el HEX base usando tu script existente
+            hex_color=$(python3 /home/javier/.config/quickshell/scripts/cava_color.py "$img_path")
+            
+            # 3. Categorizar el HEX en las etiquetas que requiere tu QML
+            color_category=$(python3 -c "
+import sys, colorsys
+try:
+    hex_c = sys.argv[1].lstrip('#')
+    r, g, b = tuple(int(hex_c[i:i+2], 16)/255.0 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    
+    if s < 0.15 or l < 0.15 or l > 0.85: print('gray')
+    elif h < 0.05 or h > 0.95: print('red')
+    elif h < 0.12: print('orange')
+    elif h < 0.20: print('yellow')
+    elif h < 0.45: print('green')
+    elif h < 0.70: print('blue')
+    elif h < 0.85: print('purple')
+    else: print('pink')
+except:
+    print('gray')
+" "$hex_color")
+            
+            # Unir ambos datos (Ej: "#001a4d blue") y guardarlos en caché
+            cached_data="$hex_color $color_category"
+            echo "$img_path|$cached_data" >> "$CACHE_FILE"
+        fi
+        
+        # 4. Inyectar los metadatos reales en el output para que el buscador de QML los lea
+        echo "${wall%.}|$cached_data|$img_path|echo '$img_path' > /tmp/current_wallpaper; awww img \"$img_path\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$img_path\" -n -q && cp \"$img_path\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$img_path\"|image"
     done
 
 # =================================================================
