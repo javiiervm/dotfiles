@@ -162,6 +162,12 @@ ShellRoot {
         }
     }
 
+    onIsNotifOpenChanged: {
+        if (!isNotifOpen) {
+            hasUnread = false
+        }
+    }
+
     Process {
         id: colorMonitorProc
         command: [
@@ -274,7 +280,8 @@ ShellRoot {
                     if (!root.isNotifOpen) {
                         root.hasUnread = true
                         var n = JSON.parse(line.substring(6))
-                        popupModel.insert(0, { "nId": n.id, "pApp": n.app, "pTitle": n.title, "pBody": n.body, "pIcon": n.icon })
+                        // AÑADIDO: Guardamos pUrgency extrayéndolo del JSON
+                        popupModel.insert(0, { "nId": n.id, "pApp": n.app, "pTitle": n.title, "pBody": n.body, "pIcon": n.icon, "pUrgency": n.urgency })
                     }
                 }
             }
@@ -358,13 +365,20 @@ ShellRoot {
                 delegate: Rectangle {
                     id: popupItem
                     width: 360; height: 80; radius: 15
-                    color: Theme.bgGlass; border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
+                    
+                    // 1. Lógica de colores según la urgencia (Igual que en el panel)
+                    color: pUrgency === 2 ? Qt.alpha(Theme.red, 0.15) : Theme.bgGlass
+                    border.color: pUrgency === 2 ? Theme.red : Qt.alpha(Theme.white, 0.15)
+                    border.width: pUrgency === 2 ? 2 : 1
+                    
                     transform: Translate { id: slideTrans; x: 400 }
                     Component.onCompleted: { slideIn.start(); hideTimer.start(); }
                     NumberAnimation { id: slideIn; target: slideTrans; property: "x"; to: 0; duration: 400; easing.type: Easing.OutBack }
                     NumberAnimation { id: slideOut; target: slideTrans; property: "x"; to: 400; duration: 300; easing.type: Easing.InBack; onFinished: root.removePopup(nId) }
                     Timer { id: hideTimer; interval: 5000; onTriggered: slideOut.start() }
+                    
                     MouseArea { anchors.fill: parent; onClicked: slideOut.start() }
+                    
                     RowLayout {
                         anchors.fill: parent; anchors.margins: 12; spacing: 12
                         Item {
@@ -390,13 +404,49 @@ ShellRoot {
                                 anchors.fill: parent
                                 source: notifImgPopup
                                 maskSource: maskPopup
+                                layer.enabled: pUrgency === 2 // Habilita la capa si es crítica
                             }
                         }
+                        
                         ColumnLayout {
                             spacing: 2
-                            Text { text: pApp; color: Theme.blue; font.pixelSize: 10; font.bold: true }
+                            Text { 
+                                // Añade la etiqueta de urgencia al nombre de la app
+                                text: pApp + (pUrgency === 2 ? " • CRITICAL" : "") 
+                                color: pUrgency === 2 ? Theme.red : Theme.blue 
+                                font.pixelSize: 10; font.bold: true 
+                            }
                             Text { text: pTitle; color: Theme.white; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
                             Text { text: pBody; color: Theme.grey1; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true; maximumLineCount: 1 }
+                        }
+
+                        // 2. Botón de cerrar (X) en la esquina derecha
+                        Item {
+                            Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                            width: 20
+                            height: 20
+                            Text { 
+                                anchors.centerIn: parent
+                                text: "󰅖"
+                                font.family: Theme.fontIcons
+                                color: xMousePopup.containsMouse ? Theme.white : Theme.grey1
+                                font.pixelSize: 14 
+                            }
+                            MouseArea { 
+                                id: xMousePopup
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: { 
+                                    // Desliza la notificación fuera de la pantalla inmediatamente
+                                    slideOut.start() 
+                                    
+                                    // OPCIONAL: Elimina la notificación del sistema completamente
+                                    // para que tampoco aparezca si abres el panel después.
+                                    cmdProc.command = ["sh", "-c", "echo 'REMOVE|" + nId + "' > /tmp/qs_notif_cmd"]
+                                    cmdProc.running = true
+                                }
+                            }
                         }
                     }
                 }
@@ -472,7 +522,13 @@ ShellRoot {
                     Battery { percentage: root.batCap; charging: (root.batStat === "Charging" || root.batStat === "Full") }
                     MouseArea {
                         width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
-                        Notification { dnd: root.dnd; count: root.notifCount; showContainer: false; anchors.fill: parent }
+                        Notification { 
+                            dnd: root.dnd; 
+                            count: root.notifCount; 
+                            hasUnread: root.hasUnread; // AÑADIDO
+                            showContainer: false; 
+                            anchors.fill: parent 
+                        }
                     }
                 }
             }
