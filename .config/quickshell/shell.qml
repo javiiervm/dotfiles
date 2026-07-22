@@ -977,10 +977,15 @@ ShellRoot {
 
                     Repeater {
                         model: [
-                            { icon: "󰈹", cmd: "firefox" },
-                            { icon: "󰉋", cmd: "dolphin" },
-                            { icon: "󰆍", cmd: "kitty" },
-                            { icon: "󰨞", cmd: "code" }
+                            { type: "font", icon: "󰈹", cmd: "firefox" },
+                            { type: "font", icon: "󰉋", cmd: "dolphin" },
+                            { type: "font", icon: "󰆍", cmd: "kitty" },
+                            { type: "font", icon: "󰨞", cmd: "code" },
+                            { type: "svg",  icon: "icons/discord.svg", cmd: "discord" },
+                            { type: "font", icon: "󰓇", cmd: "spotify" },
+                            { type: "font", icon: "󰖣", cmd: "firefox --new-window https://web.whatsapp.com" },
+                            { type: "svg",  icon: "icons/obsidian.svg", cmd: "obsidian" },
+                            { type: "svg",  icon: "icons/notion.svg", cmd: "firefox --new-window https://www.notion.so" },
                         ]
 
                         Rectangle {
@@ -991,10 +996,30 @@ ShellRoot {
 
                             Text {
                                 anchors.centerIn: parent
+                                visible: modelData.type !== "svg"
                                 text: modelData.icon
                                 font.family: Theme.fontIcons
                                 font.pixelSize: 24 
                                 color: Theme.white
+                            }
+
+                            Image {
+                                id: svgIcon
+                                anchors.centerIn: parent
+                                width: 22; height: 22
+                                visible: false
+                                source: modelData.type === "svg" ? modelData.icon : ""
+                                sourceSize.width: 22
+                                sourceSize.height: 22
+                                smooth: true
+                                fillMode: Image.PreserveAspectFit
+                            }
+
+                            ColorOverlay {
+                                anchors.fill: svgIcon
+                                source: svgIcon
+                                color: Theme.white
+                                visible: modelData.type === "svg"
                             }
 
                             MouseArea {
