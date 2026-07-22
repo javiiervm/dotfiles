@@ -8,6 +8,7 @@ from gi.repository import GLib
 import threading
 import os
 import subprocess
+from PIL import Image
 
 DBusGMainLoop(set_as_default=True)
 
@@ -30,17 +31,49 @@ class NotificationServer(dbus.service.Object):
         except BrokenPipeError:
             os._exit(0)
 
+    @dbus.service.signal('org.freedesktop.Notifications', signature='us')
+    def ActionInvoked(self, id, action_key):
+        pass
+
     @dbus.service.method('org.freedesktop.Notifications', in_signature='susssasa{sv}i', out_signature='u')
     def Notify(self, app_name, replaces_id, app_icon, summary, body, actions, hints, timeout):
         notif_id = int(replaces_id) if replaces_id > 0 else self.next_id
         if replaces_id == 0:
             self.next_id += 1
 
-        # Extraer la urgencia (por defecto 1 si no existe)
-        # Se suele recibir como dbus.Byte, así que lo convertimos a int
         urgency = int(hints.get("urgency", 1))
 
-        icon = str(app_icon) if app_icon else "dialog-information"
+        icon = str(app_icon) if app_icon else ""
+
+        if not icon:
+            if "image-path" in hints:
+                icon = str(hints["image-path"])
+            elif "image-data" in hints or "icon_data" in hints:
+                img_key = "image-data" if "image-data" in hints else "icon_data"
+                try:
+                    img_data = hints[img_key]
+                    width = int(img_data[0])
+                    height = int(img_data[1])
+                    rowstride = int(img_data[2])
+                    has_alpha = bool(img_data[3])
+                    pixels = bytes(img_data[6])
+
+                    mode = 'RGBA' if has_alpha else 'RGB'
+                    image = Image.frombytes(mode, (width, height), pixels, 'raw', mode, rowstride, 1)
+                    
+                    tmp_path = f"/tmp/qs_notif_icon_{notif_id}.png"
+                    image.save(tmp_path)
+                    icon = tmp_path
+                except Exception as e:
+                    pass
+
+        if not icon:
+            app_str = str(app_name).lower().replace(" ", "-")
+            if app_str:
+                icon = app_str
+
+        if not icon:
+            icon = "dialog-information"
 
         notif = {
             "id": notif_id,
@@ -82,11 +115,9 @@ class NotificationServer(dbus.service.Object):
 
     @dbus.service.method('org.freedesktop.Notifications', in_signature='u', out_signature='')
     def CloseNotification(self, id):
-        # IGNORAR el borrado automático para conservar el historial
-        pass
+        self.remove_notif(id)
         
     def remove_notif(self, nid):
-        # Nueva función para el botón X individual
         self.notifications = [n for n in self.notifications if n["id"] != nid]
         self.emit_state()
 
@@ -126,6 +157,21 @@ def listen_fifo():
                         try:
                             nid = int(cmd.split("|")[1])
                             GLib.idle_add(server.remove_notif, nid)
+                        except Exception:
+                            pass
+                    elif cmd.startswith("ACTION|"):
+                        try:
+                            parts = cmd.split("|")
+                            nid = int(parts[1])
+                            action_key = parts[2]
+                            GLib.idle_add(server.ActionInvoked, nid, action_key)
+                        except Exception:
+                            pass
+                    elif cmd.startswith("CLEAR_APP|"):
+                        try:
+                            app_to_clear = cmd.split("|")[1].lower()
+                            server.notifications = [n for n in server.notifications if n["app"].lower() != app_to_clear]
+                            GLib.idle_add(server.emit_state)
                         except Exception:
                             pass
         except Exception:

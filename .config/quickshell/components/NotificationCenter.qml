@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Io
 import QtQuick.Controls
+import Qt5Compat.GraphicalEffects
 import ".."
 
 PanelWindow {
@@ -185,7 +186,21 @@ PanelWindow {
                 border.color: Qt.alpha(Theme.white, 0.15) 
                 border.width: 1
 
-                MouseArea { anchors.fill: parent }
+                // Disparador principal para abrir la app desde la notificación
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    // z: 0 permite que el botón "X" (que está dentro del RowLayout) se superponga correctamente
+                    z: 0 
+                    onClicked: {
+                        // Cierra el centro de notificaciones
+                        ncWindow.requestClose()
+                        // Envía el comando de acción al daemon (invocando la acción por defecto)
+                        execCmd("echo 'ACTION|" + model.id + "|default' > /tmp/qs_notif_cmd")
+                        // Fuerza la eliminación visual inmediata
+                        execCmd("echo 'REMOVE|" + model.id + "' > /tmp/qs_notif_cmd")
+                    }
+                }
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -322,14 +337,31 @@ PanelWindow {
                             anchors.margins: 12
                             spacing: 12
 
-                            Image { 
+                            Item {
                                 Layout.preferredWidth: 35
                                 Layout.preferredHeight: 35
-                                source: "image://icon/" + icon
-                                fillMode: Image.PreserveAspectFit
-                                
-                                // Opcional: Desaturar el icono si no es crítica, o ponerle un tinte
-                                layer.enabled: model.urgency === 2
+
+                                Image {
+                                    id: notifImgCenter
+                                    anchors.fill: parent
+                                    source: String(icon).startsWith("/") ? "file://" + icon : "image://icon/" + icon
+                                    fillMode: Image.PreserveAspectCrop // Corrección crítica
+                                    visible: false // Se oculta la imagen original sin recortar
+                                }
+
+                                Rectangle {
+                                    id: maskCenter
+                                    anchors.fill: parent
+                                    radius: width / 2
+                                    visible: false // Se oculta la máscara de referencia
+                                }
+
+                                OpacityMask {
+                                    anchors.fill: parent
+                                    source: notifImgCenter
+                                    maskSource: maskCenter
+                                    layer.enabled: model.urgency === 2 // Mantiene tu lógica de borde rojo
+                                }
                             }
 
                             ColumnLayout {
