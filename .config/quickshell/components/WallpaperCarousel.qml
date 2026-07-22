@@ -38,13 +38,10 @@ PanelWindow {
     visible: isReallyVisible
     color: "transparent"
 
-    // FONDO: Panel de vidrio translúcido con contorno
+    // FONDO: Capa translúcida a pantalla completa
     Rectangle {
         anchors.fill: parent
         color: Theme.bgGlass
-        radius: 20
-        border.color: Qt.alpha(Theme.white, 0.1)
-        border.width: 2
         opacity: wallCarouselWindow.visible_state ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
     }
