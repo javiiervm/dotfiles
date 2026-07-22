@@ -47,7 +47,8 @@ ShellRoot {
     // --- ESTADOS PARA CAVA VISUALIZER ---
     property bool isPlayingMedia: false
     property bool isWorkspaceEmpty: true
-    property bool showCavaVisualizer: false 
+    //property bool showCavaVisualizer: isPlayingMedia && isWorkspaceEmpty
+    property bool showCavaVisualizer: false // isPlayingMedia && isWorkspaceEmpty
 
     property string cavaColor: Theme.blue // Color inicial
 
@@ -60,8 +61,8 @@ ShellRoot {
     property string advSecurity: "N/A"
     property string advMac: "N/A"
     property string advBattery: "N/A"
-    property string advFreq: "N/A"
-    property string advSignal: "N/A"
+    property string advFreq: "N/A"      // NUEVA
+    property string advSignal: "N/A"    // NUEVA
 
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
@@ -69,6 +70,7 @@ ShellRoot {
     ListModel {
         id: cavaModel
         Component.onCompleted: {
+            // Inicializamos las 120 barras a altura 0
             for (var i = 0; i < 120; i++) {
                 append({"barHeight": 0});
             }
@@ -86,12 +88,14 @@ ShellRoot {
         }
     }
     
+    // Procesos separados para evitar bloqueos si clicas muy rápido
     Process { id: cmdProc }
     Process { id: wifiProc; command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"] }
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
 
+    // --- MONITOR DE ESCRITORIO Y MEDIA (Basado en Eventos 0% CPU) ---
     Process {
         id: mediaWorkspaceMonitor
         command: [
@@ -116,6 +120,7 @@ ShellRoot {
         }
     }
 
+    // 2. Motor de Visualización (Cava)
     Process {
         id: cavaVisualizerProc
         command: [
@@ -141,6 +146,7 @@ ShellRoot {
                 var rawValues = data.trim().split(";");
                 for(var i = 0; i < 120; i++) {
                     var val = parseInt(rawValues[i]);
+                    // Actualizamos exclusivamente la altura de cada barra en el modelo
                     cavaModel.setProperty(i, "barHeight", isNaN(val) ? 0 : val);
                 }
             }
@@ -160,6 +166,7 @@ ShellRoot {
         id: colorMonitorProc
         command: [
             "bash", "-c", 
+            // EL SALVAVIDAS: Forzamos la creación del archivo para que inotifywait no crashee al arrancar
             "touch /tmp/current_wallpaper; " + 
             "if [ -s /tmp/current_wallpaper ]; then python3 /home/javier/.config/quickshell/scripts/cava_color.py \"$(cat /tmp/current_wallpaper)\"; fi; " +
             "while inotifywait -q -e close_write,modify /tmp/current_wallpaper; do " +
@@ -239,6 +246,7 @@ ShellRoot {
                     root.btDev = fields[7].trim()
                     root.perfMode = fields[8].trim()
                     root.dnd = (fields[9].trim() === "true")
+                    //root.notifCount = parseInt(fields[10]) || 0
                     root.volMute = (fields[11].trim() === "true")
                     root.volDesc = fields[12].trim()
                     root.cpuUsage = parseInt(fields[13]) || 0
@@ -273,12 +281,15 @@ ShellRoot {
         }
     }
 
+    // --- MONITOR DE MODO AVIÓN (Basado en Eventos 0% CPU) ---
     Process {
         id: airplaneMonitor
         command: [
             "bash", "-c",
+            // Función que lee el estado real: Si hay algún bloqueo "Soft" o "Hard", el modo avión está activo.
             "check_airplane() { rfkill list all | grep -q 'Soft blocked: no' && echo 0 || echo 1; }; " +
-            "check_airplane; " +
+            "check_airplane; " + // Estado inicial
+            // Magia event-driven: 'rfkill event' frena el script hasta que tocas algo de red.
             "rfkill event | while read -r _; do check_airplane; done"
         ]
         running: true
@@ -287,22 +298,6 @@ ShellRoot {
                 root.airplaneMode = (data.trim() === "1");
             }
         }
-    }
-
-    // --- NUEVO MONITOR PARA LIMPIAR NOTIFICACIONES AL ENFOCAR VENTANA ---
-    Process {
-        id: focusMonitor
-        command: [
-            "bash", "-c",
-            "socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | while read -r line; do " +
-            "if [[ \"$line\" == \"activewindow>>\"* ]]; then " +
-            "window_class=$(echo \"$line\" | awk -F'>>' '{print $2}' | awk -F',' '{print $1}' | tr '[:upper:]' '[:lower:]'); " +
-            "if [[ \"$window_class\" =~ \"whatsapp\" ]] || [[ \"$window_class\" =~ \"brave\" ]]; then " +
-            "echo 'CLEAR_APP|whatsapp' > /tmp/qs_notif_cmd; " +
-            "echo 'CLEAR_APP|brave' > /tmp/qs_notif_cmd; " +
-            "fi; fi; done"
-        ]
-        running: true
     }
 
     Connections {
@@ -421,6 +416,7 @@ ShellRoot {
             opacity: 0
             NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
             
+            // --- CONTENEDOR IZQUIERDO (Logo Arch y Workspaces) ---
             Rectangle {
                 anchors.left: parent.left
                 anchors.leftMargin: 12 
@@ -429,7 +425,7 @@ ShellRoot {
                 width: leftRow.implicitWidth + 30 
                 radius: height / 2 
                 color: Theme.bgGlass 
-                border.color: Qt.alpha(Theme.white, 0.15) 
+                border.color: Qt.alpha(Theme.white, 0.15) // Borde un poco más visible
                 border.width: 1
 
                 RowLayout {
@@ -445,6 +441,7 @@ ShellRoot {
                 }
             }
 
+            // --- CONTENEDOR DERECHO (Iconos, bandeja, batería, notificaciones) ---
             Rectangle {
                 anchors.right: parent.right
                 anchors.rightMargin: 12 
@@ -461,6 +458,7 @@ ShellRoot {
                     anchors.centerIn: parent
                     spacing: 18
                     
+                    // --- UPDATES MODULE ENCAPSULADO ---
                     Updates { Layout.rightMargin: 15 }
 
                     SystemIcons { 
@@ -468,6 +466,7 @@ ShellRoot {
                         btOn: root.btStat === "on"; btDev: root.btDev; perf: root.perfMode; vol: root.vol; volMute: root.volMute; volDesc: root.volDesc
                     }
 
+                    // --- CUSTOM APP TRAY ENCAPSULADO ---
                     AppTray { Layout.alignment: Qt.AlignVCenter }
 
                     Battery { percentage: root.batCap; charging: (root.batStat === "Charging" || root.batStat === "Full") }
@@ -491,8 +490,10 @@ ShellRoot {
             SysMenu { title: root.activeMenuTitle; info1: root.activeMenuInfo1; info2: root.activeMenuInfo2; accent: root.activeMenuAccent; isOpen: root.isMenuOpen }
         }
 
+        // === ISLA DINÁMICA (TEMPORALMENTE COMENTADA) ===
         DynamicIsland { 
             id: islandWidget 
+            // Filtro estricto que ignora palabras vacías o nulas devueltas por el sistema
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
@@ -537,10 +538,12 @@ ShellRoot {
         }
     }
 
+    // Instancia del nuevo menú de wallpapers
     WallpaperCarousel {
         id: wallCarouselWidget
     }
 
+    // Atajo global para abrirlo directamente (ej. Meta + W)
     GlobalShortcut {
         name: "wallpaper_menu"
         onPressed: { wallCarouselWidget.toggle() }
@@ -550,6 +553,7 @@ ShellRoot {
         id: controlCenterWindow
         screen: Quickshell.screens[0]
 
+        // Fullscreen como el NotificationCenter — el dismiss y la tarjeta van dentro
         anchors { top: true; bottom: true; left: true; right: true }
         exclusiveZone: 0
         color: "transparent"
@@ -557,11 +561,13 @@ ShellRoot {
         WlrLayershell.keyboardFocus: root.isControlCenterOpen ? WlrLayershell.OnDemand : WlrLayershell.None
         visible: root.isControlCenterOpen
 
+        // 1. Dismiss de fondo (fullscreen, primer hijo = z inferior)
         MouseArea {
             anchors.fill: parent
             onClicked: root.isControlCenterOpen = false
         }
 
+        // 2. Contenido (segundo hijo = z superior), posicionado arriba-derecha
         Item {
             id: cardContainer
             width: 460
@@ -582,6 +588,7 @@ ShellRoot {
 
                 Keys.onEscapePressed: root.isControlCenterOpen = false
 
+                // Control de gestos (rueda del ratón / touchpad)
                 MouseArea {
                     anchors.fill: parent
                     Timer { id: swipeCooldown; interval: 400 }
@@ -599,6 +606,7 @@ ShellRoot {
                     }
                 }
 
+                // 1. Tarjeta base de información
                 Component {
                     id: infoCard
                     Rectangle {
@@ -622,6 +630,7 @@ ShellRoot {
                     }
                 }
 
+                // 2. Núcleo central y líneas conectoras (Empaquetado para reutilizarlo en el slide)
                 Component {
                     id: tabCore
                     Item {
@@ -642,6 +651,7 @@ ShellRoot {
                                     ctx.moveTo(cx, cy);
                                     ctx.bezierCurveTo(cx + (tx - cx)/2, cy, cx + (tx - cx)/2, ty, tx, ty);
                                 }
+                                // Trazamos las líneas según la disposición de tarjetas de cada pestaña
                                 if (tabName === "bluetooth") {
                                     drawNodeLine(140, 82.5); drawNodeLine(140, 222.5); drawNodeLine(320, 152.5);
                                 } else if (tabName === "audio") {
@@ -679,6 +689,7 @@ ShellRoot {
                     }
                 }
 
+                // 3. Contenedor Deslizante (La magia de la animación)
                 Item {
                     id: slideWindow
                     anchors.top: parent.top
@@ -694,12 +705,14 @@ ShellRoot {
                         id: slideContainer
                         width: slideWindow.width * 4
                         height: slideWindow.height
+                        // Animamos la posición X basada en el índice de la pestaña activa
                         x: -slideWindow.currentIndex * slideWindow.width
 
                         Behavior on x {
                             NumberAnimation { duration: 400; easing.type: Easing.OutQuart }
                         }
 
+                        // --- PESTAÑA WIFI (x: 0) ---
                         Item {
                             width: slideWindow.width; height: parent.height; x: 0
                             Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "wifi" }
@@ -709,6 +722,7 @@ ShellRoot {
                             Loader { sourceComponent: infoCard; x: 320; y: 200; onLoaded: { item.accentColor = "#5bc0eb"; item.iconText = "󰤨"; item.mainText = Qt.binding(() => root.advSignal !== "N/A" ? root.advSignal + "%" : "N/A"); item.subText = "Signal" } }
                         }
 
+                        // --- PESTAÑA BLUETOOTH (x: ancho * 1) ---
                         Item {
                             width: slideWindow.width; height: parent.height; x: slideWindow.width
                             Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "bluetooth" }
@@ -717,6 +731,7 @@ ShellRoot {
                             Loader { sourceComponent: infoCard; x: 320; y: 130; onLoaded: { item.accentColor = "#cbaacb"; item.iconText = "󰥉"; item.mainText = Qt.binding(() => root.advBattery !== "N/A" ? root.advBattery + "%" : "N/A"); item.subText = "Battery" } }
                         }
 
+                        // --- PESTAÑA AUDIO (x: ancho * 2) ---
                         Item {
                             width: slideWindow.width; height: parent.height; x: slideWindow.width * 2
                             Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "audio" }
@@ -724,6 +739,7 @@ ShellRoot {
                             Loader { sourceComponent: infoCard; x: 20; y: 200; onLoaded: { item.accentColor = "#e74c3c"; item.iconText = Qt.binding(() => root.volMute ? "󰝟" : "󰕾"); item.mainText = Qt.binding(() => root.volMute ? "Muted" : "Unmuted"); item.subText = "Audio State" } }
                         }
 
+                        // --- PESTAÑA PERFORMANCE (x: ancho * 3) ---
                         Item {
                             width: slideWindow.width; height: parent.height; x: slideWindow.width * 3
                             Loader { anchors.fill: parent; sourceComponent: tabCore; onLoaded: item.tabName = "performance" }
@@ -735,6 +751,7 @@ ShellRoot {
                     }
                 }
 
+                // 4. Barra de navegación inferior con indicador animado
                 Rectangle {
                     id: bottomNav
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 15
@@ -747,13 +764,16 @@ ShellRoot {
                     readonly property int currentIndex: tabs.indexOf(root.controlCenterTab)
                     readonly property real stepWidth: width / 4
 
+                    // --- EL INDICADOR MÓVIL ---
                     Rectangle {
                         id: activeIndicator
                         width: bottomNav.stepWidth - 4; height: 31
                         radius: 15; y: 2
+                        // Calculamos la X basándonos en el índice actual
                         x: 2 + (bottomNav.currentIndex * bottomNav.stepWidth)
                         color: Qt.alpha(Theme.white, 0.15)
 
+                        // Esta es la clave: misma duración y easing que el slide de arriba
                         Behavior on x {
                             NumberAnimation { duration: 400; easing.type: Easing.OutQuart }
                         }
@@ -762,6 +782,7 @@ ShellRoot {
                     RowLayout {
                         anchors.fill: parent; spacing: 0
                         
+                        // 1. Botón Wi-Fi
                         Item {
                             Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
@@ -771,6 +792,7 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "wifi" }
                         }
                         
+                        // 2. Botón Bluetooth
                         Item {
                             Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
@@ -780,6 +802,7 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "bluetooth" }
                         }
                         
+                        // 3. Botón Audio
                         Item {
                             Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6
@@ -789,6 +812,7 @@ ShellRoot {
                             MouseArea { anchors.fill: parent; onClicked: root.controlCenterTab = "audio" }
                         }
                         
+                        // 4. Botón Performance
                         Item {
                             Layout.fillWidth: true; Layout.fillHeight: true
                             RowLayout { anchors.centerIn: parent; spacing: 6

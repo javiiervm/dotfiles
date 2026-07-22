@@ -31,6 +31,7 @@ class NotificationServer(dbus.service.Object):
         except BrokenPipeError:
             os._exit(0)
 
+    # --- NUEVA SEÑAL PARA ABRIR LAS APPS ---
     @dbus.service.signal('org.freedesktop.Notifications', signature='us')
     def ActionInvoked(self, id, action_key):
         pass
@@ -43,12 +44,14 @@ class NotificationServer(dbus.service.Object):
 
         urgency = int(hints.get("urgency", 1))
 
+        # --- LÓGICA DE ICONOS CORREGIDA ---
         icon = str(app_icon) if app_icon else ""
 
         if not icon:
             if "image-path" in hints:
                 icon = str(hints["image-path"])
             elif "image-data" in hints or "icon_data" in hints:
+                # Extraer la imagen cruda (raw bitmap)
                 img_key = "image-data" if "image-data" in hints else "icon_data"
                 try:
                     img_data = hints[img_key]
@@ -67,13 +70,16 @@ class NotificationServer(dbus.service.Object):
                 except Exception as e:
                     pass
 
+        # Fallback 1: Nombre de la aplicación normalizado
         if not icon:
             app_str = str(app_name).lower().replace(" ", "-")
             if app_str:
                 icon = app_str
 
+        # Fallback 2: Icono genérico del sistema si todo lo demás falla
         if not icon:
             icon = "dialog-information"
+        # ----------------------------------
 
         notif = {
             "id": notif_id,
@@ -115,7 +121,7 @@ class NotificationServer(dbus.service.Object):
 
     @dbus.service.method('org.freedesktop.Notifications', in_signature='u', out_signature='')
     def CloseNotification(self, id):
-        self.remove_notif(id)
+        pass
         
     def remove_notif(self, nid):
         self.notifications = [n for n in self.notifications if n["id"] != nid]
@@ -159,19 +165,13 @@ def listen_fifo():
                             GLib.idle_add(server.remove_notif, nid)
                         except Exception:
                             pass
+                    # --- NUEVA LÓGICA DE EVENTOS ACTION ---
                     elif cmd.startswith("ACTION|"):
                         try:
                             parts = cmd.split("|")
                             nid = int(parts[1])
                             action_key = parts[2]
                             GLib.idle_add(server.ActionInvoked, nid, action_key)
-                        except Exception:
-                            pass
-                    elif cmd.startswith("CLEAR_APP|"):
-                        try:
-                            app_to_clear = cmd.split("|")[1].lower()
-                            server.notifications = [n for n in server.notifications if n["app"].lower() != app_to_clear]
-                            GLib.idle_add(server.emit_state)
                         except Exception:
                             pass
         except Exception:
