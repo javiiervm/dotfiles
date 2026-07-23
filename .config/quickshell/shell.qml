@@ -66,6 +66,12 @@ ShellRoot {
     // --- ESTADOS DEL DOCK DINÁMICO ---
     property int bottomGap: 12
     property bool isDockHovered: false
+    property bool isMacosMode: false
+
+    // --- ESTADOS DE ALT+TAB NATIVO ---
+    property bool isAltTabVisible: false
+    property var altTabList: []
+    property int altTabCurrentIndex: 0
 
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
@@ -110,7 +116,31 @@ ShellRoot {
         }
     }
 
-    // --- 1. MONITOR DE ESCRITORIO (EVENT-DRIVEN, 0% CPU, AUTO-RECOVERY) ---
+    // --- MONITOR DEL MODO MACOS ---
+    Process {
+        id: macosModeMonitor
+        command: [
+            "bash", "-c",
+            "check() { [ -f /tmp/hypr_macos_mode ] && echo 1 || echo 0; }; " +
+            "check; " +
+            "if command -v inotifywait >/dev/null 2>&1; then " +
+            "  inotifywait -m -q -e create,delete,moved_to,moved_from --format '%f' /tmp | while read -r f; do " +
+            "    [ \"$f\" = \"hypr_macos_mode\" ] && check; " +
+            "  done; " +
+            "else " +
+            "  while true; do sleep 1; check; done; " +
+            "fi"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var val = data.trim();
+                if (val === "1" || val === "0") root.isMacosMode = (val === "1");
+            }
+        }
+    }
+
+    // --- 1. MONITOR DE ESCRITORIO ---
     Process {
         id: workspaceMonitorProc
         command: [
@@ -144,7 +174,7 @@ ShellRoot {
         }
     }
 
-    // --- 2. MONITOR DE MEDIOS (AISLADO) ---
+    // --- 2. MONITOR DE MEDIOS ---
     Process {
         id: mediaMonitorProc
         command: [
@@ -278,7 +308,7 @@ ShellRoot {
 
     Process {
         id: backendProc
-        command: ["/bin/bash", "-c", "mkdir -p /tmp/fake_bin; printf '#!/bin/bash\\necho 0\\n' > /tmp/fake_bin/swaync-client; chmod +x /tmp/fake_bin/swaync-client; export PATH=\"/tmp/fake_bin:$PATH\"; /home/javier/.config/quickshell/scripts/backend_daemon.sh"]
+        command: ["/home/javier/.config/quickshell/scripts/backend_daemon.sh"]
         running: true
         stdout: SplitParser {
             onRead: (data) => {
@@ -325,6 +355,62 @@ ShellRoot {
                     }
                 }
             }
+        }
+    }
+
+    // Carga ultrarrápida de la lista de ventanas
+    Process {
+        id: altTabFetchProc
+        command: ["/home/javier/.config/quickshell/scripts/alttab_fetch.sh"]
+        stdout: SplitParser {
+            onRead: (data) => {
+                try {
+                    var list = JSON.parse(data.trim());
+                    if (list && list.length > 0) {
+                        root.altTabList = list;
+                        root.altTabCurrentIndex = list.length > 1 ? 1 : 0;
+                        root.isAltTabVisible = true;
+                    }
+                } catch (e) {}
+            }
+        }
+    }
+
+    Process { id: altTabFocusProc }
+
+    // Métodos invocables desde Hyprland via IPC (qsctl dispatch)
+    function alttab_next() {
+        if (!root.isAltTabVisible) {
+            altTabFetchProc.running = true;
+        } else {
+            if (root.altTabList.length > 0) {
+                root.altTabCurrentIndex = (root.altTabCurrentIndex + 1) % root.altTabList.length;
+            }
+        }
+    }
+
+    function alttab_commit() {
+        if (root.isAltTabVisible) {
+            if (root.altTabList.length > 0 && root.altTabCurrentIndex < root.altTabList.length) {
+                var target = root.altTabList[root.altTabCurrentIndex];
+                altTabFocusProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + target.address];
+                altTabFocusProc.running = true;
+            }
+            root.isAltTabVisible = false;
+        }
+    }
+
+    // Expone alttab_next / alttab_commit por IPC para que Hyprland pueda invocarlos
+    // con: qs ipc -p ~/.config/quickshell call alttab next|commit
+    IpcHandler {
+        target: "alttab"
+
+        function next(): void {
+            root.alttab_next();
+        }
+
+        function commit(): void {
+            root.alttab_commit();
         }
     }
 
@@ -889,7 +975,7 @@ ShellRoot {
         }
     }
 
-    // --- ZONA DE GATILLO DEL DOCK (2px) ---
+    // --- ZONA DE GATILLO DEL DOCK ---
     PanelWindow {
         id: dockTriggerZone
         anchors { bottom: true; left: true; right: true }
@@ -911,14 +997,13 @@ ShellRoot {
         id: dockHideTimer
         interval: 350
         onTriggered: {
-            // Doble comprobación: Solo oculta si el ratón NO está en el dock NI en la zona gatillo
             if (!dockHoverHandler.hovered && !triggerArea.containsMouse) {
                 root.isDockHovered = false;
             }
         }
     }
 
-    // --- COMPONENTE DEL DOCK (ESCALADO 120%) ---
+    // --- COMPONENTE DEL DOCK ---
     PanelWindow {
         id: customDockWindow
         anchors { bottom: true }
@@ -934,7 +1019,7 @@ ShellRoot {
         Item {
             anchors.fill: parent
             
-            property bool showDock: root.isWorkspaceEmpty || root.isDockHovered
+            property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
             
             opacity: showDock ? 1 : 0
             visible: opacity > 0
@@ -957,7 +1042,6 @@ ShellRoot {
                 border.color: Qt.alpha(Theme.white, 0.15)
                 border.width: 1
 
-                // La solución arquitectónica: HoverHandler supervisa el elemento y a sus hijos sin colisionar
                 HoverHandler {
                     id: dockHoverHandler
                     onHoveredChanged: {
@@ -1027,7 +1111,6 @@ ShellRoot {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                // Los botones ya no gestionan la visibilidad del panel general
                                 onClicked: {
                                     dockLauncherProc.command = ["bash", "-c", modelData.cmd + " & disown"]
                                     dockLauncherProc.running = true
@@ -1040,5 +1123,10 @@ ShellRoot {
         }
 
         Process { id: dockLauncherProc }
+    }
+
+    // --- COMPONENTE OVERLAY DE ALT+TAB ---
+    AltTabOverlay {
+        rootRef: root
     }
 }

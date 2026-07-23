@@ -135,3 +135,5 @@ function theme() {
 eval "$(starship init zsh)"
 
 clear && echo ' ' && fastfetch -l arch && echo ' '
+
+export PATH="$HOME/.local/bin:$PATH"
