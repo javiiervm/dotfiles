@@ -393,7 +393,9 @@ ShellRoot {
         if (root.isAltTabVisible) {
             if (root.altTabList.length > 0 && root.altTabCurrentIndex < root.altTabList.length) {
                 var target = root.altTabList[root.altTabCurrentIndex];
-                altTabFocusProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + target.address];
+                var addr = "address:" + target.address;
+                altTabFocusProc.command = ["bash", "-c",
+                    "hyprctl dispatch focuswindow '" + addr + "' && hyprctl dispatch alterzorder 'top," + addr + "'"];
                 altTabFocusProc.running = true;
             }
             root.isAltTabVisible = false;
