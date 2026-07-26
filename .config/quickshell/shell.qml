@@ -394,8 +394,13 @@ ShellRoot {
             if (root.altTabList.length > 0 && root.altTabCurrentIndex < root.altTabList.length) {
                 var target = root.altTabList[root.altTabCurrentIndex];
                 var addr = "address:" + target.address;
-                altTabFocusProc.command = ["bash", "-c",
-                    "hyprctl dispatch focuswindow '" + addr + "' && hyprctl dispatch alterzorder 'top," + addr + "'"];
+                if (target.minimized) {
+                    altTabFocusProc.command = ["bash", "-c",
+                        "~/.config/hypr/scripts/macos_restore_minimized.sh '" + target.address + "'"];
+                } else {
+                    altTabFocusProc.command = ["bash", "-c",
+                        "hyprctl dispatch focuswindow '" + addr + "' && hyprctl dispatch alterzorder 'top," + addr + "'"];
+                }
                 altTabFocusProc.running = true;
             }
             root.isAltTabVisible = false;

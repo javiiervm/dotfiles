@@ -2,6 +2,10 @@
 # Obtiene el listado de ventanas activas ordenado por último foco en JSON instantáneo.
 # El icono se resuelve buscando el .desktop real de cada app (igual que provider.sh),
 # en vez de adivinar el nombre del icono a partir del "class" de la ventana.
+#
+# También marca con "minimized": true las ventanas escondidas por
+# macos_minimize.sh, para que el overlay de Alt+Tab pueda mostrarlas
+# y para que shell.qml sepa que debe restaurarlas en vez de solo enfocarlas.
 
 DIRS=(
     "$HOME/.local/share/applications"
@@ -10,6 +14,8 @@ DIRS=(
     "/var/lib/flatpak/exports/share/applications"
     "$HOME/.local/share/flatpak/exports/share/applications"
 )
+
+MINIMIZED_STATE_DIR="$HOME/.local/state/hypr/minimized"
 
 # Cache simple para no repetir la búsqueda si hay varias ventanas de la misma app
 declare -A ICON_CACHE
@@ -56,12 +62,19 @@ resolve_icon() {
     echo "$icon"
 }
 
+is_minimized() {
+    local addr_clean="${1#0x}"
+    [ -f "$MINIMIZED_STATE_DIR/${addr_clean}.json" ] && echo "true" || echo "false"
+}
+
 hyprctl clients -j | jq -c '
     [ .[] | select(.mapped == true and .hidden == false and .class != "") ]
     | sort_by(.focusHistoryID)
     | [ .[] | { address: .address, class: .class, title: .title } ]
 ' | jq -c '.[]' | while read -r win; do
     class=$(echo "$win" | jq -r '.class')
+    address=$(echo "$win" | jq -r '.address')
     icon=$(resolve_icon "$class")
-    echo "$win" | jq -c --arg icon "$icon" '. + {icon: $icon}'
+    minimized=$(is_minimized "$address")
+    echo "$win" | jq -c --arg icon "$icon" --argjson minimized "$minimized" '. + {icon: $icon, minimized: $minimized}'
 done | jq -s -c '.'
