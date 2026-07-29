@@ -105,11 +105,10 @@ Row {
     Item {
         width: 20; height: 44
         
-        // Definimos el color según el perfil activo para usarlo en el icono y el menú
         readonly property color currentPerfColor: {
-            if (perf === "power-saver") return "#2ecc71"; // Verde
-            if (perf === "performance") return "#f39c12"; // Naranja
-            return "#ffffff"; // Blanco (Balanced)
+            if (perf === "power-saver") return "#2ecc71"; 
+            if (perf === "performance") return "#f39c12"; 
+            return "#ffffff"; 
         }
 
         Text {
@@ -123,7 +122,6 @@ Row {
             anchors.fill: parent
             hoverEnabled: true 
             onEntered: {
-                // Pasamos el color calculado a la ventanita emergente
                 iconsRoot.updateMenu(true, "Power Mode", "Profile: " + perf, "Mode: System Controlled", parent.currentPerfColor, 52);
             }
             onExited: {
@@ -133,6 +131,26 @@ Row {
                 rootRef.controlCenterTab = "performance"
                 rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
             }
+        }
+    }
+
+    // --- Portapapeles (󰅍) ---
+    Item {
+        width: 20; height: 44
+
+        Text {
+            anchors.centerIn: parent
+            text: "󰅍"
+            color: (rootRef && rootRef.isClipMenuOpen) ? Theme.blue : Theme.white
+            font.family: Theme.fontIcons
+            font.pixelSize: 16
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            onEntered: if (rootRef) rootRef.enterClipIcon()
+            onExited: if (rootRef) rootRef.startClipHideTimer()
         }
     }
 }
