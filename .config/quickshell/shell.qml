@@ -924,11 +924,15 @@ ShellRoot {
         }
     }
 
-    // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en el borde de la pantalla) ---
+    // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en una franja central del borde superior) ---
     PanelWindow {
         id: topTriggerZone
-        anchors { top: true; left: true; right: true }
-        implicitHeight: 4
+        // Sin left/right: se centra horizontalmente sola (igual que la isla fantasma),
+        // formando una franja ancha en la zona superior-central, no un punto único
+        // ni todo el borde de la pantalla.
+        anchors { top: true }
+        implicitWidth: 460
+        implicitHeight: 14
         color: "transparent"
         WlrLayershell.layer: WlrLayershell.Top
         exclusiveZone: 0
@@ -968,7 +972,9 @@ ShellRoot {
 
         // Deslizamos TODA la ventana (no un transform interno) para que el
         // input-region de la capa Wayland siempre coincida con lo visible.
-        margins { top: root.isTopHovered ? 0 : -50 }
+        // -38 es el mismo margen que usa DynamicIsland.qml en su estado de reposo,
+        // así que al bajar queda exactamente a la altura habitual de la isla real.
+        margins { top: root.isTopHovered ? -38 : -50 }
         Behavior on margins.top { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
 
         Rectangle {
