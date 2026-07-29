@@ -27,6 +27,13 @@ PanelWindow {
         item: visualBg
     }
 
+    // --- PROPIEDAD REQUERIDA POR SHELL.QML ---
+    // Ocultamos la ventana entera (no solo visualmente) en fullscreen.
+    // Esto evita depender de un transform animado sobre el item enmascarado,
+    // que puede desincronizarse con el input-region real de la capa Wayland.
+    property bool isFullscreen: false
+    visible: !isFullscreen
+
     function triggerMsg(icon, color, text) {
         triggerTextNotification(icon, text, color);
     }

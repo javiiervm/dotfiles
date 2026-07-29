@@ -812,17 +812,16 @@ PanelWindow {
             return;
         }
 
-        execProc.command = ["/bin/bash", "-c", "echo '" + name + "' >> ~/.cache/qs_recents"];
-        execProc.running = true;
-
         var cleanCmd = cmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
-        
         WlrLayershell.keyboardFocus = WlrLayershell.None;
-        execProc.running = false; 
-        execProc.command = ["hyprctl", "dispatch", "exec", "--", "bash -c \"" + cleanCmd + " && hyprctl dispatch warpcursor 50 50\""];
+
+        // Escribe en caché, lanza la aplicación desvinculada (como en el dock) y mueve el cursor
+        var fullCmd = "echo '" + name + "' >> ~/.cache/qs_recents && (" + cleanCmd + " & disown) && hyprctl dispatch warpcursor 50 50";
+
+        execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
 
-        toggle(); 
+        toggle();
     }
 
     function toggle() {

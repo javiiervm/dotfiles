@@ -144,7 +144,7 @@ PanelWindow {
         }
     }
 
-    function executeWall(cmd, iconPath) {
+    /*function executeWall(cmd, iconPath) {
         if (!cmd || cmd === "") return;
         
         // Actualizamos la ruta actual en memoria instantáneamente
@@ -157,6 +157,48 @@ PanelWindow {
         WlrLayershell.keyboardFocus = WlrLayershell.None;
         execProc.running = false;
         execProc.command = ["hyprctl", "dispatch", "exec", "--", "bash -c \"" + cleanCmd + " && hyprctl dispatch warpcursor 50 50\""];
+        execProc.running = true;
+
+        toggle();
+    }*/
+    /*function executeWall(cmd, iconPath) {
+        if (!cmd || cmd === "") return;
+        
+        // Actualizamos la ruta actual en memoria instantáneamente
+        wallCarouselWindow.currentWallPath = (iconPath || "").replace("~", "/home/javier");
+
+        var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + iconPath + "' /home/javier/.cache/hyprlock/current_wallpaper.png && echo '" + iconPath + "' > /home/javier/.cache/qs_wall_path && ";
+        var finalCmd = syncCmd + cmd;
+        var cleanCmd = finalCmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
+
+        WlrLayershell.keyboardFocus = WlrLayershell.None;
+        execProc.running = false;
+        
+        // Redirigimos la salida de BASH a un archivo de log temporal para ver qué falla al ejecutarse
+        var debugCmd = "(" + cleanCmd + ") > /tmp/qs_wall_debug.log 2>&1";
+        console.log("COMANDO EJECUTADO:", debugCmd); // Esto saldrá por la terminal de quickshell
+        
+        execProc.command = ["hyprctl", "dispatch", "exec", "--", "bash -c \"" + debugCmd + "\""];
+        
+        execProc.running = true;
+
+        toggle();
+    }*/
+    function executeWall(cmd, iconPath) {
+        if (!cmd || cmd === "") return;
+        
+        // Actualizamos la ruta actual en memoria instantáneamente
+        wallCarouselWindow.currentWallPath = (iconPath || "").replace("~", "/home/javier");
+
+        var syncCmd = "mkdir -p /home/javier/.cache/hyprlock && cp '" + iconPath + "' /home/javier/.cache/hyprlock/current_wallpaper.png && echo '" + iconPath + "' > /home/javier/.cache/qs_wall_path && ";
+        var finalCmd = syncCmd + cmd;
+        var cleanCmd = finalCmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
+
+        WlrLayershell.keyboardFocus = WlrLayershell.None;
+        
+        // Ejecutamos la cadena directamente mediante BASH sin pasar por comillas en hyprctl
+        execProc.running = false;
+        execProc.command = ["/bin/bash", "-c", cleanCmd + " && hyprctl dispatch warpcursor 50 50 >/tmp/qs_wall_debug.log 2>&1"];
         execProc.running = true;
 
         toggle();

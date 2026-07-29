@@ -44,6 +44,32 @@ ShellRoot {
     property bool isMenuOpen: false
     property bool isMenuVisible: false
 
+    // --- ESTADOS LÓGICOS PARA EL MENÚ DEL PORTAPAPELES ---
+    property bool isClipIconHovered: false
+    property bool isClipMenuHovered: false
+    property bool isClipMenuOpen: false
+
+    Timer {
+        id: clipHideTimer
+        interval: 150
+        onTriggered: {
+            if (!root.isClipIconHovered && !root.isClipMenuHovered) {
+                root.isClipMenuOpen = false;
+            }
+        }
+    }
+
+    function enterClipIcon() {
+        root.isClipIconHovered = true;
+        root.isClipMenuOpen = true;
+        clipHideTimer.stop();
+    }
+
+    function startClipHideTimer() {
+        root.isClipIconHovered = false;
+        clipHideTimer.start();
+    }
+
     // --- ESTADOS PARA CAVA VISUALIZER ---
     property bool isPlayingMedia: false
     property bool isWorkspaceEmpty: true
@@ -73,6 +99,10 @@ ShellRoot {
     property var altTabList: []
     property int altTabCurrentIndex: 0
 
+    // --- ESTADOS DE PANTALLA COMPLETA ---
+    property bool isFullscreen: false
+    property bool isTopHovered: false
+
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
     ListModel { id: popupModel }
@@ -84,6 +114,10 @@ ShellRoot {
             }
         }
     }
+    
+    // --- MODELO PORTAPAPELES ---
+    property alias clipboardModel: clipboardModel
+    ListModel { id: clipboardModel }
 
     function clearNotifications() { cmdProc.command = ["sh", "-c", "echo CLEAR > /tmp/qs_notif_cmd"]; cmdProc.running = true }
     function toggleDnd() { cmdProc.command = ["sh", "-c", "echo TOGGLE_DND > /tmp/qs_notif_cmd"]; cmdProc.running = true }
@@ -96,12 +130,29 @@ ShellRoot {
         }
     }
     
+    // Funciones del Portapapeles
+    function copyClipItem(id) {
+        clipActionProc.command = ["bash", "-c", "cliphist decode " + id + " | wl-copy"]
+        clipActionProc.running = true
+    }
+
+    function deleteClipItem(id) {
+        clipActionProc.command = ["bash", "-c", "cliphist delete <<< $(cliphist list | grep '^" + id + "\t')"]
+        clipActionProc.running = true
+    }
+
+    function clearClipHistory() {
+        clipActionProc.command = ["bash", "-c", "cliphist wipe"]
+        clipActionProc.running = true
+    }
+    
     // Procesos separados
     Process { id: cmdProc }
     Process { id: wifiProc; command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"] }
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
+    Process { id: clipActionProc } // Para comandos del portapapeles
 
     // --- LECTOR DINÁMICO DE MÁRGENES DE HYPRLAND ---
     Process {
@@ -352,6 +403,24 @@ ShellRoot {
                         root.hasUnread = true
                         var n = JSON.parse(line.substring(6))
                         popupModel.insert(0, { "nId": n.id, "pApp": n.app, "pTitle": n.title, "pBody": n.body, "pIcon": n.icon, "pUrgency": n.urgency })
+                    }
+                }
+            }
+        }
+    }
+
+    // --- DAEMON PORTAPAPELES ---
+    Process {
+        id: clipProc
+        command: ["bash", "-c", "python3 -OO /home/javier/.config/quickshell/scripts/clip_daemon.py 2>> /tmp/clip_daemon_qs.log"]
+        running: true
+        stdout: SplitParser {
+            onRead: (line) => {
+                if (line.startsWith("CLIP|")) {
+                    var items = JSON.parse(line.substring(5))
+                    clipboardModel.clear()
+                    for (var i = 0; i < items.length; i++) {
+                        clipboardModel.append(items[i])
                     }
                 }
             }
@@ -666,11 +735,284 @@ ShellRoot {
             SysMenu { title: root.activeMenuTitle; info1: root.activeMenuInfo1; info2: root.activeMenuInfo2; accent: root.activeMenuAccent; isOpen: root.isMenuOpen }
         }
 
+        // --- VENTANA DEL MENÚ DEL PORTAPAPELES ---
+        PanelWindow {
+            id: clipMenuWindow
+            anchors { top: true; right: true }
+            WlrLayershell.layer: WlrLayershell.Overlay
+            implicitHeight: root.isClipMenuOpen ? Math.min(320, clipColumn.implicitHeight + 20) : 0
+            implicitWidth: 260
+            margins { right: 22 } // Alineado bajo el icono
+            exclusiveZone: 0
+            color: "transparent"
+
+            Rectangle {
+                anchors.fill: parent
+                radius: 12
+                color: Theme.bgGlass
+                border.color: Qt.alpha(Theme.white, 0.15)
+                border.width: 1
+                clip: true
+
+                opacity: root.isClipMenuOpen ? 1.0 : 0.0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+                transform: Translate {
+                    y: root.isClipMenuOpen ? 0 : -10
+                    Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                }
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            root.isClipMenuHovered = true;
+                            clipHideTimer.stop();
+                        } else {
+                            root.isClipMenuHovered = false;
+                            clipHideTimer.start();
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    id: clipColumn
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "Clipboard"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            font.bold: true
+                            Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            width: 55; height: 18; radius: 4
+                            color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
+                            border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Clear"
+                                color: clearMouse.containsMouse ? Theme.red : Theme.grey1
+                                font.pixelSize: 9
+                            }
+
+                            MouseArea {
+                                id: clearMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.clearClipHistory()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: Qt.alpha(Theme.white, 0.1)
+                    }
+
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: root.clipboardModel
+                        spacing: 4
+
+                        delegate: Rectangle {
+                            width: ListView.view.width
+                            height: 28
+                            radius: 6
+                            color: itemArea.containsMouse ? Qt.alpha(Theme.white, 0.1) : "transparent"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 6
+                                spacing: 6
+
+                                Text {
+                                    text: model.content
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Item {
+                                    width: 16; height: 16
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "󰅖"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 12
+                                        color: delArea.containsMouse ? Theme.red : Theme.grey1
+                                    }
+                                    MouseArea {
+                                        id: delArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.deleteClipItem(model.id)
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: itemArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (mouse.x < width - 24) {
+                                        root.copyClipItem(model.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         DynamicIsland { 
             id: islandWidget 
+            isFullscreen: root.isFullscreen
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
+    }
+
+    // --- MONITOR DE PANTALLA COMPLETA ---
+    Process {
+        id: fullscreenMonitorProc
+        command: [
+            "bash", "-c",
+            // check_fs: usamos 'jq' para EXTRAER el valor (no para decidir verdad/falso con -e,
+            // ya que jq considera "truthy" cualquier valor != null/false, incluido el entero 0).
+            "check_fs() { " +
+            "  val=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.hasfullscreen' 2>/dev/null); " +
+            "  if [ \"$val\" = \"true\" ] || [ \"$val\" = \"1\" ]; then echo 1; else echo 0; fi; " +
+            "}; " +
+            "check_fs; " +
+            "SOCAT_BIN=$(command -v socat); " +
+            "if [ -n \"$SOCAT_BIN\" ]; then " +
+            "  \"$SOCAT_BIN\" -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock 2>/dev/null | grep --line-buffered -E '(fullscreen|workspace)' | while read -r _; do check_fs; done; " +
+            "else " +
+            "  while true; do check_fs; sleep 2; done; " +
+            "fi"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var val = data.trim();
+                root.isFullscreen = (val === "1");
+            }
+        }
+    }
+
+    // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en el borde de la pantalla) ---
+    PanelWindow {
+        id: topTriggerZone
+        anchors { top: true; left: true; right: true }
+        implicitHeight: 4
+        color: "transparent"
+        WlrLayershell.layer: WlrLayershell.Top
+        exclusiveZone: 0
+        visible: root.isFullscreen
+
+        MouseArea {
+            id: topTriggerArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onEntered: { root.isTopHovered = true; topHideTimer.stop(); }
+            onExited: topHideTimer.start()
+        }
+    }
+
+    Timer {
+        id: topHideTimer
+        interval: 350
+        onTriggered: {
+            if (!topTriggerArea.containsMouse && !fsGhostMouseArea.containsMouse) {
+                root.isTopHovered = false;
+            }
+        }
+    }
+
+    // --- ISLA FANTASMA: solo reloj + batería, no interactiva, visible en fullscreen ---
+    PanelWindow {
+        id: fullscreenGhostIsland
+        anchors { top: true } // se centra horizontalmente sola, igual que la isla real
+
+        WlrLayershell.layer: WlrLayershell.Overlay
+        exclusiveZone: 0
+        color: "transparent"
+        visible: root.isFullscreen
+
+        implicitWidth: fsGhostLayout.implicitWidth + 36
+        implicitHeight: 32 // misma altura que la isla real contraída
+
+        // Deslizamos TODA la ventana (no un transform interno) para que el
+        // input-region de la capa Wayland siempre coincida con lo visible.
+        margins { top: root.isTopHovered ? 0 : -50 }
+        Behavior on margins.top { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: Theme.bgGlass
+            border.color: Qt.alpha(Theme.white, 0.15)
+            border.width: 1
+
+            // Solo mantiene la píldora visible mientras el ratón está sobre ella.
+            // Deliberadamente NO abre/expande nada al hacer hover.
+            MouseArea {
+                id: fsGhostMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onEntered: { root.isTopHovered = true; topHideTimer.stop(); }
+                onExited: topHideTimer.start()
+            }
+
+            RowLayout {
+                id: fsGhostLayout
+                anchors.centerIn: parent
+                spacing: 10
+
+                Text {
+                    id: fsGhostClockText
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+
+                Battery {
+                    percentage: root.batCap
+                    charging: (root.batStat === "Charging" || root.batStat === "Full")
+                }
+            }
+        }
+
+        Timer {
+            interval: 2000; running: root.isFullscreen; repeat: true; triggeredOnStart: true
+            onTriggered: {
+                var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
+                if (fsGhostClockText.text !== timeStr) fsGhostClockText.text = timeStr;
             }
         }
     }
