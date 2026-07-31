@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
 import "modules" as Modules
@@ -26,14 +27,14 @@ WlSessionLock {
             anchors.fill: wall
             source: wall
             blurEnabled: true
-            blur: 0.45
+            blur: 1
         }
 
         // Capa de oscurecimiento global
         Rectangle {
             anchors.fill: parent
             color: "black"
-            opacity: 0.3 
+            opacity: 0.4
         }
 
         // --- DASHBOARD CENTRAL (El "Macro-Contenedor") ---
@@ -49,93 +50,97 @@ WlSessionLock {
             Row {
                 id: dashboardLayout
                 anchors.centerIn: parent
-                spacing: 24
+                spacing: 36
 
                 // --- COLUMNA IZQUIERDA ---
                 Column {
+                    id: leftColumn
                     spacing: 20
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.top: parent.top
                     Modules.WeatherCard {}
                     Modules.SystemInfoCard {}
                     Modules.MediaPlayerCard {}
                 }
 
                 // --- COLUMNA CENTRAL ---
-                Column {
-                    spacing: 40 // Aumentado para dar aire al nuevo reloj gigante
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 300
+                Item {
+                    anchors.top: parent.top
+                    width: 340
+                    height: leftColumn.height
 
+                    // Reloj desplazado hacia abajo para equilibrar aire superior
                     Modules.ClockCard {
+                        id: clockCard
+                        anchors.top: parent.top
+                        anchors.topMargin: 28 * Theme.scale
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
 
-                    // Avatar
+                    // Avatar con tu imagen personalizada de Greninja
                     Rectangle {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: 120; height: 120; radius: 60
+                        id: avatar
+                        width: 120 * Theme.scale; height: 120 * Theme.scale; radius: width / 2
                         color: Theme.bgGlass
                         border.width: 1
                         border.color: Qt.alpha(Theme.white, 0.15)
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: passField.top
+                        anchors.bottomMargin: 24 * Theme.scale
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: ""
-                            font.family: Theme.fontIcons
-                            font.pixelSize: 54
-                            color: Theme.blue
+                        // 1. Imagen personalizada
+                        Image {
+                            id: avatarImg
+                            anchors.fill: parent
+                            anchors.margins: 4 * Theme.scale
+                            source: "file:///home/javier/Pictures/Greninja-Blue.jpeg"
+                            fillMode: Image.PreserveAspectCrop
+                            visible: false
+                        }
+
+                        // 2. Máscara circular
+                        Rectangle {
+                            id: avatarMask
+                            anchors.fill: avatarImg
+                            radius: width / 2
+                            visible: false
+                        }
+
+                        // 3. Recorte circular aplicado
+                        OpacityMask {
+                            anchors.fill: avatarImg
+                            source: avatarImg
+                            maskSource: avatarMask
                         }
                     }
 
+                    // Campo de contraseña
                     Modules.PasswordField {
+                        id: passField
+                        anchors.bottom: parent.bottom
                         anchors.horizontalCenter: parent.horizontalCenter
-                        onUnlocked: lock.locked = false
+                        onUnlocked: {
+                            lock.locked = false
+                            Qt.quit() 
+                        }
                     }
                 }
 
                 // --- COLUMNA DERECHA ---
                 Column {
                     spacing: 20
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.top: parent.top
 
-                    Row {
-                        spacing: 10
-                        Repeater {
-                            model: [
-                                { icon: "󰖩", text: "WLAN" },
-                                { icon: "󰂄", text: "BATT" },
-                                { icon: "󰋋", text: "VOL" }
-                            ]
-                            delegate: Rectangle {
-                                width: 80; height: 75; radius: 18 // Un poco más anchos para encajar mejor
-                                color: Theme.bgGlass
-                                border.width: 1
-                                border.color: Qt.alpha(Theme.white, 0.15)
-                                
-                                Column {
-                                    anchors.centerIn: parent
-                                    spacing: 6
-                                    Text { 
-                                        text: modelData.icon
-                                        color: Theme.blue
-                                        font.pixelSize: 24
-                                        font.family: Theme.fontIcons
-                                        anchors.horizontalCenter: parent.horizontalCenter 
-                                    }
-                                    Text { 
-                                        text: modelData.text
-                                        color: Theme.white
-                                        font.pixelSize: 11
-                                        font.weight: Font.Bold
-                                        font.family: Theme.fontMain
-                                        anchors.horizontalCenter: parent.horizontalCenter 
-                                    }
-                                }
-                            }
-                        }
+                    Modules.StatusIcons {
+                        id: statusCard
                     }
 
-                    Modules.NotificationsCard {}
+                    Modules.NotificationsCard {
+                        implicitHeight: leftColumn.height - statusCard.implicitHeight - powerCard.implicitHeight - 40
+                    }
+
+                    Modules.PowerButtons {
+                        id: powerCard
+                    }
                 }
             }
         }

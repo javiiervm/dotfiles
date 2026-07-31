@@ -1,22 +1,23 @@
 import QtQuick
+import QtQuick.Layouts
 import Quickshell.Io
 import "." as Local
 import "../../"
 
 Local.Card {
     id: root
-    implicitWidth: 260
-    implicitHeight: 170
+    implicitWidth: 260 * Theme.scale
+    implicitHeight: 160 * Theme.scale // Volvemos a la altura original
 
-    property string wm: "—"
-    property string user: "—"
+    property string wm: "Hyprland"
+    property string user: "javier"
     property string uptime: "—"
     property int battery: 0
     property bool charging: false
 
     Process {
         id: fetchProc
-        command: ["bash", Qt.resolvedUrl("../scripts/fetch.sh").toString().replace("file://", "")] //[cite: 19]
+        command: ["bash", Qt.resolvedUrl("../scripts/fetch.sh").toString().replace("file://", "")]
         stdout: SplitParser {
             onRead: data => {
                 try {
@@ -25,7 +26,7 @@ Local.Card {
                     root.user = j.user
                     root.uptime = j.uptime
                     root.battery = j.battery
-                    root.charging = j.charging //[cite: 19]
+                    root.charging = j.charging
                 } catch (e) {}
             }
         }
@@ -36,63 +37,77 @@ Local.Card {
         running: true
         repeat: true
         triggeredOnStart: true
-        onTriggered: fetchProc.running = true //[cite: 19]
+        onTriggered: fetchProc.running = true
     }
 
-    content: Row {
-        anchors.fill: parent
-        spacing: 14
+    // --- CONTENEDOR PRINCIPAL CENTRADO ---
+    Column {
+        anchors.centerIn: parent
+        spacing: 14 * Theme.scale
 
-        Canvas {
-            width: 48
-            height: 48
-            anchors.verticalCenter: parent.verticalCenter
-            onPaint: {
-                const ctx = getContext("2d")
-                ctx.strokeStyle = Theme.blue
-                ctx.lineWidth = 3
-                ctx.beginPath()
-                for (let i = 0; i < 6; i++) {
-                    const angle = Math.PI / 3 * i - Math.PI / 2
-                    const x = width / 2 + (width / 2 - 4) * Math.cos(angle)
-                    const y = height / 2 + (height / 2 - 4) * Math.sin(angle)
-                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y) //[cite: 19]
+        RowLayout {
+            spacing: 18 * Theme.scale
+            
+            // --- LOGO HEXAGONAL (CachyOS / Hyprland style) ---
+            Item {
+                Layout.preferredWidth: 55 * Theme.scale
+                Layout.preferredHeight: 55 * Theme.scale
+                Layout.alignment: Qt.AlignVCenter
+
+                Canvas {
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d");
+                        ctx.clearRect(0, 0, width, height);
+                        
+                        const cx = width / 2;
+                        const cy = height / 2;
+                        const r = Math.min(width, height) / 2 - (3 * Theme.scale); // Radio con padding
+                        
+                        ctx.beginPath();
+                        // Dibujar un hexágono regular
+                        for (let i = 0; i < 6; i++) {
+                            // Desfase de PI/6 para que los lados queden rectos en vertical
+                            const angle = (Math.PI / 3) * i + (Math.PI / 6); 
+                            const x = cx + r * Math.cos(angle);
+                            const y = cy + r * Math.sin(angle);
+                            if (i === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }
+                        ctx.closePath();
+                        
+                        ctx.lineWidth = 3.5 * Theme.scale;
+                        ctx.strokeStyle = Theme.blue; // Azul acorde a tu captura
+                        ctx.stroke();
+                    }
                 }
-                ctx.closePath()
-                ctx.stroke()
+            }
+
+            // --- TEXTOS ---
+            ColumnLayout {
+                spacing: 4 * Theme.scale
+                Layout.alignment: Qt.AlignVCenter
+
+                Text { text: "WM   : " + root.wm; color: Theme.white; font.pixelSize: 11 * Theme.scale; font.family: Theme.fontMain; font.weight: Font.DemiBold }
+                Text { text: "USER : " + root.user; color: Theme.white; font.pixelSize: 11 * Theme.scale; font.family: Theme.fontMain; font.weight: Font.DemiBold }
+                Text { text: "UP   : " + root.uptime; color: Theme.white; font.pixelSize: 11 * Theme.scale; font.family: Theme.fontMain; font.weight: Font.DemiBold }
+                Text { text: "BATT : " + (root.charging ? "(+) " : "") + root.battery + "%"; color: Theme.white; font.pixelSize: 11 * Theme.scale; font.family: Theme.fontMain; font.weight: Font.DemiBold }
             }
         }
 
-        Column {
-            spacing: 6
-            anchors.verticalCenter: parent.verticalCenter
-
-            Text {
-                text: "WM   : " + root.wm
-                color: Theme.white; font.pixelSize: 13; font.family: Theme.fontMain
-            }
-            Text {
-                text: "USER : " + root.user
-                color: Theme.white; font.pixelSize: 13; font.family: Theme.fontMain
-            }
-            Text {
-                text: "UP   : " + root.uptime
-                color: Theme.white; font.pixelSize: 13; font.family: Theme.fontMain
-            }
-            Text {
-                text: "BATT : " + (root.charging ? "(+) " : "") + root.battery + "%"
-                color: Theme.white; font.pixelSize: 13; font.family: Theme.fontMain
-            }
-
-            Row {
-                spacing: 6
-                topPadding: 4
-                Repeater {
-                    model: 8
-                    Rectangle {
-                        width: 10; height: 10; radius: 5
-                        color: index === 1 ? Theme.blue : Qt.alpha(Theme.white, 0.2) //[cite: 19]
-                    }
+        // --- INDICADORES INFERIORES (Workspaces / Dots) ---
+        Row {
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 6 * Theme.scale
+            
+            Repeater {
+                model: 8
+                Rectangle {
+                    width: 10 * Theme.scale
+                    height: 10 * Theme.scale
+                    radius: 5 * Theme.scale
+                    // Usamos Theme.blue para que haga juego con el hexágono
+                    color: index === 1 ? Theme.blue : Qt.alpha(Theme.white, 0.25)
                 }
             }
         }
