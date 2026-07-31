@@ -39,13 +39,9 @@ PanelWindow {
     visible: isReallyVisible
     color: "transparent"
 
-    // FONDO: Capa translúcida a pantalla completa
-    Rectangle {
-        anchors.fill: parent
-        color: Theme.bgGlass
-        opacity: wallCarouselWindow.visible_state ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
-    }
+    // Antes había una capa translúcida a pantalla completa que oscurecía todo
+    // el escritorio (efecto "blur"/glass). Se ha eliminado a petición: ahora
+    // el menú aparece directamente sobre el escritorio, sin capa de fondo.
 
     ListModel { id: wallpaperModel }
     ListModel { id: filteredModel } 
@@ -311,7 +307,12 @@ PanelWindow {
                 Item {
                     anchors.fill: parent
                     // clip: true (Se debe eliminar estrictamente para que la máscara redondeada funcione)
-                    
+
+                    // Los wallpapers NO seleccionados quedan ligeramente
+                    // transparentes (se deja ver el escritorio a través).
+                    opacity: carousel.currentIndex === index ? 1.0 : 0.6
+                    Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+
                     transform: Matrix4x4 {
                         matrix: Qt.matrix4x4(1, -0.25, 0, 0,
                                             0,     1, 0, 0,
@@ -397,7 +398,9 @@ PanelWindow {
             width: pillRow.implicitWidth + 40
             height: 44 
             radius: 22
-            color: Theme.bgGlass
+            // Ligeramente transparente: al no haber capa de fondo detrás,
+            // ahora se nota el escritorio a través de la píldora.
+            color: Qt.alpha(Theme.bgGlass, 0.75)
             border.color: Qt.alpha(Theme.white, 0.1)
             border.width: 1
             
