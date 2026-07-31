@@ -1,10 +1,9 @@
 import QtQuick
+import "../../"
 
-// Reloj grande estilo "02:46 PM" + fecha "WEDNESDAY · 1 JUL"
-// Sin tarjeta/fondo propio: se ve mejor flotando directamente sobre el wallpaper,
-// igual que en la referencia.
 Column {
-    spacing: 4
+    spacing: 12
+    anchors.horizontalCenter: parent.horizontalCenter
 
     QtObject {
         id: clock
@@ -20,33 +19,53 @@ Column {
     }
 
     Row {
-        spacing: 6
+        spacing: 8
         anchors.horizontalCenter: parent.horizontalCenter
 
+        // Horas
         Text {
-            text: Qt.formatTime(clock.date, "hh:mm")
-            font.pixelSize: 76
-            font.weight: Font.Black
-            font.family: "JetBrains Mono Nerd Font"
-            color: "#7ee6ff"   // cian, igual que el "02:46" de la captura
+            text: Qt.formatTime(clock.date, "hh")
+            font.pixelSize: 140 
+            font.family: "Bebas Neue"
+            font.weight: Font.Bold // Forzamos el grosor
+            color: Theme.white
+            height: 140
+            verticalAlignment: Text.AlignVCenter
         }
-        Text {
-            text: Qt.formatTime(clock.date, "AP")
-            font.pixelSize: 22
-            font.weight: Font.Bold
-            font.family: "JetBrains Mono Nerd Font"
-            color: "#e8f4ff"
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 12
+
+        // Minutos y AM/PM apilados
+        Column {
+            spacing: -12
+            anchors.verticalCenter: parent.verticalCenter
+
+            // Minutos
+            Text {
+                text: Qt.formatTime(clock.date, "mm")
+                font.pixelSize: 75
+                font.family: "Bebas Neue"
+                font.weight: Font.Bold // Forzamos el grosor
+                color: Theme.grey1
+            }
+            
+            // AM / PM
+            Text {
+                text: Qt.formatTime(clock.date, "AP")
+                font.pixelSize: 32
+                font.family: "Bebas Neue"
+                font.weight: Font.Bold // Forzamos el grosor
+                color: Qt.alpha(Theme.grey1, 0.6) 
+            }
         }
     }
 
+    // Fecha inferior
     Text {
         anchors.horizontalCenter: parent.horizontalCenter
         text: Qt.formatDate(clock.date, "dddd").toUpperCase() + "  ·  " + Qt.formatDate(clock.date, "d MMM").toUpperCase()
-        font.pixelSize: 14
-        font.family: "JetBrains Mono Nerd Font"
-        font.letterSpacing: 1
-        color: "#9fb3c8"
+        font.pixelSize: 13
+        font.weight: Font.Bold
+        font.family: Theme.fontMain
+        font.letterSpacing: 2
+        color: Theme.grey1 
     }
 }

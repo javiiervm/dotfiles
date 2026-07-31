@@ -1,11 +1,8 @@
 import QtQuick
 import Quickshell.Io
 import "." as Local
+import "../../"
 
-// Tarjeta de clima. Usa wttr.in en formato JSON (?format=j1) porque no
-// requiere API key. Si prefieres OpenWeatherMap u otro proveedor con más
-// precisión, cambia el comando en `Process.command` y el parseo en
-// `onStdoutParsed` — la interfaz visual no necesita tocarse.
 Local.Card {
     id: root
     implicitWidth: 260
@@ -19,11 +16,9 @@ Local.Card {
 
     Process {
         id: weatherProc
-        // -s silencioso, -S ignora errores de cert si tu sistema tiene relojes
-        // desincronizados justo tras un boot en frío
-        command: ["curl", "-s", "https://wttr.in/?format=j1"]
+        command: ["curl", "-s", "https://wttr.in/?format=j1"] //[cite: 20]
         stdout: SplitParser {
-            splitMarker: "" // recibe el bloque completo
+            splitMarker: "" 
             onRead: data => {
                 try {
                     const j = JSON.parse(data)
@@ -32,20 +27,20 @@ Local.Card {
                     root.tempC = cur.temp_C
                     root.feelsLike = cur.FeelsLikeC
                     root.high = j.weather[0].maxtempC
-                    root.low = j.weather[0].mintempC
+                    root.low = j.weather[0].mintempC //[cite: 20]
                 } catch (e) {
-                    root.condition = "Sin datos"
+                    root.condition = "No data"
                 }
             }
         }
     }
 
     Timer {
-        interval: 10 * 60 * 1000 // refresca cada 10 minutos
+        interval: 10 * 60 * 1000
         running: true
         repeat: true
         triggeredOnStart: true
-        onTriggered: weatherProc.running = true
+        onTriggered: weatherProc.running = true //[cite: 20]
     }
 
     content: Column {
@@ -54,28 +49,28 @@ Local.Card {
 
         Text {
             text: root.condition
-            color: "#9fb3c8"
+            color: Theme.grey1
             font.pixelSize: 13
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
         }
         Text {
-            text: root.tempC + "°C"
-            color: "#eef4fb"
+            text: root.tempC + "°C" //[cite: 20]
+            color: Theme.white
             font.pixelSize: 34
             font.weight: Font.Bold
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
         }
         Text {
-            text: "Feels like " + root.feelsLike + "°C"
-            color: "#7f93a8"
+            text: "Feels like " + root.feelsLike + "°C" //[cite: 20]
+            color: Theme.grey1
             font.pixelSize: 11
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
         }
         Text {
-            text: "High " + root.high + "°C · Low " + root.low + "°C"
-            color: "#7f93a8"
+            text: "High " + root.high + "°C · Low " + root.low + "°C" //[cite: 20]
+            color: Theme.grey1
             font.pixelSize: 11
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
         }
     }
 }

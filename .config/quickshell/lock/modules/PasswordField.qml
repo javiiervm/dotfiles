@@ -1,20 +1,7 @@
 import QtQuick
 import Quickshell.Services.Pam
+import "../../"
 
-// Campo de contraseña translúcido con autenticación PAM real.
-//
-// Flujo real de PamContext (verificado contra
-// /usr/lib/qt6/qml/Quickshell/Services/Pam/quickshell-service-pam.qmltypes):
-//   1. start()               → inicia la sesión PAM (sin argumentos)
-//   2. señal pamMessage      → el backend pide algo; mirar las propiedades
-//                              `message` / `responseRequired` / `responseVisible`
-//   3. respond(texto)        → responder cuando responseRequired es true
-//   4. señal completed(result) → PamResult.Success / Failed / Error / MaxTries
-//
-// `config` y `user` no se fijan explícitamente: por defecto ya usa el
-// servicio "login" de /etc/pam.d y el usuario del proceso actual, que es
-// lo que confirmó tu log ("Starting pam session for user javier with
-// config login").
 Item {
     id: root
     implicitWidth: 260
@@ -29,8 +16,6 @@ Item {
         id: pam
 
         onPamMessage: {
-            // El backend está pidiendo algo (típicamente la contraseña).
-            // Le respondemos con lo que el usuario ha escrito.
             if (responseRequired) {
                 pam.respond(field.text)
             }
@@ -42,7 +27,7 @@ Item {
                 root.errorText = ""
                 root.unlocked()
             } else {
-                root.errorText = "Contraseña incorrecta"
+                root.errorText = "Incorrect password" //[cite: 15]
                 field.text = ""
                 shake.start()
             }
@@ -50,7 +35,7 @@ Item {
 
         onError: error => {
             root.authenticating = false
-            root.errorText = "Error PAM: " + PamError.toString(error)
+            root.errorText = "PAM Error: " + PamError.toString(error)
             field.text = ""
         }
     }
@@ -59,9 +44,9 @@ Item {
         id: box
         anchors.fill: parent
         radius: 23
-        color: "#00000033"
+        color: Qt.alpha(Theme.bg0, 0.4)
         border.width: 1
-        border.color: "#ffffff26"
+        border.color: Qt.alpha(Theme.white, 0.2)
 
         SequentialAnimation {
             id: shake
@@ -76,9 +61,10 @@ Item {
             spacing: 8
 
             Text {
-                text: ""
-                color: "#eef4fb"
+                text: ""
+                color: Theme.white
                 font.pixelSize: 16
+                font.family: Theme.fontIcons
                 anchors.verticalCenter: parent.verticalCenter
                 leftPadding: 8
             }
@@ -88,17 +74,17 @@ Item {
                 width: parent.width - 70
                 anchors.verticalCenter: parent.verticalCenter
                 echoMode: TextInput.Password
-                color: "#eef4fb"
+                color: Theme.white
                 font.pixelSize: 14
-                font.family: "JetBrains Mono Nerd Font"
+                font.family: Theme.fontMain
                 focus: true
-                enabled: !root.authenticating
+                enabled: !root.authenticating //[cite: 15]
 
                 Text {
-                    text: root.errorText !== "" ? root.errorText : "Enter your password"
-                    color: root.errorText !== "" ? "#ff8080" : "#7f93a8"
+                    text: root.errorText !== "" ? root.errorText : "Enter your password" //[cite: 15]
+                    color: root.errorText !== "" ? Theme.red : Theme.grey1
                     font.pixelSize: 13
-                    font.family: "JetBrains Mono Nerd Font"
+                    font.family: Theme.fontMain
                     visible: field.text.length === 0
                 }
 
@@ -108,14 +94,6 @@ Item {
                     root.errorText = ""
                     pam.start()
                 }
-            }
-
-            Text {
-                text: ""
-                color: "#eef4fb"
-                font.pixelSize: 16
-                anchors.verticalCenter: parent.verticalCenter
-                MouseArea { anchors.fill: parent; onClicked: field.accepted() }
             }
         }
     }

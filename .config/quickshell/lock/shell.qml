@@ -1,11 +1,9 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Wayland
 import "modules" as Modules
-
-// Lanzar con: quickshell -c lock.qml
-// (o copia esta carpeta a ~/.config/quickshell/lock/ e intégrala con tu
-// configuración principal / atajo de bloqueo de Hyprland)
+import "modules" // Importa el qmldir local para acceder a Theme
 
 WlSessionLock {
     id: lock
@@ -14,104 +12,131 @@ WlSessionLock {
     WlSessionLockSurface {
         id: surface
 
+        // Imagen base oculta
         Image {
+            id: wall
             anchors.fill: parent
             source: "file://" + Quickshell.env("HOME") + "/.cache/hyprlock/current_wallpaper.png"
             fillMode: Image.PreserveAspectCrop
+            visible: false 
         }
 
-        // Oscurece un poco el wallpaper para que las tarjetas resalten,
-        // igual que el `brightness = 0.7` que ya usabas en hyprlock
+        // Desenfoque del entorno
+        MultiEffect {
+            anchors.fill: wall
+            source: wall
+            blurEnabled: true
+            blur: 0.45
+        }
+
+        // Capa de oscurecimiento global
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
-            opacity: 0.25
+            color: "black"
+            opacity: 0.3 
         }
 
-        Row {
+        // --- DASHBOARD CENTRAL (El "Macro-Contenedor") ---
+        Rectangle {
             anchors.centerIn: parent
-            spacing: 24
+            width: dashboardLayout.implicitWidth + 80
+            height: dashboardLayout.implicitHeight + 80
+            radius: 32
+            color: Qt.alpha(Theme.bg0, 0.65) // Fondo oscuro translúcido
+            border.width: 1
+            border.color: Qt.alpha(Theme.white, 0.1)
 
-            // --- COLUMNA IZQUIERDA ---
-            Column {
-                spacing: 20
-                anchors.verticalCenter: parent.verticalCenter
-                Modules.WeatherCard {}
-                Modules.SystemInfoCard {}
-                Modules.MediaPlayerCard {}
-            }
+            Row {
+                id: dashboardLayout
+                anchors.centerIn: parent
+                spacing: 24
 
-            // --- COLUMNA CENTRAL ---
-            Column {
-                spacing: 32
-                anchors.verticalCenter: parent.verticalCenter
-                width: 260
-
-                Item { width: 1; height: 20 } // respiro superior
-
-                Modules.ClockCard {
-                    anchors.horizontalCenter: parent.horizontalCenter
+                // --- COLUMNA IZQUIERDA ---
+                Column {
+                    spacing: 20
+                    anchors.verticalCenter: parent.verticalCenter
+                    Modules.WeatherCard {}
+                    Modules.SystemInfoCard {}
+                    Modules.MediaPlayerCard {}
                 }
 
-                // Avatar/planeta decorativo central, como en la referencia.
-                // Sustituye por tu propia imagen si tienes una.
-                Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: 140; height: 140; radius: 70
-                    color: "#232a3d"
-                    border.width: 1
-                    border.color: "#ffffff1a"
+                // --- COLUMNA CENTRAL ---
+                Column {
+                    spacing: 40 // Aumentado para dar aire al nuevo reloj gigante
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 300
 
+                    Modules.ClockCard {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                    }
+
+                    // Avatar
                     Rectangle {
-                        anchors.centerIn: parent
-                        width: 80; height: 80; radius: 40
-                        color: "#eef4fb"
-                        rotation: -20
-                        Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 120; height: 120; radius: 60
+                        color: Theme.bgGlass
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.white, 0.15)
+
+                        Text {
                             anchors.centerIn: parent
-                            width: 120; height: 14; radius: 7
-                            color: "#232a3d"
+                            text: ""
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 54
+                            color: Theme.blue
                         }
+                    }
+
+                    Modules.PasswordField {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        onUnlocked: lock.locked = false
                     }
                 }
 
-                Modules.PasswordField {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    onUnlocked: lock.locked = false
-                }
-            }
+                // --- COLUMNA DERECHA ---
+                Column {
+                    spacing: 20
+                    anchors.verticalCenter: parent.verticalCenter
 
-            // --- COLUMNA DERECHA ---
-            Column {
-                spacing: 20
-                anchors.verticalCenter: parent.verticalCenter
-
-                Row {
-                    spacing: 10
-                    // Pills de estado rápido (temp/red/batería), decorativas
-                    // por ahora — conéctalas a tus propios providers de datos
-                    Repeater {
-                        model: [
-                            { icon: "", text: "100%" },
-                            { icon: "", text: "41%" },
-                            { icon: "", text: "16%" }
-                        ]
-                        delegate: Rectangle {
-                            width: 60; height: 60; radius: 16
-                            color: "#1a1f2eCC"
-                            border.width: 1
-                            border.color: "#ffffff1a"
-                            Column {
-                                anchors.centerIn: parent
-                                spacing: 2
-                                Text { text: modelData.icon; color: "#7ee6ff"; font.pixelSize: 16; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: modelData.text; color: "#eef4fb"; font.pixelSize: 11; font.family: "JetBrains Mono Nerd Font"; anchors.horizontalCenter: parent.horizontalCenter }
+                    Row {
+                        spacing: 10
+                        Repeater {
+                            model: [
+                                { icon: "󰖩", text: "WLAN" },
+                                { icon: "󰂄", text: "BATT" },
+                                { icon: "󰋋", text: "VOL" }
+                            ]
+                            delegate: Rectangle {
+                                width: 80; height: 75; radius: 18 // Un poco más anchos para encajar mejor
+                                color: Theme.bgGlass
+                                border.width: 1
+                                border.color: Qt.alpha(Theme.white, 0.15)
+                                
+                                Column {
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    Text { 
+                                        text: modelData.icon
+                                        color: Theme.blue
+                                        font.pixelSize: 24
+                                        font.family: Theme.fontIcons
+                                        anchors.horizontalCenter: parent.horizontalCenter 
+                                    }
+                                    Text { 
+                                        text: modelData.text
+                                        color: Theme.white
+                                        font.pixelSize: 11
+                                        font.weight: Font.Bold
+                                        font.family: Theme.fontMain
+                                        anchors.horizontalCenter: parent.horizontalCenter 
+                                    }
+                                }
                             }
                         }
                     }
-                }
 
-                Modules.NotificationsCard {}
+                    Modules.NotificationsCard {}
+                }
             }
         }
     }

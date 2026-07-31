@@ -1,59 +1,49 @@
 import QtQuick
-import Quickshell.Services.Notifications
 import "." as Local
+import "../../"
 
-// IMPORTANTE: solo puede haber UN NotificationServer activo en tu sesión
-// (ocupa el nombre org.freedesktop.Notifications en DBus). Si tu barra
-// principal de Quickshell ya corre uno, NO instancies otro aquí: en vez de
-// eso, expón la lista de notificaciones desde tu shell principal como una
-// propiedad global (singleton) y consúmela aquí. Dejo el server activo
-// como fallback para que el lockscreen funcione standalone durante pruebas.
 Local.Card {
     id: root
     implicitWidth: 260
     implicitHeight: 220
 
-    NotificationServer {
-        id: server
-        keepOnReload: true
-        onNotification: notif => {
-            notif.tracked = true
-        }
-    }
+    // ELIMINADO NotificationServer para prevenir conflictos críticos de Wayland/DBus.
+    // Dependemos de un modelo inyectado o mostramos 0 por defecto.
+    property var notifModel: typeof sharedNotifModel !== "undefined" ? sharedNotifModel : null
 
     content: Column {
         anchors.fill: parent
         spacing: 4
 
         Text {
-            text: server.trackedNotifications.values.length + " notifications"
-            color: "#9fb3c8"
+            text: (root.notifModel ? root.notifModel.count : 0) + " notifications"
+            color: Theme.grey1
             font.pixelSize: 12
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
             bottomPadding: 6
         }
 
         Repeater {
-            model: server.trackedNotifications.values.slice(0, 4)
+            model: root.notifModel ? 4 : 0 //[cite: 17]
             delegate: Column {
                 width: root.width - 32
                 spacing: 1
                 bottomPadding: 8
 
                 Text {
-                    text: modelData.summary
-                    color: "#eef4fb"
+                    text: model.title !== undefined ? model.title : (model.summary || "")
+                    color: Theme.white
                     font.pixelSize: 12
                     font.weight: Font.Bold
-                    font.family: "JetBrains Mono Nerd Font"
+                    font.family: Theme.fontMain
                     elide: Text.ElideRight
                     width: parent.width
                 }
                 Text {
-                    text: modelData.body
-                    color: "#7f93a8"
+                    text: model.body || ""
+                    color: Theme.grey1
                     font.pixelSize: 11
-                    font.family: "JetBrains Mono Nerd Font"
+                    font.family: Theme.fontMain
                     elide: Text.ElideRight
                     width: parent.width
                     maximumLineCount: 1
@@ -62,11 +52,11 @@ Local.Card {
         }
 
         Text {
-            visible: server.trackedNotifications.values.length === 0
-            text: "Sin notificaciones"
-            color: "#7f93a8"
+            visible: !root.notifModel || root.notifModel.count === 0
+            text: "No notifications"
+            color: Theme.grey1
             font.pixelSize: 12
-            font.family: "JetBrains Mono Nerd Font"
+            font.family: Theme.fontMain
         }
     }
 }
