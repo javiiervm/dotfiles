@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Qt5Compat.GraphicalEffects
 import ".."
 
 PanelWindow {
@@ -137,11 +138,18 @@ PanelWindow {
             }
         }
         
-        carousel.currentIndex = targetIndex;
+        /*carousel.currentIndex = targetIndex;
         // Solo desplazamos la vista físicamente si hemos limpiado los filtros y encontrado la coincidencia
         if (isFilterEmpty && targetIndex !== 0) {
             carousel.positionViewAtIndex(targetIndex, ListView.Center);
-        }
+        }*/
+        Qt.callLater(function() {
+            carousel.currentIndex = targetIndex;
+            if (isFilterEmpty) {
+                // Al ejecutarse en el siguiente ciclo, la geometría ya incluye los anchos de 550px
+                carousel.positionViewAtIndex(targetIndex, ListView.Center);
+            }
+        });
     }
 
     /*function executeWall(cmd, iconPath) {
@@ -239,16 +247,16 @@ PanelWindow {
             width: parent.width
             height: 320 
             orientation: ListView.Horizontal
-            spacing: -40 
+            spacing: 15
             
             model: filteredModel
             clip: false
             
-            preferredHighlightBegin: parent.width / 2 - 150
-            preferredHighlightEnd: parent.width / 2 + 150
-            highlightRangeMode: ListView.StrictlyEnforceRange
+            preferredHighlightBegin: parent.width / 2 - 275
+            preferredHighlightEnd: parent.width / 2 + 275
+            highlightRangeMode: ListView.ApplyRange
 
-            highlightMoveDuration: 150
+            highlightMoveDuration: 250
             
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Left) { decrementCurrentIndex(); event.accepted = true; }
@@ -268,51 +276,78 @@ PanelWindow {
             }
 
             delegate: Item {
-                width: 300 
+                // Ancho dinámico que se expande al enfocar
+                width: ListView.isCurrentItem ? 550 : 200 
                 height: carousel.height
                 z: ListView.isCurrentItem ? 10 : 1
                 
-                scale: ListView.isCurrentItem ? 1.12 : 1.0
-                Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
+                // Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutQuart } }
+                Behavior on width { 
+                    NumberAnimation { 
+                        // Anula la interpolación geométrica mientras el menú se abre para garantizar 
+                        // que positionViewAtIndex disponga del contentWidth real.
+                        duration: wallCarouselWindow.opacity === 1.0 ? 300 : 0 
+                        easing.type: Easing.OutQuart 
+                    } 
+                }
 
                 Item {
                     anchors.fill: parent
-                    clip: true
+                    // clip: true (Se debe eliminar estrictamente para que la máscara redondeada funcione)
                     
                     transform: Matrix4x4 {
                         matrix: Qt.matrix4x4(1, -0.25, 0, 0,
-                                             0,     1, 0, 0,
-                                             0,     0, 1, 0,
-                                             0,     0, 0, 1)
-                    }
-
-                    Image {
-                        transform: Matrix4x4 {
-                            matrix: Qt.matrix4x4(1, 0.25, 0, 0,
-                                                 0,    1, 0, 0,
-                                                 0,    0, 1, 0,
-                                                 0,    0, 0, 1)
-                        }
-                        
-                        width: parent.width + (parent.height * 0.25) + 160 
-                        height: parent.height + 120 
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.horizontalCenterOffset: -40 
-                        anchors.verticalCenterOffset: -10   
-                        
-                        source: "file://" + icon
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        sourceSize.width: 700 
-                        sourceSize.height: 500
+                                            0,     1, 0, 0,
+                                            0,     0, 1, 0,
+                                            0,     0, 0, 1)
                     }
 
                     Rectangle {
+                        id: maskRect
                         anchors.fill: parent
-                        color: Qt.alpha(Theme.bgGlass, 0.4)
-                        opacity: carousel.currentIndex === index ? 0.0 : 1.0
-                        Behavior on opacity { NumberAnimation { duration: 300 } }
+                        radius: 20 // Valor que define la suavidad del redondeado de las esquinas
+                        visible: false
+                    }
+
+                    Item {
+                        id: contentItem
+                        anchors.fill: parent
+                        visible: false
+
+                        Image {
+                            transform: Matrix4x4 {
+                                matrix: Qt.matrix4x4(1, 0.25, 0, 0,
+                                                    0,    1, 0, 0,
+                                                    0,    0, 1, 0,
+                                                    0,    0, 0, 1)
+                            }
+                            
+                            width: parent.width + (parent.height * 0.25) + 160 
+                            height: parent.height + 120 
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.horizontalCenterOffset: -40 
+                            anchors.verticalCenterOffset: -10   
+                            
+                            source: "file://" + icon
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: 700 
+                            sourceSize.height: 500
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.alpha(Theme.bgGlass, 0.4)
+                            opacity: carousel.currentIndex === index ? 0.0 : 1.0
+                            Behavior on opacity { NumberAnimation { duration: 300 } }
+                        }
+                    }
+
+                    OpacityMask {
+                        anchors.fill: parent
+                        source: contentItem
+                        maskSource: maskRect
                     }
                     
                     Rectangle {
@@ -320,6 +355,7 @@ PanelWindow {
                         color: "transparent"
                         border.color: carousel.currentIndex === index ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
                         border.width: 1
+                        radius: 20 // Debe coincidir obligatoriamente con el radio de maskRect
                     }
                 }
 
