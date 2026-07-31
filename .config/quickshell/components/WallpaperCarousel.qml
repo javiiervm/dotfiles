@@ -257,6 +257,23 @@ PanelWindow {
             highlightRangeMode: ListView.ApplyRange
 
             highlightMoveDuration: 250
+            // Recicla delegates al hacer scroll en vez de crear/destruirlos.
+            // No cambia nada visual, solo reduce trabajo al desplazar la lista.
+            reuseItems: true
+
+            // Colchón invisible al principio y al final: sin esto, al llegar al
+            // primer o último wallpaper el ListView no tiene más contenido que
+            // desplazar y el item seleccionado se queda pegado al borde en vez
+            // de centrarse. El ancho es tal que, incluso expandido a 550px,
+            // ese item extremo puede llegar exactamente al centro de la ventana.
+            header: Item {
+                width: Math.max(0, carousel.width / 2 - 275)
+                height: 1
+            }
+            footer: Item {
+                width: Math.max(0, carousel.width / 2 - 275)
+                height: 1
+            }
             
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Left) { decrementCurrentIndex(); event.accepted = true; }
