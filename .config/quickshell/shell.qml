@@ -63,6 +63,9 @@ ShellRoot {
         root.isClipIconHovered = true;
         root.isClipMenuOpen = true;
         clipHideTimer.stop();
+
+        if (!clipProc.running)
+            clipProc.running = true;
     }
 
     function startClipHideTimer() {
@@ -131,19 +134,37 @@ ShellRoot {
     }
     
     // Funciones del Portapapeles
+    function refreshClipboard() {
+        if (!clipProc.running)
+            clipProc.running = true;
+    }
+
     function copyClipItem(id) {
         clipActionProc.command = ["bash", "-c", "cliphist decode " + id + " | wl-copy"]
         clipActionProc.running = true
+        clipRefreshTimer.restart()
     }
 
     function deleteClipItem(id) {
-        clipActionProc.command = ["bash", "-c", "cliphist delete <<< $(cliphist list | grep '^" + id + "\t')"]
+        clipActionProc.command = [
+            "bash", "-c",
+            "cliphist list | awk -F '\t' -v id='" + id + "' '$1 == id { print; exit }' | cliphist delete"
+        ]
         clipActionProc.running = true
+        clipRefreshTimer.restart()
     }
 
     function clearClipHistory() {
         clipActionProc.command = ["bash", "-c", "cliphist wipe"]
         clipActionProc.running = true
+        clipRefreshTimer.restart()
+    }
+
+    Timer {
+        id: clipRefreshTimer
+        interval: 150
+        repeat: false
+        onTriggered: root.refreshClipboard()
     }
     
     // Procesos separados
@@ -409,20 +430,54 @@ ShellRoot {
         }
     }
 
-    // --- DAEMON PORTAPAPELES ---
+    // --- PORTAPAPELES ---
     Process {
         id: clipProc
-        command: ["bash", "-c", "python3 -OO /home/javier/.config/quickshell/scripts/clip_daemon.py 2>> /tmp/clip_daemon_qs.log"]
-        running: true
-        stdout: SplitParser {
-            onRead: (line) => {
-                if (line.startsWith("CLIP|")) {
-                    var items = JSON.parse(line.substring(5))
-                    clipboardModel.clear()
-                    for (var i = 0; i < items.length; i++) {
-                        clipboardModel.append(items[i])
-                    }
+
+        command: [
+            "bash",
+            "-c",
+            "cliphist list | head -n 25"
+        ]
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                clipboardModel.clear()
+
+                var lines = text.split("\n")
+
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i]
+
+                    if (!line.trim())
+                        continue
+
+                    var tabIndex = line.indexOf("\t")
+
+                    if (tabIndex === -1)
+                        continue
+
+                    var clipId = line.substring(0, tabIndex)
+                    var clipContent = line.substring(tabIndex + 1)
+
+                    clipboardModel.append({
+                        clipId: clipId,
+                        clipContent: clipContent
+                    })
                 }
+
+                console.log(
+                    "[Clipboard] Loaded " +
+                    clipboardModel.count +
+                    " entries"
+                )
+            }
+        }
+
+        stderr: StdioCollector {
+            onStreamFinished: {
+                if (text.trim().length > 0)
+                    console.warn("[Clipboard] " + text.trim())
             }
         }
     }
@@ -740,8 +795,10 @@ ShellRoot {
             id: clipMenuWindow
             anchors { top: true; right: true }
             WlrLayershell.layer: WlrLayershell.Overlay
-            implicitHeight: root.isClipMenuOpen ? Math.min(320, clipColumn.implicitHeight + 20) : 0
             implicitWidth: 260
+            implicitHeight: root.isClipMenuOpen
+                ? Math.min(320, 63 + (root.clipboardModel.count * 32))
+                : 0
             margins { right: 22 } // Alineado bajo el icono
             exclusiveZone: 0
             color: "transparent"
@@ -776,13 +833,13 @@ ShellRoot {
                 }
 
                 ColumnLayout {
-                    id: clipColumn
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 8
 
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 20
 
                         Text {
                             text: "Clipboard"
@@ -794,7 +851,9 @@ ShellRoot {
                         }
 
                         Rectangle {
-                            width: 55; height: 18; radius: 4
+                            Layout.preferredWidth: 55
+                            Layout.preferredHeight: 18
+                            radius: 4
                             color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
                             border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
                             border.width: 1
@@ -811,6 +870,7 @@ ShellRoot {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
+                                enabled: root.clipboardModel.count > 0
                                 onClicked: root.clearClipHistory()
                             }
                         }
@@ -818,22 +878,39 @@ ShellRoot {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        Layout.preferredHeight: 1
                         color: Qt.alpha(Theme.white, 0.1)
                     }
 
+                    Text {
+                        visible: root.clipboardModel.count === 0
+                        text: "No clipboard history"
+                        color: Theme.grey1
+                        font.family: Theme.fontMain
+                        font.pixelSize: 10
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+
                     ListView {
+                        id: clipboardList
+                        visible: root.clipboardModel.count > 0
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: root.clipboardModel
                         spacing: 4
+                        model: root.clipboardModel
 
                         delegate: Rectangle {
+                            required property string clipId
+                            required property string clipContent
+
                             width: ListView.view.width
                             height: 28
                             radius: 6
-                            color: itemArea.containsMouse ? Qt.alpha(Theme.white, 0.1) : "transparent"
+                            color: rowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
 
                             RowLayout {
                                 anchors.fill: parent
@@ -841,17 +918,35 @@ ShellRoot {
                                 anchors.rightMargin: 6
                                 spacing: 6
 
-                                Text {
-                                    text: model.content
-                                    color: Theme.white
-                                    font.family: Theme.fontMain
-                                    font.pixelSize: 11
+                                Item {
                                     Layout.fillWidth: true
-                                    elide: Text.ElideRight
+                                    Layout.fillHeight: true
+
+                                    Text {
+                                        anchors.fill: parent
+                                        anchors.rightMargin: 4
+                                        text: clipContent
+                                        color: Theme.white
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+                                    }
+
+                                    MouseArea {
+                                        id: rowMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.copyClipItem(clipId)
+                                    }
                                 }
 
                                 Item {
-                                    width: 16; height: 16
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
+
                                     Text {
                                         anchors.centerIn: parent
                                         text: "󰅖"
@@ -859,24 +954,13 @@ ShellRoot {
                                         font.pixelSize: 12
                                         color: delArea.containsMouse ? Theme.red : Theme.grey1
                                     }
+
                                     MouseArea {
                                         id: delArea
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.deleteClipItem(model.id)
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                id: itemArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (mouse.x < width - 24) {
-                                        root.copyClipItem(model.id)
+                                        onClicked: root.deleteClipItem(clipId)
                                     }
                                 }
                             }
