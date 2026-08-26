@@ -1562,6 +1562,22 @@ ShellRoot {
         implicitWidth: dockLayout.implicitWidth + 34
         implicitHeight: 66
 
+        // IMPORTANT: a transparent PanelWindow is still an input surface.
+        // When the dock is hidden, use an empty input mask so clicks pass
+        // straight through to the application underneath. When visible, only
+        // the actual dock surface is clickable.
+        mask: dockVisual.showDock ? dockInputRegion : emptyDockInputRegion
+
+        Region {
+            id: dockInputRegion
+            item: dockGlass
+            radius: dockGlass.radius
+        }
+
+        Region {
+            id: emptyDockInputRegion
+        }
+
         BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
 
         Region {
@@ -1571,6 +1587,7 @@ ShellRoot {
         }
 
         Item {
+            id: dockVisual
             anchors.fill: parent
 
             property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
