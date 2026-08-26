@@ -24,8 +24,12 @@ PanelWindow {
     property bool isBtLoading: false
     property bool isFileLoading: false
     
-    property int activeHeaderButton: 0 
-    
+    property int activeHeaderButton: 0
+
+    // Apps recientes: mantenemos una fila separada al estilo macOS.
+    // Los nombres se leen de ~/.cache/qs_recents, que ya actualiza executeApp().
+    property var recentNames: []
+
     signal requestIslandMsg(string icon, string color, string text)
 
     anchors { top: true; bottom: true; left: true; right: true }
@@ -65,8 +69,12 @@ PanelWindow {
 
     ListModel { id: rawModel }
     ListModel { id: filteredModel }
+    ListModel { id: recentModel }
 
-    Component.onCompleted: { loadTabData("--apps"); }
+    Component.onCompleted: {
+        loadTabData("--apps");
+        loadRecents();
+    }
 
     MouseArea { anchors.fill: parent; onClicked: { if (visible_state) toggle(); } }
 
@@ -104,7 +112,26 @@ PanelWindow {
         onExited: {
             launcherWindow.isFileLoading = false;
             updateFilter();
+            if (launcherWindow.currentMode === 0)
+                rebuildRecentModel();
         }
+    }
+
+    Process {
+        id: recentLoader
+        stdout: SplitParser {
+            onRead: (line) => {
+                var name = (line || "").trim();
+                if (name === "") return;
+
+                var names = launcherWindow.recentNames.slice();
+                if (names.indexOf(name) === -1 && names.length < 6) {
+                    names.push(name);
+                    launcherWindow.recentNames = names;
+                }
+            }
+        }
+        onExited: rebuildRecentModel()
     }
 
     Process { id: execProc }
@@ -194,20 +221,24 @@ PanelWindow {
                 // A) BUSCADOR Y CONTRASEÑA
                 Rectangle {
                     anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 50
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: launcherWindow.currentMode === 9 ? parent.width : Math.min(parent.width, 470)
+                    height: launcherWindow.currentMode === 9 ? 50 : 38
                     visible: launcherWindow.currentMode === 0 || launcherWindow.currentMode === 9
                     radius: height / 2
-                    color: Qt.alpha(Theme.white, 0.05)
-                    border.color: Qt.alpha(Theme.white, 0.15)
+                    color: launcherWindow.currentMode === 9
+                        ? Qt.alpha(Theme.white, 0.05)
+                        : Qt.alpha(Theme.white, 0.075)
+                    border.color: launcherWindow.currentMode === 9
+                        ? Qt.alpha(Theme.white, 0.15)
+                        : Qt.alpha(Theme.white, 0.18)
                     border.width: 1
 
                     Row {
                         anchors.fill: parent
-                        anchors.leftMargin: launcherWindow.currentMode === 9 ? 8 : 20
-                        anchors.rightMargin: 20
-                        spacing: 12
+                        anchors.leftMargin: launcherWindow.currentMode === 9 ? 8 : 14
+                        anchors.rightMargin: launcherWindow.currentMode === 9 ? 20 : 14
+                        spacing: launcherWindow.currentMode === 9 ? 12 : 9
 
                         Rectangle {
                             width: 34; height: 34; radius: 17; color: "transparent"
@@ -224,8 +255,8 @@ PanelWindow {
                             anchors.verticalCenter: parent.verticalCenter
                             text: ""
                             font.family: Theme.fontIcons
-                            color: Theme.grey1
-                            font.pixelSize: 18
+                            color: Qt.alpha(Theme.white, 0.58)
+                            font.pixelSize: 14
                             visible: launcherWindow.currentMode === 0
                         }
 
@@ -234,15 +265,15 @@ PanelWindow {
                             width: parent.width - (launcherWindow.currentMode === 9 ? 50 : 32)
                             anchors.verticalCenter: parent.verticalCenter
                             color: Theme.white
-                            font.pixelSize: 16
+                            font.pixelSize: launcherWindow.currentMode === 9 ? 16 : 14
                             selectionColor: Theme.blue
                             selectedTextColor: Theme.bg0
                             clip: true
 
                             Text {
                                 text: launcherWindow.currentMode === 9 ? "Password" : "Search"
-                                color: Theme.grey1
-                                font.pixelSize: 16
+                                color: Qt.alpha(Theme.white, 0.48)
+                                font.pixelSize: launcherWindow.currentMode === 9 ? 16 : 14
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: searchInput.text === ""
                             }
@@ -491,15 +522,120 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 2. CUADRÍCULA DE APLICACIONES (Modo 0)
+            // 2. APLICACIONES (Modo 0)
             // ------------------------------------------
+
+            // Fila independiente de aplicaciones usadas recientemente.
+            // Solo aparece en la vista normal, sin texto de búsqueda.
+            Column {
+                id: recentSection
+                width: parent.width
+                spacing: 8
+                visible: launcherWindow.currentMode === 0
+                    && searchInput.text === ""
+                    && launcherWindow.calcResult === ""
+                    && recentModel.count > 0
+
+                Item {
+                    width: parent.width
+                    height: 16
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Recent"
+                        color: Qt.alpha(Theme.white, 0.52)
+                        font.pixelSize: 11
+                        font.family: Theme.fontMain
+                        font.bold: true
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 47
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        height: 1
+                        color: Qt.alpha(Theme.white, 0.10)
+                    }
+                }
+
+                GridView {
+                    id: recentGrid
+                    width: parent.width
+                    model: recentModel
+                    cellWidth: parent.width / 6
+                    cellHeight: 98
+                    height: cellHeight
+                    interactive: false
+                    clip: true
+                    currentIndex: -1
+
+                    delegate: Rectangle {
+                        width: recentGrid.cellWidth - 10
+                        height: recentGrid.cellHeight - 8
+                        radius: 14
+                        color: "transparent"
+
+                        Column {
+                            width: parent.width
+                            anchors.centerIn: parent
+                            spacing: 7
+
+                            Image {
+                                width: 52
+                                height: 52
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                source: icon.startsWith("/")
+                                    ? "file://" + icon
+                                    : "image://icon/" + icon
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true
+                            }
+
+                            Text {
+                                width: parent.width - 8
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: name
+                                color: Theme.white
+                                font.pixelSize: 11
+                                font.family: Theme.fontMain
+                                horizontalAlignment: Text.AlignHCenter
+                                maximumLineCount: 1
+                                wrapMode: Text.NoWrap
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: executeApp(exec, name)
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Qt.alpha(Theme.white, 0.10)
+                }
+            }
+
+            // Todas las aplicaciones siguen apareciendo aquí en orden alfabético.
             GridView {
                 id: appGrid
-                width: parent.width; model: filteredModel
-                cellWidth: parent.width / 6; cellHeight: 110
-                height: Math.min(Math.ceil(count / 6) * cellHeight, 440)
-                currentIndex: 0; clip: true
-                visible: count > 0 && launcherWindow.calcResult === "" && launcherWindow.currentMode === 0
+                width: parent.width
+                model: filteredModel
+                cellWidth: parent.width / 6
+                cellHeight: 110
+                height: Math.min(Math.ceil(count / 6) * cellHeight,
+                    recentSection.visible ? 330 : 440)
+                currentIndex: 0
+                clip: true
+                visible: count > 0
+                    && launcherWindow.calcResult === ""
+                    && launcherWindow.currentMode === 0
 
                 delegate: Rectangle {
                     width: appGrid.cellWidth - 10
@@ -549,6 +685,7 @@ PanelWindow {
 
                     MouseArea {
                         anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
 
                         onClicked: {
                             appGrid.currentIndex = index
@@ -740,6 +877,35 @@ PanelWindow {
     // LÓGICA DE CONTROLADORES
     // ==========================================
 
+    function loadRecents() {
+        launcherWindow.recentNames = [];
+        recentModel.clear();
+
+        // Últimas seis aplicaciones distintas, de más reciente a menos reciente.
+        recentLoader.command = [
+            "/bin/bash", "-c",
+            "test -f ~/.cache/qs_recents && tac ~/.cache/qs_recents | awk 'NF && !seen[$0]++' | head -n 6 || true"
+        ];
+        recentLoader.running = true;
+    }
+
+    function rebuildRecentModel() {
+        recentModel.clear();
+        if (launcherWindow.currentMode !== 0 || rawModel.count === 0)
+            return;
+
+        for (var r = 0; r < launcherWindow.recentNames.length; r++) {
+            var wanted = launcherWindow.recentNames[r];
+            for (var i = 0; i < rawModel.count; i++) {
+                var app = rawModel.get(i);
+                if (app.name === wanted && app.exec && !app.exec.startsWith("qs_")) {
+                    recentModel.append(app);
+                    break;
+                }
+            }
+        }
+    }
+
     function loadTabData(arg, extra = "") {
         rawModel.clear();
         var cmd = ["/bin/bash", "/home/javier/.config/quickshell/scripts/provider.sh", arg];
@@ -899,7 +1065,8 @@ PanelWindow {
         } else {
             isReallyVisible = true;
             visible_state = true;
-            WlrLayershell.keyboardFocus = WlrLayershell.OnDemand; 
+            WlrLayershell.keyboardFocus = WlrLayershell.OnDemand;
+            loadRecents();
             searchInput.forceActiveFocus();
         }
     }
