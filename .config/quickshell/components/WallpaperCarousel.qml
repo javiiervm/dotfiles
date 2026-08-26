@@ -43,10 +43,23 @@ PanelWindow {
     // Las previews conservan exactamente su transparencia y selección actuales.
     BackgroundEffect.blurRegion: Glass.blurEnabled ? searchPillBlurRegion : null
 
+    /*
+     * Use explicit window coordinates instead of item: topPill.
+     * topPill lives inside an Item animated with Translate, and transformed
+     * item geometry is not always propagated reliably to Region.
+     */
     Region {
         id: searchPillBlurRegion
-        item: topPill
-        radius: topPill.radius
+
+        x: Math.round((wallCarouselWindow.width - topPill.width) / 2)
+        y: Math.round((wallCarouselWindow.height - carousel.height) / 2
+                      - 40
+                      - topPill.height
+                      + carouselSlide.y)
+
+        width: Math.round(topPill.width)
+        height: Math.round(topPill.height)
+        radius: Math.round(topPill.radius)
     }
 
     // Antes había una capa translúcida a pantalla completa que oscurecía todo
@@ -242,6 +255,7 @@ PanelWindow {
         anchors.fill: parent
         opacity: wallCarouselWindow.visible_state ? 1 : 0
         transform: Translate {
+            id: carouselSlide
             y: wallCarouselWindow.visible_state ? 0 : 30
             Behavior on y { NumberAnimation { duration: 350; easing.type: Easing.OutExpo } }
         }

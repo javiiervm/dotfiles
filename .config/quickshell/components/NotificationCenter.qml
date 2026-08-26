@@ -124,14 +124,53 @@ PanelWindow {
 
     BackgroundEffect.blurRegion: Glass.blurEnabled ? notificationCenterBlurRegion : null
 
+    /*
+     * The cards live inside animationContainer, which slides with Translate.
+     * Define the blur geometry directly in PanelWindow coordinates instead of
+     * binding Region.item to transformed descendants.
+     */
     Region {
         id: notificationCenterBlurRegion
-        item: notificationsGlass
-        radius: notificationsGlass.radius
+
+        /*
+         * Keep the root region empty and combine two independent child
+         * regions in PanelWindow coordinates.
+         *
+         * Previously the calendar region was nested inside the notification
+         * card region. Because its Y position starts below the parent's
+         * height, it could end up outside the effective parent geometry and
+         * receive no backdrop blur.
+         */
 
         Region {
-            item: calendarGlass
-            radius: calendarGlass.radius
+            id: notificationsBlurRegion
+
+            x: Math.round(ncWindow.width
+                          - animationContainer.anchors.rightMargin
+                          - notificationsGlass.width
+                          + notificationSlide.x)
+
+            y: 0
+
+            width: Math.round(notificationsGlass.width)
+            height: Math.round(notificationsGlass.height)
+            radius: Math.round(notificationsGlass.radius)
+        }
+
+        Region {
+            id: calendarBlurRegion
+
+            x: Math.round(ncWindow.width
+                          - animationContainer.anchors.rightMargin
+                          - calendarGlass.width
+                          + notificationSlide.x)
+
+            y: Math.round(notificationsGlass.height
+                          + notificationColumn.spacing)
+
+            width: Math.round(calendarGlass.width)
+            height: Math.round(calendarGlass.height)
+            radius: Math.round(calendarGlass.radius)
         }
     }
     
@@ -173,8 +212,9 @@ PanelWindow {
 
         // --- NUEVA ANIMACIÓN DE DESLIZAMIENTO ---
         transform: Translate {
+            id: notificationSlide
             x: ncWindow.visible_state ? 0 : 460 // Se desplaza a la derecha cuando se cierra
-            Behavior on x { 
+            Behavior on x {
                 NumberAnimation { 
                     duration: 350
                     easing.type: Easing.OutQuart 
@@ -186,6 +226,7 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 250 } }
 
         Column {
+            id: notificationColumn
             anchors.right: parent.right
             width: 400
             spacing: 12

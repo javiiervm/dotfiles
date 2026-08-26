@@ -16,7 +16,7 @@ QtObject {
     // Base material
     // ─────────────────────────────────────────────────────
 
-    readonly property color tint: "#1e1e24"
+    readonly property color tint: '#101013'
 
     // 0 = transparente
     // 1 = opaco
