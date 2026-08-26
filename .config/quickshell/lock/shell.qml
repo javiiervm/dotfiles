@@ -4,7 +4,7 @@ import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
 import "modules" as Modules
-import "modules" // Importa el qmldir local para acceder a Theme
+import "modules"
 
 WlSessionLock {
     id: lock
@@ -13,136 +13,204 @@ WlSessionLock {
     WlSessionLockSurface {
         id: surface
 
-        // Imagen base oculta
+        // ============================================================
+        // WALLPAPER
+        // ============================================================
+
         Image {
             id: wall
+
             anchors.fill: parent
-            source: "file://" + Quickshell.env("HOME") + "/.cache/hyprlock/current_wallpaper.png"
+
+            source: "file://"
+                    + Quickshell.env("HOME")
+                    + "/.cache/hyprlock/current_wallpaper.png"
+
             fillMode: Image.PreserveAspectCrop
-            visible: false 
+
+            // MultiEffect renderiza la imagen final.
+            visible: false
         }
 
-        // Desenfoque del entorno
+        // ============================================================
+        // WALLPAPER BLUR
+        // ============================================================
+
         MultiEffect {
-            anchors.fill: wall
+            anchors.fill: parent
+
             source: wall
+
             blurEnabled: true
-            blur: 1
+
+            // blur va de 0.0 a 1.0.
+            // 1.0 = intensidad máxima.
+            blur: 1.0
+
+            // blurMax determina el radio/tamaño real del desenfoque.
+            //
+            // Si quieres MÁS blur, cambia este valor.
+            // Por ejemplo:
+            //
+            // 32 -> suave
+            // 48 -> medio
+            // 64 -> fuerte
+            // 80 -> muy fuerte
+            //
+            // Empiezo con 48 para mantener el wallpaper reconocible.
+            blurMax: 64
         }
 
-        // Capa de oscurecimiento global
+        // ============================================================
+        // DARK OVERLAY
+        // ============================================================
+
         Rectangle {
             anchors.fill: parent
+
             color: "black"
-            opacity: 0.4
+
+            // Controla únicamente cuánto se oscurece el fondo,
+            // no cuánto se desenfoca.
+            opacity: 0.32
         }
 
-        // --- DASHBOARD CENTRAL (El "Macro-Contenedor") ---
-        Rectangle {
-            anchors.centerIn: parent
-            width: dashboardLayout.implicitWidth + 80
-            height: dashboardLayout.implicitHeight + 80
-            radius: 32
-            color: Qt.alpha(Theme.bg0, 0.65) // Fondo oscuro translúcido
-            border.width: 1
-            border.color: Qt.alpha(Theme.white, 0.1)
+        // ============================================================
+        // CLOCK
+        // ============================================================
 
-            Row {
-                id: dashboardLayout
-                anchors.centerIn: parent
-                spacing: 36
+        Modules.ClockCard {
+            id: clockCard
 
-                // --- COLUMNA IZQUIERDA ---
-                Column {
-                    id: leftColumn
-                    spacing: 20
-                    anchors.top: parent.top
-                    Modules.WeatherCard {}
-                    Modules.SystemInfoCard {}
-                    Modules.MediaPlayerCard {}
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            anchors.top: parent.top
+            anchors.topMargin: parent.height * 0.24
+        }
+
+        // ============================================================
+        // LOGIN AREA
+        // ============================================================
+
+        Item {
+            id: loginArea
+
+            width: 360 * Theme.scale
+            height: 245 * Theme.scale
+
+            anchors.horizontalCenter: parent.horizontalCenter
+
+            anchors.top: clockCard.bottom
+            anchors.topMargin: 30 * Theme.scale
+
+            // ========================================================
+            // AVATAR
+            // ========================================================
+
+            Rectangle {
+                id: avatar
+
+                width: 120 * Theme.scale
+                height: 120 * Theme.scale
+
+                radius: width / 2
+
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+
+                color: Theme.bgGlass
+
+                border.width: 1
+                border.color: Qt.alpha(
+                    Theme.white,
+                    0.15
+                )
+
+                // ----------------------------------------------------
+                // AVATAR IMAGE
+                // ----------------------------------------------------
+
+                Image {
+                    id: avatarImg
+
+                    anchors.fill: parent
+                    anchors.margins: 4 * Theme.scale
+
+                    source:
+                        "file:///home/javier/Pictures/Greninja-Blue.jpeg"
+
+                    fillMode: Image.PreserveAspectCrop
+
+                    visible: false
                 }
 
-                // --- COLUMNA CENTRAL ---
-                Item {
-                    anchors.top: parent.top
-                    width: 340
-                    height: leftColumn.height
+                // ----------------------------------------------------
+                // CIRCULAR MASK
+                // ----------------------------------------------------
 
-                    // Reloj desplazado hacia abajo para equilibrar aire superior
-                    Modules.ClockCard {
-                        id: clockCard
-                        anchors.top: parent.top
-                        anchors.topMargin: 28 * Theme.scale
-                        anchors.horizontalCenter: parent.horizontalCenter
-                    }
+                Rectangle {
+                    id: avatarMask
 
-                    // Avatar con tu imagen personalizada de Greninja
-                    Rectangle {
-                        id: avatar
-                        width: 120 * Theme.scale; height: 120 * Theme.scale; radius: width / 2
-                        color: Theme.bgGlass
-                        border.width: 1
-                        border.color: Qt.alpha(Theme.white, 0.15)
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottom: passField.top
-                        anchors.bottomMargin: 24 * Theme.scale
+                    anchors.fill: avatarImg
 
-                        // 1. Imagen personalizada
-                        Image {
-                            id: avatarImg
-                            anchors.fill: parent
-                            anchors.margins: 4 * Theme.scale
-                            source: "file:///home/javier/Pictures/Greninja-Blue.jpeg"
-                            fillMode: Image.PreserveAspectCrop
-                            visible: false
-                        }
+                    radius: width / 2
 
-                        // 2. Máscara circular
-                        Rectangle {
-                            id: avatarMask
-                            anchors.fill: avatarImg
-                            radius: width / 2
-                            visible: false
-                        }
-
-                        // 3. Recorte circular aplicado
-                        OpacityMask {
-                            anchors.fill: avatarImg
-                            source: avatarImg
-                            maskSource: avatarMask
-                        }
-                    }
-
-                    // Campo de contraseña
-                    Modules.PasswordField {
-                        id: passField
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        onUnlocked: {
-                            lock.locked = false
-                            Qt.quit() 
-                        }
-                    }
+                    visible: false
                 }
 
-                // --- COLUMNA DERECHA ---
-                Column {
-                    spacing: 20
-                    anchors.top: parent.top
+                // ----------------------------------------------------
+                // MASKED AVATAR
+                // ----------------------------------------------------
 
-                    Modules.StatusIcons {
-                        id: statusCard
-                    }
+                OpacityMask {
+                    anchors.fill: avatarImg
 
-                    Modules.NotificationsCard {
-                        implicitHeight: leftColumn.height - statusCard.implicitHeight - powerCard.implicitHeight - 40
-                    }
-
-                    Modules.PowerButtons {
-                        id: powerCard
-                    }
+                    source: avatarImg
+                    maskSource: avatarMask
                 }
             }
+
+            // ========================================================
+            // PASSWORD
+            // ========================================================
+
+            Modules.PasswordField {
+                id: passField
+
+                anchors.horizontalCenter: parent.horizontalCenter
+
+                anchors.top: avatar.bottom
+                anchors.topMargin: 26 * Theme.scale
+
+                onUnlocked: {
+                    lock.locked = false
+                    Qt.quit()
+                }
+            }
+        }
+
+        // ============================================================
+        // MEDIA PLAYER
+        // ============================================================
+        //
+        // Centrado horizontalmente en la parte inferior de la pantalla.
+        //
+        // Antes:
+        //
+        // ┌──── media
+        //
+        // Ahora:
+        //
+        //                media
+        //
+
+        Modules.MediaPlayerCard {
+            id: mediaCard
+
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+
+            anchors.bottomMargin: 54 * Theme.scale
         }
     }
 }
