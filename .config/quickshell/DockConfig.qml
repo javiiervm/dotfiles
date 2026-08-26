@@ -17,7 +17,7 @@ QtObject {
         {
             name: "Files",
             iconName: "org.kde.dolphin",
-            command: "dolphin"
+            command: "nautilus"
         },
         {
             name: "Launcher",

@@ -57,7 +57,7 @@ local editor = "code"
 -- #################
 
 -- Environment variables to force dark theme in GTK apps and disable portal theming
-hl.env("GTK_THEME", "adw-gtk3-dark")
+-- hl.env("GTK_THEME", "adw-gtk3-dark")
 hl.env("ADW_DISABLE_PORTAL", "1")
 
 -- --- FORCE INTEGRATED GRAPHICS (BATTERY) ---
@@ -330,7 +330,7 @@ hl.bind(mainMod .. " + M", function()
     end
 end)
 -- hl.bind(mainMod .. " + E", hl.dsp.exec_cmd("nautilus --new-window"))
-hl.bind(mainMod .. " + E", hl.dsp.exec_cmd("dolphin --new-window"))
+hl.bind(mainMod .. " + E", hl.dsp.exec_cmd("nautilus --new-window"))
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }))
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd("MOZ_ENABLE_WAYLAND=1 firefox"))
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("code"))
