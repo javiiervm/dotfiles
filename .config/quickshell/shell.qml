@@ -1446,20 +1446,21 @@ ShellRoot {
     PanelWindow {
         id: customDockWindow
         anchors { bottom: true }
-        margins { bottom: root.bottomGap } 
+        margins { bottom: root.bottomGap }
 
-        WlrLayershell.layer: WlrLayershell.Overlay 
+        WlrLayershell.layer: WlrLayershell.Overlay
         exclusiveZone: 0
         color: "transparent"
 
-        implicitWidth: dockLayout.implicitWidth + 30
-        implicitHeight: 58 
+        // Same position/behaviour as before, just a little larger visually.
+        implicitWidth: dockLayout.implicitWidth + 34
+        implicitHeight: 66
 
         Item {
             anchors.fill: parent
-            
+
             property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
-            
+
             opacity: showDock ? 1 : 0
             visible: opacity > 0
 
@@ -1469,17 +1470,37 @@ ShellRoot {
                     NumberAnimation { duration: 400; easing.type: Easing.OutQuint }
                 }
             }
-            
+
             Behavior on opacity {
                 NumberAnimation { duration: 300; easing.type: Easing.OutQuint }
             }
 
             Rectangle {
+                id: dockGlass
                 anchors.fill: parent
-                color: Theme.bgGlass
-                radius: height / 2
-                border.color: Qt.alpha(Theme.white, 0.15)
+                radius: 18
+
+                // Tahoe-like cool glass. Hyprland's existing Quickshell blur rule
+                // supplies the backdrop blur behind this translucent material.
+                color: Qt.rgba(0.22, 0.45, 0.64, 0.30)
                 border.width: 1
+                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.26)
+
+                gradient: Gradient {
+                    GradientStop { position: 0.00; color: Qt.rgba(1.0, 1.0, 1.0, 0.13) }
+                    GradientStop { position: 0.38; color: Qt.rgba(0.75, 0.88, 1.0, 0.055) }
+                    GradientStop { position: 1.00; color: Qt.rgba(0.10, 0.24, 0.38, 0.11) }
+                }
+
+                // Fine internal highlight, similar to the lit inner edge on Tahoe.
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: Math.max(parent.radius - 1, 0)
+                    color: "transparent"
+                    border.width: 1
+                    border.color: Qt.rgba(1.0, 1.0, 1.0, 0.085)
+                }
 
                 HoverHandler {
                     id: dockHoverHandler
@@ -1496,62 +1517,30 @@ ShellRoot {
                 RowLayout {
                     id: dockLayout
                     anchors.centerIn: parent
-                    spacing: 14 
+                    spacing: 9
 
                     Repeater {
-                        model: [
-                            { type: "font", icon: "󰈹", cmd: "firefox" },
-                            { type: "font", icon: "󰉋", cmd: "dolphin" },
-                            { type: "font", icon: "󰆍", cmd: "kitty" },
-                            { type: "font", icon: "󰨞", cmd: "code" },
-                            { type: "svg",  icon: "icons/discord.svg", cmd: "discord" },
-                            { type: "font", icon: "󰓇", cmd: "spotify" },
-                            { type: "font", icon: "󰖣", cmd: "firefox --new-window https://web.whatsapp.com" },
-                            { type: "svg",  icon: "icons/obsidian.svg", cmd: "obsidian" },
-                            { type: "svg",  icon: "icons/notion.svg", cmd: "firefox --new-window https://www.notion.so" },
-                        ]
+                        model: DockConfig.apps
 
-                        Rectangle {
-                            width: 44; height: 44; radius: 22 
-                            
-                            color: iconMouseArea.containsMouse ? Qt.alpha(Theme.white, 0.1) : "transparent"
-                            Behavior on color { ColorAnimation { duration: 150 } }
+                        DockItem {
+                            required property var modelData
+                            app: modelData
 
-                            Text {
-                                anchors.centerIn: parent
-                                visible: modelData.type !== "svg"
-                                text: modelData.icon
-                                font.family: Theme.fontIcons
-                                font.pixelSize: 24 
-                                color: Theme.white
-                            }
+                            onActivated: function(app) {
+                                // Internal action: reuse the Launcher instance that is
+                                // already alive in this ShellRoot. No second launcher
+                                // process/window is created.
+                                if (app.action === "launcher") {
+                                    mainLauncher.toggle()
+                                    return
+                                }
 
-                            Image {
-                                id: svgIcon
-                                anchors.centerIn: parent
-                                width: 22; height: 22
-                                visible: false
-                                source: modelData.type === "svg" ? modelData.icon : ""
-                                sourceSize.width: 22
-                                sourceSize.height: 22
-                                smooth: true
-                                fillMode: Image.PreserveAspectFit
-                            }
-
-                            ColorOverlay {
-                                anchors.fill: svgIcon
-                                source: svgIcon
-                                color: Theme.white
-                                visible: modelData.type === "svg"
-                            }
-
-                            MouseArea {
-                                id: iconMouseArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    dockLauncherProc.command = ["bash", "-c", modelData.cmd + " & disown"]
+                                if (app.command && app.command.length > 0) {
+                                    dockLauncherProc.command = [
+                                        "bash",
+                                        "-c",
+                                        app.command + " & disown"
+                                    ]
                                     dockLauncherProc.running = true
                                 }
                             }

@@ -478,15 +478,59 @@ PanelWindow {
                 visible: count > 0 && launcherWindow.calcResult === "" && launcherWindow.currentMode === 0
 
                 delegate: Rectangle {
-                    width: appGrid.cellWidth - 10; height: appGrid.cellHeight - 10; anchors.margins: 5; radius: 14
-                    color: GridView.isCurrentItem ? Qt.alpha(Theme.white, 0.15) : "transparent"
+                    width: appGrid.cellWidth - 10
+                    height: appGrid.cellHeight - 10
+                    anchors.margins: 5
+                    radius: 14
+
+                    color: GridView.isCurrentItem
+                        ? Qt.alpha(Theme.white, 0.15)
+                        : "transparent"
 
                     Column {
-                        anchors.centerIn: parent; spacing: 8
-                        Image { width: 56; height: 56; anchors.horizontalCenter: parent.horizontalCenter; source: icon.startsWith("/") ? "file://" + icon : "image://icon/" + icon; fillMode: Image.PreserveAspectFit; asynchronous: true }
-                        Text { width: parent.width - 10; anchors.horizontalCenter: parent.horizontalCenter; text: name; color: Theme.white; font.pixelSize: 12; font.family: Theme.fontMain; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; maximumLineCount: 2; wrapMode: Text.WordWrap }
+                        width: parent.width
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Image {
+                            width: 56
+                            height: 56
+                            anchors.horizontalCenter: parent.horizontalCenter
+
+                            source: icon.startsWith("/")
+                                ? "file://" + icon
+                                : "image://icon/" + icon
+
+                            fillMode: Image.PreserveAspectFit
+                            asynchronous: true
+                        }
+
+                        Text {
+                            width: parent.width - 8
+                            anchors.horizontalCenter: parent.horizontalCenter
+
+                            text: name
+                            color: Theme.white
+
+                            font.pixelSize: 12
+                            font.family: Theme.fontMain
+
+                            horizontalAlignment: Text.AlignHCenter
+
+                            maximumLineCount: 1
+                            wrapMode: Text.NoWrap
+                            elide: Text.ElideRight
+                        }
                     }
-                    MouseArea { anchors.fill: parent; onClicked: { appGrid.currentIndex = index; executeApp(exec, name); } }
+
+                    MouseArea {
+                        anchors.fill: parent
+
+                        onClicked: {
+                            appGrid.currentIndex = index
+                            executeApp(exec, name)
+                        }
+                    }
                 }
             }
 
