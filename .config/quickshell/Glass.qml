@@ -20,7 +20,7 @@ QtObject {
 
     // 0 = transparente
     // 1 = opaco
-    readonly property real opacity: 0.48
+    readonly property real opacity: 0.38
 
     readonly property color background:
         Qt.alpha(tint, opacity)
@@ -47,7 +47,7 @@ QtObject {
     // Border
     // ─────────────────────────────────────────────────────
 
-    readonly property real borderOpacity: 0.16
+    readonly property real borderOpacity: 0.2
     readonly property real borderWidth: 1.0
 
     readonly property color borderColor:

@@ -168,42 +168,15 @@ hl.config({
 
         blur = {
             enabled = true,
-            size = 10,
-            passes = 5,
+            size = 8,
+            passes = 3,
             new_optimizations = true,
             ignore_opacity = true,
             xray = false,
-            vibrancy = 0.1696,
-        },
+            vibrancy = 0.12,
+        }
     },
 })
-
--- hl.config({
---     decoration = {
---         rounding = 12,
---         rounding_power = 2,
-
---         active_opacity = 0.95,
---         inactive_opacity = 0.91,
-
---         shadow = {
---             enabled = true,
---             range = 6,
---             render_power = 3,
---             color = "rgba(1a1a1aaa)",
---         },
-
---         blur = {
---             enabled = true,
---             size = 8,
---             passes = 2,
---             new_optimizations = true,
---             ignore_opacity = true,
---             xray = false,
---             vibrancy = 0.08,
---         },
---     },
--- })
 
 -- https://wiki.hypr.land/Configuring/Variables/#animations
 
