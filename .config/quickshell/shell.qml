@@ -611,19 +611,30 @@ ShellRoot {
         WlrLayershell.layer: WlrLayershell.Top
         visible: popupModel.count > 0
 
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? osdBlurRegion : null
+
+        Region {
+            id: osdBlurRegion
+            item: popupColumn
+            radius: Glass.radius
+        }
+
         Column {
             id: popupColumn
             width: parent.width
             spacing: 10
             Repeater {
                 model: popupModel
-                delegate: Rectangle {
+                delegate: GlassSurface {
                     id: popupItem
-                    width: 360; height: 80; radius: 15
-                    
-                    color: pUrgency === 2 ? Qt.alpha(Theme.red, 0.15) : Theme.bgGlass
-                    border.color: pUrgency === 2 ? Theme.red : Qt.alpha(Theme.white, 0.15)
-                    border.width: pUrgency === 2 ? 2 : 1
+                    width: 360
+                    height: 80
+                    glassRadius: 15
+
+                    glassTint: pUrgency === 2 ? Theme.red : Glass.tint
+                    glassOpacity: pUrgency === 2 ? 0.15 : Glass.opacity
+                    border.color: pUrgency === 2 ? Theme.red : Glass.borderColor
+                    border.width: pUrgency === 2 ? 2 : Glass.borderWidth
                     
                     transform: Translate { id: slideTrans; x: 400 }
                     Component.onCompleted: { slideIn.start(); hideTimer.start(); }
@@ -709,21 +720,32 @@ ShellRoot {
         exclusiveZone: 44
         color: "transparent"
 
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? topBarBlurRegion : null
+
+        Region {
+            id: topBarBlurRegion
+            item: leftBarGlass
+            radius: leftBarGlass.radius
+
+            Region {
+                item: rightBarGlass
+                radius: rightBarGlass.radius
+            }
+        }
+
         Item {
             anchors.fill: parent
             opacity: 0
             NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
             
-            Rectangle {
+            GlassSurface {
+                id: leftBarGlass
                 anchors.left: parent.left
-                anchors.leftMargin: 12 
+                anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                height: 34 
-                width: leftRow.implicitWidth + 30 
-                radius: height / 2 
-                color: Theme.bgGlass 
-                border.color: Qt.alpha(Theme.white, 0.15) 
-                border.width: 1
+                height: 34
+                width: leftRow.implicitWidth + 30
+                glassRadius: height / 2
 
                 RowLayout {
                     id: leftRow
@@ -738,16 +760,14 @@ ShellRoot {
                 }
             }
 
-            Rectangle {
+            GlassSurface {
+                id: rightBarGlass
                 anchors.right: parent.right
-                anchors.rightMargin: 12 
+                anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                height: 34 
-                width: rightRow.implicitWidth + 30 
-                radius: height / 2
-                color: Theme.bgGlass 
-                border.color: Qt.alpha(Theme.white, 0.15)
-                border.width: 1
+                height: 34
+                width: rightRow.implicitWidth + 30
+                glassRadius: height / 2
 
                 RowLayout {
                     id: rightRow
@@ -803,12 +823,18 @@ ShellRoot {
             exclusiveZone: 0
             color: "transparent"
 
-            Rectangle {
+            BackgroundEffect.blurRegion: Glass.blurEnabled ? clipBlurRegion : null
+
+            Region {
+                id: clipBlurRegion
+                item: clipGlass
+                radius: clipGlass.radius
+            }
+
+            GlassSurface {
+                id: clipGlass
                 anchors.fill: parent
-                radius: 12
-                color: Theme.bgGlass
-                border.color: Qt.alpha(Theme.white, 0.15)
-                border.width: 1
+                glassRadius: 12
                 clip: true
 
                 opacity: root.isClipMenuOpen ? 1.0 : 0.0
@@ -1061,12 +1087,18 @@ ShellRoot {
         margins { top: root.isTopHovered ? -38 : -50 }
         Behavior on margins.top { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
 
-        Rectangle {
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? ghostBlurRegion : null
+
+        Region {
+            id: ghostBlurRegion
+            item: ghostGlass
+            radius: ghostGlass.radius
+        }
+
+        GlassSurface {
+            id: ghostGlass
             anchors.fill: parent
-            radius: height / 2
-            color: Theme.bgGlass
-            border.color: Qt.alpha(Theme.white, 0.15)
-            border.width: 1
+            glassRadius: height / 2
 
             // Solo mantiene la píldora visible mientras el ratón está sobre ella.
             // Deliberadamente NO abre/expande nada al hacer hover.
@@ -1164,6 +1196,14 @@ ShellRoot {
         WlrLayershell.keyboardFocus: root.isControlCenterOpen ? WlrLayershell.OnDemand : WlrLayershell.None
         visible: root.isControlCenterOpen
 
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? controlCenterBlurRegion : null
+
+        Region {
+            id: controlCenterBlurRegion
+            item: mainCard
+            radius: mainCard.radius
+        }
+
         MouseArea {
             anchors.fill: parent
             onClicked: root.isControlCenterOpen = false
@@ -1178,13 +1218,10 @@ ShellRoot {
             anchors.topMargin: 1
             anchors.rightMargin: 12
 
-            Rectangle {
+            GlassSurface {
                 id: mainCard
                 anchors.fill: parent
-                radius: 12
-                color: Theme.bgGlass
-                border.color: Qt.alpha(Theme.white, 0.15)
-                border.width: 1
+                glassRadius: 12
                 focus: true
 
                 Keys.onEscapePressed: root.isControlCenterOpen = false
@@ -1456,6 +1493,14 @@ ShellRoot {
         implicitWidth: dockLayout.implicitWidth + 34
         implicitHeight: 66
 
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
+
+        Region {
+            id: dockBlurRegion
+            item: dockGlass
+            radius: dockGlass.radius
+        }
+
         Item {
             anchors.fill: parent
 
@@ -1475,32 +1520,10 @@ ShellRoot {
                 NumberAnimation { duration: 300; easing.type: Easing.OutQuint }
             }
 
-            Rectangle {
+            GlassSurface {
                 id: dockGlass
                 anchors.fill: parent
-                radius: 18
-
-                // Tahoe-like cool glass. Hyprland's existing Quickshell blur rule
-                // supplies the backdrop blur behind this translucent material.
-                color: Qt.rgba(0.22, 0.45, 0.64, 0.30)
-                border.width: 1
-                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.26)
-
-                gradient: Gradient {
-                    GradientStop { position: 0.00; color: Qt.rgba(1.0, 1.0, 1.0, 0.13) }
-                    GradientStop { position: 0.38; color: Qt.rgba(0.75, 0.88, 1.0, 0.055) }
-                    GradientStop { position: 1.00; color: Qt.rgba(0.10, 0.24, 0.38, 0.11) }
-                }
-
-                // Fine internal highlight, similar to the lit inner edge on Tahoe.
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    radius: Math.max(parent.radius - 1, 0)
-                    color: "transparent"
-                    border.width: 1
-                    border.color: Qt.rgba(1.0, 1.0, 1.0, 0.085)
-                }
+                glassRadius: 18
 
                 HoverHandler {
                     id: dockHoverHandler
