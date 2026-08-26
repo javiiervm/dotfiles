@@ -804,10 +804,39 @@ ShellRoot {
             WlrLayershell.layer: WlrLayershell.Overlay
             implicitHeight: root.isMenuVisible ? 90 : 0
             implicitWidth: 200
-            margins { right: root.activeMenuOffset } 
+            margins { right: root.activeMenuOffset }
             exclusiveZone: 0
             color: "transparent"
-            SysMenu { title: root.activeMenuTitle; info1: root.activeMenuInfo1; info2: root.activeMenuInfo2; accent: root.activeMenuAccent; isOpen: root.isMenuOpen }
+
+            /*
+             * SysMenu is a reusable GlassSurface, not a PanelWindow itself.
+             * The parent window therefore owns the backdrop blur request.
+             *
+             * A separate geometry target is used instead of the animated
+             * SysMenu surface, keeping the blur region stable while the menu
+             * fades/scales in and out.
+             */
+            BackgroundEffect.blurRegion: Glass.blurEnabled ? sysMenuBlurRegion : null
+
+            Item {
+                id: sysMenuBlurTarget
+                anchors.fill: parent
+            }
+
+            Region {
+                id: sysMenuBlurRegion
+                item: sysMenuBlurTarget
+                radius: 12
+            }
+
+            SysMenu {
+                id: sysMenu
+                title: root.activeMenuTitle
+                info1: root.activeMenuInfo1
+                info2: root.activeMenuInfo2
+                accent: root.activeMenuAccent
+                isOpen: root.isMenuOpen
+            }
         }
 
         // --- VENTANA DEL MENÚ DEL PORTAPAPELES ---

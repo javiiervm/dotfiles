@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import ".."
 
-Rectangle {
+GlassSurface {
     id: menuRoot
 
     // Propiedades de estado expuestas
@@ -14,12 +14,7 @@ Rectangle {
 
     width: 200
     height: 90
-    radius: 12
-
-    // --- ESTILO GLASS DEL TEMA ---
-    color: Theme.bgGlass
-    border.color: Qt.alpha(Theme.white, 0.15)
-    border.width: 1
+    glassRadius: 12
 
     // Cliping para evitar que los hijos se desborden durante las animaciones de escala/tamaño
     clip: true

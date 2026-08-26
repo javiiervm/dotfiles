@@ -20,6 +20,14 @@ PanelWindow {
     exclusiveZone: 0
     color: "transparent"
 
+    BackgroundEffect.blurRegion: Glass.blurEnabled ? islandBlurRegion : null
+
+    Region {
+        id: islandBlurRegion
+        item: visualBg
+        radius: visualBg.radius
+    }
+
     implicitWidth: 480
     implicitHeight: 240
 
@@ -493,20 +501,19 @@ PanelWindow {
     property bool isExpanded: hoverArea.containsMouse || islandWindow.isUserSeeking
 
     // --- VISUAL PILL ---
-    Rectangle {
+    GlassSurface {
         id: visualBg
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         
         width: targetWidth
         height: targetHeight
-        
-        color: Theme.bgGlass
-        radius: isExpanded ? 28 : height / 2
+
+        glassRadius: isExpanded ? 28 : height / 2
         clip: true
 
-        border.color: baseAlertColor !== "transparent" ? baseAlertColor : Qt.alpha(Theme.white, 0.15)
-        border.width: baseAlertColor !== "transparent" ? 2 : 1
+        border.color: baseAlertColor !== "transparent" ? baseAlertColor : Glass.borderColor
+        border.width: baseAlertColor !== "transparent" ? 2 : Glass.borderWidth
         
         SequentialAnimation on border.color {
             running: baseAlertColor !== "transparent" && !isExpanded && (isOverheating || isOverloaded)
@@ -517,7 +524,7 @@ PanelWindow {
 
         Behavior on width  { NumberAnimation { duration: 300; easing.type: Easing.OutQuint } }
         Behavior on height { NumberAnimation { duration: 300; easing.type: Easing.OutQuint } }
-        Behavior on radius { NumberAnimation { duration: 300; easing.type: Easing.OutQuint } }
+        Behavior on glassRadius { NumberAnimation { duration: 300; easing.type: Easing.OutQuint } }
 
         property bool isAnimating: Math.abs(width - targetWidth) > 1.0 || Math.abs(height - targetHeight) > 1.0
 

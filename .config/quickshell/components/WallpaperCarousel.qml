@@ -39,6 +39,16 @@ PanelWindow {
     visible: isReallyVisible
     color: "transparent"
 
+    // El blur se limita exclusivamente a la barra de búsqueda/filtros.
+    // Las previews conservan exactamente su transparencia y selección actuales.
+    BackgroundEffect.blurRegion: Glass.blurEnabled ? searchPillBlurRegion : null
+
+    Region {
+        id: searchPillBlurRegion
+        item: topPill
+        radius: topPill.radius
+    }
+
     // Antes había una capa translúcida a pantalla completa que oscurecía todo
     // el escritorio (efecto "blur"/glass). Se ha eliminado a petición: ahora
     // el menú aparece directamente sobre el escritorio, sin capa de fondo.
@@ -390,19 +400,14 @@ PanelWindow {
             }
         }
 
-        Rectangle {
+        GlassSurface {
             id: topPill
             anchors.bottom: carousel.top
-            anchors.bottomMargin: 40 
+            anchors.bottomMargin: 40
             anchors.horizontalCenter: parent.horizontalCenter
             width: pillRow.implicitWidth + 40
-            height: 44 
-            radius: 22
-            // Ligeramente transparente: al no haber capa de fondo detrás,
-            // ahora se nota el escritorio a través de la píldora.
-            color: Qt.alpha(Theme.bgGlass, 0.75)
-            border.color: Qt.alpha(Theme.white, 0.1)
-            border.width: 1
+            height: 44
+            glassRadius: 22
             
             Rectangle {
                 anchors.bottom: parent.bottom

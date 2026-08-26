@@ -121,6 +121,19 @@ PanelWindow {
 
     visible: isReallyVisible
     color: "transparent"
+
+    BackgroundEffect.blurRegion: Glass.blurEnabled ? notificationCenterBlurRegion : null
+
+    Region {
+        id: notificationCenterBlurRegion
+        item: notificationsGlass
+        radius: notificationsGlass.radius
+
+        Region {
+            item: calendarGlass
+            radius: calendarGlass.radius
+        }
+    }
     
     onVisible_stateChanged: {
         if (visible_state) {
@@ -178,13 +191,11 @@ PanelWindow {
             spacing: 12
 
             // PANEL DE NOTIFICACIONES
-            Rectangle {
+            GlassSurface {
+                id: notificationsGlass
                 width: parent.width
                 height: 480
-                radius: 10
-                color: Theme.bgGlass 
-                border.color: Qt.alpha(Theme.white, 0.15) 
-                border.width: 1
+                glassRadius: 10
 
                 // Disparador principal para abrir la app desde la notificación
                 MouseArea {
@@ -420,15 +431,13 @@ PanelWindow {
             }
 
             // CALENDARIO Y AGENDA
-            Rectangle {
+            GlassSurface {
+                id: calendarGlass
                 width: parent.width
                 // Altura dinámica: se expande si hay ALGÚN día seleccionado
-                height: ncWindow.selectedDateString !== "" ? 520 : 400 
+                height: ncWindow.selectedDateString !== "" ? 520 : 400
                 Behavior on height { NumberAnimation { duration: 300; easing.type: Easing.OutQuart } }
-                radius: 10
-                color: Theme.bgGlass 
-                border.color: Qt.alpha(Theme.white, 0.15) 
-                border.width: 1
+                glassRadius: 10
                 clip: true
                 
                 ColumnLayout {

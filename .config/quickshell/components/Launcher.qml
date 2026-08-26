@@ -35,6 +35,34 @@ PanelWindow {
     visible: isReallyVisible
     color: "transparent"
 
+    BackgroundEffect.blurRegion: Glass.blurEnabled ? launcherBlurRegion : null
+
+    /*
+     * Do NOT bind the blur Region directly to mainCard.
+     *
+     * mainCard is animated with scale 0 -> 1 when the launcher opens/closes.
+     * A Region attached directly to that transformed item can keep the small
+     * geometry from the closing animation and reuse it on later openings.
+     *
+     * This proxy reproduces the visible geometry using normal width/height,
+     * without a QML transform, so BackgroundEffect always receives a clean,
+     * continuously updated region.
+     */
+    Item {
+        id: launcherBlurTarget
+
+        anchors.centerIn: parent
+
+        width: Math.max(0, mainCard.width * mainCard.scale)
+        height: Math.max(0, mainCard.height * mainCard.scale)
+    }
+
+    Region {
+        id: launcherBlurRegion
+        item: launcherBlurTarget
+        radius: Math.max(0, mainCard.radius * mainCard.scale)
+    }
+
     ListModel { id: rawModel }
     ListModel { id: filteredModel }
 
@@ -108,9 +136,8 @@ PanelWindow {
     // ==========================================
     // INTERFAZ VISUAL (UI)
     // ==========================================
-    Rectangle {
+    GlassSurface {
         id: mainCard
-        
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420; 
             if (launcherWindow.currentMode === 9) return 320; 
@@ -120,11 +147,8 @@ PanelWindow {
         width: targetWidth
         height: contentColumn.height + 40 
         anchors.centerIn: parent
-        transformOrigin: Item.Center 
-        radius: 20
-        color: Theme.bgGlass
-        border.color: Qt.alpha(Theme.white, 0.15)
-        border.width: 1
+        transformOrigin: Item.Center
+        glassRadius: 20
         clip: true
 
         scale: launcherWindow.visible_state ? 1.0 : 0.0
