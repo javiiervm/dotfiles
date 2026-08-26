@@ -31,6 +31,13 @@ PanelWindow {
     property string cleanupError: ""
     property string cleanupLastMessage: ""
     property var cleanupData: ({})
+    // Navegación por teclado del panel Cleanup:
+    // 0 = volver, 1 = Scan again, 2 = Clear removable cache
+    property int cleanupSelection: 1
+    // Navegación por teclado del diálogo de confirmación:
+    // 0 = Cancel, 1 = Clear cache
+    property int cleanupConfirmSelection: 0
+    property bool recentKeyboardActive: false
     
     property int activeHeaderButton: 0
 
@@ -75,12 +82,15 @@ PanelWindow {
         radius: Math.max(0, mainCard.radius * mainCard.scale)
     }
 
+    // Persistent application cache for the whole Quickshell session.
+    // Apps are loaded once, so reopening the launcher is pure in-memory work.
+    ListModel { id: appsModel }
     ListModel { id: rawModel }
     ListModel { id: filteredModel }
     ListModel { id: recentModel }
 
     Component.onCompleted: {
-        loadTabData("--apps");
+        loadAppsOnce();
         loadRecents();
     }
 
@@ -93,9 +103,11 @@ PanelWindow {
             isReallyVisible = false;
             launcherWindow.currentMode = 0;
             launcherWindow.activeHeaderButton = 0;
+            launcherWindow.cleanupConfirmVisible = false;
+            launcherWindow.cleanupSelection = 1;
+            launcherWindow.cleanupConfirmSelection = 0;
             searchInput.text = "";
             searchInput.echoMode = TextInput.Normal;
-            loadTabData("--apps"); 
         }
     }
 
@@ -109,19 +121,50 @@ PanelWindow {
     }
 
     Process {
+        id: appsLoader
+        stdout: SplitParser {
+            onRead: (line) => {
+                if (!line || line.trim() === "") return;
+                var f = line.split("|");
+                if (f.length >= 5) {
+                    appendUnique(appsModel, {
+                        name: f[0],
+                        comment: f[1],
+                        icon: f[2],
+                        exec: f[3],
+                        type: f[4]
+                    });
+                }
+            }
+        }
+        onExited: {
+            updateFilter();
+            rebuildRecentModel();
+        }
+    }
+
+    Process { id: recentWriteProc }
+
+    Process {
         id: dataLoader
         stdout: SplitParser {
             onRead: (line) => {
                 if (!line || line.trim() === "") return;
                 var f = line.split("|");
-                if (f.length >= 5) { rawModel.append({ name: f[0], comment: f[1], icon: f[2], exec: f[3], type: f[4] }); }
+                if (f.length >= 5) {
+                    appendUnique(rawModel, {
+                        name: f[0],
+                        comment: f[1],
+                        icon: f[2],
+                        exec: f[3],
+                        type: f[4]
+                    });
+                }
             }
         }
         onExited: {
             launcherWindow.isFileLoading = false;
             updateFilter();
-            if (launcherWindow.currentMode === 0)
-                rebuildRecentModel();
         }
     }
 
@@ -253,11 +296,18 @@ PanelWindow {
             visible: launcherWindow.cleanupConfirmVisible
             color: Qt.rgba(0, 0, 0, 0.34)
 
-            MouseArea { anchors.fill: parent; onClicked: launcherWindow.cleanupConfirmVisible = false }
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    launcherWindow.cleanupConfirmVisible = false
+                    launcherWindow.cleanupConfirmSelection = 0
+                    searchInput.forceActiveFocus()
+                }
+            }
 
             Rectangle {
-                width: 370
-                height: 178
+                width: Math.min(390, parent.width - 48)
+                height: 190
                 radius: 20
                 anchors.centerIn: parent
                 color: Qt.alpha(Theme.bg0, 0.94)
@@ -267,25 +317,100 @@ PanelWindow {
                 MouseArea { anchors.fill: parent }
 
                 Column {
-                    anchors.fill: parent; anchors.margins: 20; spacing: 10
-                    Text { text: "Clear removable cache?"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 17; font.bold: true }
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    spacing: 10
+
+                    Text {
+                        width: parent.width
+                        text: "Clear removable cache?"
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 17
+                        font.bold: true
+                        horizontalAlignment: Text.AlignLeft
+                    }
+
                     Text {
                         width: parent.width
                         text: "This will clear the configured yay, paru, Spotify and Mozilla caches. It will not wipe all of ~/.cache."
-                        color: Qt.alpha(Theme.white, 0.62); font.family: Theme.fontMain; font.pixelSize: 12; wrapMode: Text.WordWrap
+                        color: Qt.alpha(Theme.white, 0.62)
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignLeft
                     }
-                    Item { width: 1; height: 2 }
+
+                    Item { width: 1; height: 4 }
+
                     Row {
-                        width: parent.width; spacing: 10
+                        width: parent.width
+                        spacing: 10
+
                         Rectangle {
-                            width: (parent.width - 10) / 2; height: 38; radius: 12; color: Qt.alpha(Theme.white, 0.09)
-                            Text { anchors.centerIn: parent; text: "Cancel"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: launcherWindow.cleanupConfirmVisible = false }
+                            width: (parent.width - 10) / 2
+                            height: 40
+                            radius: 12
+                            color: launcherWindow.cleanupConfirmSelection === 0
+                                   ? Theme.white
+                                   : (cancelCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.15) : Qt.alpha(Theme.white, 0.09))
+                            border.color: launcherWindow.cleanupConfirmSelection === 0
+                                          ? Theme.white
+                                          : Qt.alpha(Theme.white, 0.12)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Cancel"
+                                color: launcherWindow.cleanupConfirmSelection === 0 ? Theme.bg0 : Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: cancelCleanupMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: launcherWindow.cleanupConfirmSelection = 0
+                                onClicked: {
+                                    launcherWindow.cleanupConfirmVisible = false
+                                    launcherWindow.cleanupConfirmSelection = 0
+                                    searchInput.forceActiveFocus()
+                                }
+                            }
                         }
+
                         Rectangle {
-                            width: (parent.width - 10) / 2; height: 38; radius: 12; color: Theme.white
-                            Text { anchors.centerIn: parent; text: "Clear cache"; color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: runCleanup() }
+                            width: (parent.width - 10) / 2
+                            height: 40
+                            radius: 12
+                            color: launcherWindow.cleanupConfirmSelection === 1
+                                   ? Theme.white
+                                   : (confirmCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.15) : Qt.alpha(Theme.white, 0.09))
+                            border.color: launcherWindow.cleanupConfirmSelection === 1
+                                          ? Theme.white
+                                          : Qt.alpha(Theme.white, 0.12)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Clear cache"
+                                color: launcherWindow.cleanupConfirmSelection === 1 ? Theme.bg0 : Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: confirmCleanupMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: launcherWindow.cleanupConfirmSelection = 1
+                                onClicked: runCleanup()
+                            }
                         }
                     }
                 }
@@ -383,17 +508,112 @@ PanelWindow {
                             }
 
                             onTextChanged: {
+                                launcherWindow.recentKeyboardActive = false;
+                                recentGrid.currentIndex = -1;
+
                                 // Si escribe/borra algo mientras está en la vista de archivos, lo devolvemos a la vista general
                                 // y recargamos el modelo de apps (si no, quedan los resultados de archivos "pegados").
                                 if (launcherWindow.currentMode === 1) {
                                     launcherWindow.currentMode = 0;
-                                    loadTabData("--apps");
+                                    showApps();
                                     return;
                                 }
                                 updateFilter();
                             }
 
                             Keys.onPressed: (event) => {
+
+                                // Cleanup has its own keyboard navigation.
+                                if (launcherWindow.currentMode === 10) {
+                                    // Confirmation dialog: Left/Right chooses, Enter confirms, Esc cancels.
+                                    if (launcherWindow.cleanupConfirmVisible) {
+                                        if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+                                            launcherWindow.cleanupConfirmSelection = 0
+                                            event.accepted = true
+                                            return
+                                        }
+                                        if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
+                                            launcherWindow.cleanupConfirmSelection = 1
+                                            event.accepted = true
+                                            return
+                                        }
+                                        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+                                            launcherWindow.cleanupConfirmVisible = false
+                                            launcherWindow.cleanupConfirmSelection = 0
+                                            event.accepted = true
+                                            return
+                                        }
+                                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                            if (launcherWindow.cleanupConfirmSelection === 1)
+                                                runCleanup()
+                                            else {
+                                                launcherWindow.cleanupConfirmVisible = false
+                                                launcherWindow.cleanupConfirmSelection = 0
+                                            }
+                                            event.accepted = true
+                                            return
+                                        }
+                                    }
+
+                                    if (event.key === Qt.Key_Up) {
+                                        launcherWindow.cleanupSelection = 0
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Down) {
+                                        if (launcherWindow.cleanupSelection === 0)
+                                            launcherWindow.cleanupSelection = 1
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Left) {
+                                        if (launcherWindow.cleanupSelection === 2)
+                                            launcherWindow.cleanupSelection = 1
+                                        else if (launcherWindow.cleanupSelection === 1)
+                                            launcherWindow.cleanupSelection = 0
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Right) {
+                                        if (launcherWindow.cleanupSelection === 0)
+                                            launcherWindow.cleanupSelection = 1
+                                        else if (launcherWindow.cleanupSelection === 1)
+                                            launcherWindow.cleanupSelection = 2
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+                                        launcherWindow.currentMode = 0
+                                        launcherWindow.cleanupSelection = 1
+                                        launcherWindow.activeHeaderButton = 0
+                                        searchInput.text = ""
+                                        showApps()
+                                        event.accepted = true
+                                        return
+                                    }
+                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                        if (launcherWindow.cleanupSelection === 0) {
+                                            launcherWindow.currentMode = 0
+                                            launcherWindow.cleanupSelection = 1
+                                            launcherWindow.activeHeaderButton = 0
+                                            searchInput.text = ""
+                                            showApps()
+                                        } else if (launcherWindow.cleanupSelection === 1) {
+                                            if (!launcherWindow.isCleanupLoading && !launcherWindow.isCleanupCleaning)
+                                                loadCleanupStatus()
+                                        } else if (launcherWindow.cleanupSelection === 2) {
+                                            if (!launcherWindow.isCleanupLoading
+                                                    && !launcherWindow.isCleanupCleaning
+                                                    && launcherWindow.cleanupData.removable_cache
+                                                    && launcherWindow.cleanupData.removable_cache.total_bytes > 0) {
+                                                launcherWindow.cleanupConfirmSelection = 0
+                                                launcherWindow.cleanupConfirmVisible = true
+                                            }
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+                                }
                                 if (event.key === Qt.Key_Escape) {
                                     if (launcherWindow.currentMode === 9) { launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; searchInput.text = ""; loadTabData("--wifi"); }
                                     else { toggle(); }
@@ -404,14 +624,22 @@ PanelWindow {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
                                     } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6 || launcherWindow.currentMode === 10) {
-                                        launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps");
+                                        launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; showApps();
                                     }
                                     event.accepted = true;
                                 }
                                 
                                 if (event.key === Qt.Key_Down && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
-                                        appGrid.moveCurrentIndexDown(); 
+                                        if (launcherWindow.recentKeyboardActive) {
+                                            var recentColumnDown = Math.max(0, recentGrid.currentIndex);
+                                            launcherWindow.recentKeyboardActive = false;
+                                            recentGrid.currentIndex = -1;
+                                            if (filteredModel.count > 0)
+                                                appGrid.currentIndex = Math.min(recentColumnDown, filteredModel.count - 1);
+                                        } else {
+                                            appGrid.moveCurrentIndexDown(); 
+                                        }
                                     } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton > 0) {
                                             launcherWindow.activeHeaderButton = 0; 
@@ -426,7 +654,14 @@ PanelWindow {
                                 
                                 if (event.key === Qt.Key_Up && launcherWindow.calcResult === "") { 
                                     if (launcherWindow.currentMode === 0) {
-                                        appGrid.moveCurrentIndexUp(); 
+                                        if (launcherWindow.recentKeyboardActive) {
+                                            // Already in Recent: keep the current item selected.
+                                        } else if (recentSection.visible && appGrid.currentIndex >= 0 && appGrid.currentIndex < 6) {
+                                            launcherWindow.recentKeyboardActive = true;
+                                            recentGrid.currentIndex = Math.min(appGrid.currentIndex, recentModel.count - 1);
+                                        } else {
+                                            appGrid.moveCurrentIndexUp(); 
+                                        }
                                     } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton === 0) {
                                             var targetListUp = launcherWindow.currentMode === 1 ? fileList : (launcherWindow.currentMode === 4 ? sysList : (launcherWindow.currentMode === 5 ? wifiList : btList));
@@ -441,7 +676,14 @@ PanelWindow {
                                 }
                                 
                                 if (event.key === Qt.Key_Right) {
-                                    if (launcherWindow.currentMode === 0) { appGrid.moveCurrentIndexRight(); }
+                                    if (launcherWindow.currentMode === 0) {
+                                        if (launcherWindow.recentKeyboardActive) {
+                                            if (recentGrid.currentIndex < recentModel.count - 1)
+                                                recentGrid.currentIndex++;
+                                        } else {
+                                            appGrid.moveCurrentIndexRight();
+                                        }
+                                    }
                                     else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         launcherWindow.activeHeaderButton = Math.min(3, launcherWindow.activeHeaderButton + 1);
                                     }
@@ -449,7 +691,14 @@ PanelWindow {
                                 }
                                 
                                 if (event.key === Qt.Key_Left) {
-                                    if (launcherWindow.currentMode === 0) { appGrid.moveCurrentIndexLeft(); }
+                                    if (launcherWindow.currentMode === 0) {
+                                        if (launcherWindow.recentKeyboardActive) {
+                                            if (recentGrid.currentIndex > 0)
+                                                recentGrid.currentIndex--;
+                                        } else {
+                                            appGrid.moveCurrentIndexLeft();
+                                        }
+                                    }
                                     else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         launcherWindow.activeHeaderButton = Math.max(1, launcherWindow.activeHeaderButton - 1);
                                     }
@@ -474,7 +723,7 @@ PanelWindow {
                                     // 3. NAVEGACIÓN EN CABECERAS
                                     if ((launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         if (launcherWindow.activeHeaderButton === 1) { 
-                                            launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); 
+                                            launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; showApps(); 
                                         }
                                         else if (launcherWindow.activeHeaderButton === 2) { 
                                             execProc.command = launcherWindow.currentMode === 5 ? ["nmcli", "device", "wifi", "rescan"] : ["bluetoothctl", "scan", "on"]; 
@@ -512,6 +761,15 @@ PanelWindow {
                                         execProc.command = ["/bin/bash", "-c", "wl-copy '" + launcherWindow.calcResult + "' && notify-send 'Calculator' 'Copied: " + launcherWindow.calcResult + "' -i accessories-calculator"];
                                         execProc.running = true; toggle();
                                     } else {
+                                        if (launcherWindow.currentMode === 0 && launcherWindow.recentKeyboardActive) {
+                                            if (recentModel.count > 0 && recentGrid.currentIndex >= 0) {
+                                                var recentItem = recentModel.get(recentGrid.currentIndex);
+                                                executeApp(recentItem.exec, recentItem.name);
+                                            }
+                                            event.accepted = true;
+                                            return;
+                                        }
+
                                         var activeIndex = -1;
                                         if (launcherWindow.currentMode === 1) activeIndex = fileList.currentIndex;
                                         else if (launcherWindow.currentMode === 4) activeIndex = sysList.currentIndex;
@@ -544,7 +802,7 @@ PanelWindow {
                         border.width: 1
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps"); } }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; showApps(); } }
                     }
 
                     Text {
@@ -614,7 +872,14 @@ PanelWindow {
                         border.width: 1
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--apps"); } }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onEntered: { if (launcherWindow.currentMode === 10) launcherWindow.cleanupSelection = 0 }
+                            onClicked: {
+                                launcherWindow.currentMode = 0;
+                                launcherWindow.activeHeaderButton = 0;
+                                launcherWindow.cleanupSelection = 1;
+                                searchInput.text = "";
+                                showApps();
+                            } }
                     }
 
                     Text {
@@ -647,15 +912,45 @@ PanelWindow {
                         anchors.margins: 16
                         spacing: 8
 
-                        Row {
+                        Item {
                             width: parent.width
-                            spacing: 10
-                            Text { text: "󰋊"; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 19 }
-                            Text { text: "Disk"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 15; font.bold: true }
-                            Item { width: Math.max(0, parent.width - 190); height: 1 }
+                            height: 22
+
+                            Row {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 10
+
+                                Text {
+                                    text: "󰋊"
+                                    font.family: Theme.fontIcons
+                                    color: Theme.white
+                                    font.pixelSize: 19
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Text {
+                                    text: "Disk"
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                            }
+
                             Text {
-                                text: launcherWindow.cleanupData.disk ? launcherWindow.cleanupData.disk.used_human + " / " + launcherWindow.cleanupData.disk.total_human : "—"
-                                color: Qt.alpha(Theme.white, 0.58); font.family: Theme.fontMain; font.pixelSize: 12
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(250, parent.width * 0.48)
+                                text: launcherWindow.cleanupData.disk
+                                      ? launcherWindow.cleanupData.disk.used_human + " / " + launcherWindow.cleanupData.disk.total_human
+                                      : "—"
+                                color: Qt.alpha(Theme.white, 0.58)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                horizontalAlignment: Text.AlignRight
+                                elide: Text.ElideRight
                             }
                         }
 
@@ -664,6 +959,7 @@ PanelWindow {
                             height: 9
                             radius: 4.5
                             color: Qt.alpha(Theme.white, 0.10)
+
                             Rectangle {
                                 width: parent.width * Math.max(0, Math.min(1, launcherWindow.cleanupData.disk ? launcherWindow.cleanupData.disk.percentage / 100 : 0))
                                 height: parent.height
@@ -673,8 +969,15 @@ PanelWindow {
                         }
 
                         Text {
-                            text: launcherWindow.cleanupData.disk ? Math.round(launcherWindow.cleanupData.disk.percentage) + "% used  •  " + launcherWindow.cleanupData.disk.free_human + " available" : "Scanning storage…"
-                            color: Qt.alpha(Theme.white, 0.58); font.family: Theme.fontMain; font.pixelSize: 12
+                            width: parent.width
+                            text: launcherWindow.cleanupData.disk
+                                  ? Math.round(launcherWindow.cleanupData.disk.percentage) + "% used  •  " + launcherWindow.cleanupData.disk.free_human + " available"
+                                  : "Scanning storage…"
+                            color: Qt.alpha(Theme.white, 0.58)
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignLeft
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -690,18 +993,39 @@ PanelWindow {
                         color: Qt.alpha(Theme.white, 0.06)
                         border.color: Qt.alpha(Theme.white, 0.12)
                         border.width: 1
+                        clip: true
 
                         Column {
-                            anchors.fill: parent; anchors.margins: 16; spacing: 8
-                            Text { text: "Removable cache"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 14; font.bold: true }
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 8
+
                             Text {
-                                text: launcherWindow.cleanupData.removable_cache ? launcherWindow.cleanupData.removable_cache.total_human : "—"
-                                color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 26; font.bold: true
+                                width: parent.width
+                                text: "Removable cache"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                                elide: Text.ElideRight
                             }
+
+                            Text {
+                                width: parent.width
+                                text: launcherWindow.cleanupData.removable_cache ? launcherWindow.cleanupData.removable_cache.total_human : "—"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 26
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+
                             Text {
                                 width: parent.width
                                 text: launcherWindow.cleanupData.removable_cache ? launcherWindow.cleanupData.removable_cache.summary : "yay • paru • Spotify • Mozilla"
-                                color: Qt.alpha(Theme.white, 0.52); font.family: Theme.fontMain; font.pixelSize: 11
+                                color: Qt.alpha(Theme.white, 0.52)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
                                 elide: Text.ElideRight
                             }
                         }
@@ -714,21 +1038,99 @@ PanelWindow {
                         color: Qt.alpha(Theme.white, 0.06)
                         border.color: Qt.alpha(Theme.white, 0.12)
                         border.width: 1
+                        clip: true
 
                         Column {
-                            anchors.fill: parent; anchors.margins: 16; spacing: 8
-                            Text { text: "System"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 14; font.bold: true }
+                            anchors.fill: parent
+                            anchors.margins: 16
+                            spacing: 8
+
                             Text {
-                                text: "Package cache  " + (launcherWindow.cleanupData.package_cache ? launcherWindow.cleanupData.package_cache.human : "—")
-                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+                                width: parent.width
+                                text: "System"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                                elide: Text.ElideRight
                             }
-                            Text {
-                                text: "Journal  " + (launcherWindow.cleanupData.journal ? launcherWindow.cleanupData.journal.human : "—")
-                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+
+                            Item {
+                                width: parent.width
+                                height: 16
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.62
+                                    text: "Package cache"
+                                    color: Qt.alpha(Theme.white, 0.72)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.34
+                                    text: launcherWindow.cleanupData.package_cache ? launcherWindow.cleanupData.package_cache.human : "—"
+                                    color: Qt.alpha(Theme.white, 0.58)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideRight
+                                }
                             }
-                            Text {
-                                text: "Orphan packages  " + (launcherWindow.cleanupData.orphans ? launcherWindow.cleanupData.orphans.count : "—")
-                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+
+                            Item {
+                                width: parent.width
+                                height: 16
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.62
+                                    text: "Journal"
+                                    color: Qt.alpha(Theme.white, 0.72)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.34
+                                    text: launcherWindow.cleanupData.journal ? launcherWindow.cleanupData.journal.human : "—"
+                                    color: Qt.alpha(Theme.white, 0.58)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Item {
+                                width: parent.width
+                                height: 16
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.62
+                                    text: "Orphan packages"
+                                    color: Qt.alpha(Theme.white, 0.72)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.34
+                                    text: launcherWindow.cleanupData.orphans ? launcherWindow.cleanupData.orphans.count : "—"
+                                    color: Qt.alpha(Theme.white, 0.58)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideRight
+                                }
                             }
                         }
                     }
@@ -740,18 +1142,44 @@ PanelWindow {
                     visible: launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.entries
 
                     Repeater {
-                        model: launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.entries ? launcherWindow.cleanupData.removable_cache.entries : []
+                        model: launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.entries
+                               ? launcherWindow.cleanupData.removable_cache.entries
+                               : []
+
                         delegate: Rectangle {
                             required property var modelData
                             width: cleanupPanel.width
                             height: 34
                             radius: 10
                             color: Qt.alpha(Theme.white, 0.035)
-                            Row {
-                                anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
-                                Text { anchors.verticalCenter: parent.verticalCenter; text: modelData.name; color: Qt.alpha(Theme.white, 0.76); font.family: Theme.fontMain; font.pixelSize: 12 }
-                                Item { width: Math.max(0, parent.width - 150); height: 1 }
-                                Text { anchors.verticalCenter: parent.verticalCenter; text: modelData.human; color: Qt.alpha(Theme.white, 0.52); font.family: Theme.fontMain; font.pixelSize: 12 }
+
+                            Item {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.60
+                                    text: modelData.name
+                                    color: Qt.alpha(Theme.white, 0.76)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width * 0.35
+                                    text: modelData.human
+                                    color: Qt.alpha(Theme.white, 0.52)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideRight
+                                }
                             }
                         }
                     }
@@ -762,8 +1190,10 @@ PanelWindow {
                     visible: launcherWindow.cleanupError !== "" || launcherWindow.cleanupLastMessage !== ""
                     text: launcherWindow.cleanupError !== "" ? launcherWindow.cleanupError : launcherWindow.cleanupLastMessage
                     color: launcherWindow.cleanupError !== "" ? "#ff6961" : Qt.alpha(Theme.white, 0.65)
-                    font.family: Theme.fontMain; font.pixelSize: 12
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
                     horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
                 }
 
                 Row {
@@ -774,16 +1204,34 @@ PanelWindow {
                         width: (parent.width - 12) / 2
                         height: 42
                         radius: 14
-                        color: refreshCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.14) : Qt.alpha(Theme.white, 0.08)
-                        border.color: Qt.alpha(Theme.white, 0.13); border.width: 1
+                        color: launcherWindow.cleanupSelection === 1
+                               ? Theme.white
+                               : (refreshCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.14) : Qt.alpha(Theme.white, 0.08))
+                        border.color: launcherWindow.cleanupSelection === 1
+                                      ? Theme.white
+                                      : Qt.alpha(Theme.white, 0.13)
+                        border.width: 1
+                        opacity: launcherWindow.isCleanupLoading || launcherWindow.isCleanupCleaning ? 0.55 : 1
+
                         Text {
                             anchors.centerIn: parent
+                            width: parent.width - 20
                             text: launcherWindow.isCleanupLoading ? "Scanning…" : "↻  Scan again"
-                            color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true
+                            color: launcherWindow.cleanupSelection === 1 ? Theme.bg0 : Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 13
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
+
                         MouseArea {
-                            id: refreshCleanupMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            id: refreshCleanupMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             enabled: !launcherWindow.isCleanupLoading && !launcherWindow.isCleanupCleaning
+                            onEntered: launcherWindow.cleanupSelection = 1
                             onClicked: loadCleanupStatus()
                         }
                     }
@@ -792,17 +1240,44 @@ PanelWindow {
                         width: (parent.width - 12) / 2
                         height: 42
                         radius: 14
-                        color: clearCleanupMouse.containsMouse ? Theme.white : Qt.alpha(Theme.white, 0.90)
-                        opacity: launcherWindow.isCleanupCleaning ? 0.55 : 1
+                        color: launcherWindow.cleanupSelection === 2
+                               ? Theme.white
+                               : (clearCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.14) : Qt.alpha(Theme.white, 0.08))
+                        border.color: launcherWindow.cleanupSelection === 2
+                                      ? Theme.white
+                                      : Qt.alpha(Theme.white, 0.13)
+                        border.width: 1
+                        opacity: (!launcherWindow.cleanupData.removable_cache
+                                  || launcherWindow.cleanupData.removable_cache.total_bytes <= 0
+                                  || launcherWindow.isCleanupCleaning) ? 0.45 : 1
+
                         Text {
                             anchors.centerIn: parent
+                            width: parent.width - 20
                             text: launcherWindow.isCleanupCleaning ? "Cleaning…" : "Clear removable cache"
-                            color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true
+                            color: launcherWindow.cleanupSelection === 2 ? Theme.bg0 : Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 13
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
+
                         MouseArea {
-                            id: clearCleanupMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                            enabled: !launcherWindow.isCleanupLoading && !launcherWindow.isCleanupCleaning && launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.total_bytes > 0
-                            onClicked: launcherWindow.cleanupConfirmVisible = true
+                            id: clearCleanupMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !launcherWindow.isCleanupLoading
+                                     && !launcherWindow.isCleanupCleaning
+                                     && launcherWindow.cleanupData.removable_cache
+                                     && launcherWindow.cleanupData.removable_cache.total_bytes > 0
+                            onEntered: launcherWindow.cleanupSelection = 2
+                            onClicked: {
+                                launcherWindow.cleanupConfirmSelection = 0
+                                launcherWindow.cleanupConfirmVisible = true
+                                searchInput.forceActiveFocus()
+                            }
                         }
                     }
                 }
@@ -862,7 +1337,9 @@ PanelWindow {
                         width: recentGrid.cellWidth - 10
                         height: recentGrid.cellHeight - 8
                         radius: 14
-                        color: "transparent"
+                        color: launcherWindow.recentKeyboardActive && GridView.isCurrentItem
+                            ? Qt.alpha(Theme.white, 0.15)
+                            : "transparent"
 
                         Column {
                             width: parent.width
@@ -897,7 +1374,11 @@ PanelWindow {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: executeApp(exec, name)
+                            onClicked: {
+                                launcherWindow.recentKeyboardActive = true
+                                recentGrid.currentIndex = index
+                                executeApp(exec, name)
+                            }
                         }
                     }
                 }
@@ -930,7 +1411,7 @@ PanelWindow {
                     anchors.margins: 5
                     radius: 14
 
-                    color: GridView.isCurrentItem
+                    color: GridView.isCurrentItem && !launcherWindow.recentKeyboardActive
                         ? Qt.alpha(Theme.white, 0.15)
                         : "transparent"
 
@@ -975,6 +1456,8 @@ PanelWindow {
                         cursorShape: Qt.PointingHandCursor
 
                         onClicked: {
+                            launcherWindow.recentKeyboardActive = false
+                            recentGrid.currentIndex = -1
                             appGrid.currentIndex = index
                             executeApp(exec, name)
                         }
@@ -1164,11 +1647,80 @@ PanelWindow {
     // LÓGICA DE CONTROLADORES
     // ==========================================
 
-    function loadRecents() {
-        launcherWindow.recentNames = [];
-        recentModel.clear();
+    function appendUnique(model, item) {
+        var key = item.name + "\u001f" + item.exec + "\u001f" + item.type;
+        for (var i = 0; i < model.count; i++) {
+            var existing = model.get(i);
+            var existingKey = existing.name + "\u001f" + existing.exec + "\u001f" + existing.type;
+            if (existingKey === key)
+                return;
+        }
+        model.append(item);
+    }
 
-        // Últimas seis aplicaciones distintas, de más reciente a menos reciente.
+    function loadAppsOnce() {
+        if (appsModel.count > 0 || appsLoader.running)
+            return;
+
+        appsLoader.command = [
+            "/bin/bash",
+            "/home/javier/.config/quickshell/scripts/provider.sh",
+            "--apps"
+        ];
+        appsLoader.running = true;
+    }
+
+    function showApps() {
+        launcherWindow.currentMode = 0;
+        launcherWindow.activeHeaderButton = 0;
+        launcherWindow.recentKeyboardActive = false;
+        recentGrid.currentIndex = -1;
+        updateFilter();
+        rebuildRecentModel();
+    }
+
+    function rememberRecent(name) {
+        if (!name || name.trim() === "")
+            return;
+
+        var names = launcherWindow.recentNames.slice();
+        var existingIndex = names.indexOf(name);
+        if (existingIndex !== -1)
+            names.splice(existingIndex, 1);
+
+        names.unshift(name);
+        if (names.length > 6)
+            names = names.slice(0, 6);
+
+        launcherWindow.recentNames = names;
+        rebuildRecentModel();
+
+        // Persist only on a user action. No daemon, polling or background loop.
+        recentWriteProc.running = false;
+        recentWriteProc.command = [
+            "/bin/bash", "-c",
+            "mkdir -p \"$HOME/.cache\"; printf '%s\\n' \"$1\" >> \"$HOME/.cache/qs_recents\"",
+            "bash", name
+        ];
+        recentWriteProc.running = true;
+    }
+
+    function recentItemByName(name) {
+        if (name === "Cleanup")
+            return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "user-trash", exec: "qs_cleanup", type: "cmd" };
+
+        for (var i = 0; i < appsModel.count; i++) {
+            var app = appsModel.get(i);
+            if (app.name === name)
+                return app;
+        }
+        return null;
+    }
+
+    function loadRecents() {
+        // One startup read only. Reopening never waits for disk/process I/O.
+        launcherWindow.recentNames = [];
+        recentLoader.running = false;
         recentLoader.command = [
             "/bin/bash", "-c",
             "test -f ~/.cache/qs_recents && tac ~/.cache/qs_recents | awk 'NF && !seen[$0]++' | head -n 6 || true"
@@ -1178,25 +1730,36 @@ PanelWindow {
 
     function rebuildRecentModel() {
         recentModel.clear();
-        if (launcherWindow.currentMode !== 0 || rawModel.count === 0)
+        if (launcherWindow.currentMode !== 0 || appsModel.count === 0)
             return;
 
+        var added = {};
         for (var r = 0; r < launcherWindow.recentNames.length; r++) {
             var wanted = launcherWindow.recentNames[r];
-            for (var i = 0; i < rawModel.count; i++) {
-                var app = rawModel.get(i);
-                if (app.name === wanted && app.exec && !app.exec.startsWith("qs_")) {
-                    recentModel.append(app);
-                    break;
-                }
+            if (added[wanted])
+                continue;
+
+            var app = recentItemByName(wanted);
+            if (app !== null) {
+                recentModel.append(app);
+                added[wanted] = true;
             }
+
+            if (recentModel.count >= 6)
+                break;
         }
     }
 
     function loadTabData(arg, extra = "") {
+        // Nunca dejamos dos ejecuciones del provider solapadas. Si cambiamos
+        // de vista mientras una anterior sigue produciendo stdout, sus líneas
+        // podrían acabar mezclándose y duplicando aplicaciones.
+        dataLoader.running = false;
         rawModel.clear();
+
         var cmd = ["/bin/bash", "/home/javier/.config/quickshell/scripts/provider.sh", arg];
         if (extra !== "") cmd.push(extra);
+
         dataLoader.command = cmd;
         dataLoader.running = true;
     }
@@ -1270,6 +1833,8 @@ PanelWindow {
         }
 
         var results = [];
+        var sourceModel = launcherWindow.currentMode === 0 ? appsModel : rawModel;
+        var seenResults = {};
 
         // Acción interna del launcher; no depende de provider.sh y se mantiene junto
         // a las apps normales para que también pueda encontrarse buscando "cleanup".
@@ -1283,22 +1848,38 @@ PanelWindow {
                                  : 3;
                 }
                 results.push({ item: cleanupItem, score: cleanupScore });
+                seenResults[cleanupItem.name.toLowerCase()] = true;
             }
         }
 
-        for (var j = 0; j < rawModel.count; j++) {
-            var item = rawModel.get(j);
+        for (var j = 0; j < sourceModel.count; j++) {
+            var item = sourceModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
                 if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
             
-            if (search === "") { results.push({ item: item, score: 0 }); } 
-            else {
-                if (itemName.startsWith(search)) results.push({ item: item, score: 1 }); 
-                else if (itemName.includes(search)) results.push({ item: item, score: 2 }); 
-                else if (itemComment.includes(search)) results.push({ item: item, score: 3 }); 
+            // De-duplicate by visible app name. This also protects the UI if
+            // two .desktop sources expose the same application entry.
+            var resultKey = item.name.toLowerCase();
+            if (seenResults[resultKey])
+                continue;
+
+            if (search === "") {
+                results.push({ item: item, score: 0 });
+                seenResults[resultKey] = true;
+            } else {
+                if (itemName.startsWith(search)) {
+                    results.push({ item: item, score: 1 });
+                    seenResults[resultKey] = true;
+                } else if (itemName.includes(search)) {
+                    results.push({ item: item, score: 2 });
+                    seenResults[resultKey] = true;
+                } else if (itemComment.includes(search)) {
+                    results.push({ item: item, score: 3 });
+                    seenResults[resultKey] = true;
+                }
             }
         }
         results.sort(function(a, b) { if (a.score !== b.score) return a.score - b.score; return a.item.name.localeCompare(b.item.name); });
@@ -1309,12 +1890,17 @@ PanelWindow {
     function executeApp(cmd, name) {
         if (!cmd || cmd === "") return;
 
+        // Every selectable launcher entry participates in Recent.
+        rememberRecent(name);
+
         if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
         if (cmd === "qs_cleanup") {
             launcherWindow.currentMode = 10;
             launcherWindow.activeHeaderButton = 0;
+            launcherWindow.cleanupSelection = 1;
+            launcherWindow.cleanupConfirmSelection = 0;
             launcherWindow.cleanupConfirmVisible = false;
             launcherWindow.cleanupLastMessage = "";
             searchInput.text = "";
@@ -1361,8 +1947,8 @@ PanelWindow {
         var cleanCmd = cmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
         WlrLayershell.keyboardFocus = WlrLayershell.None;
 
-        // Escribe en caché, lanza la aplicación desvinculada (como en el dock) y mueve el cursor
-        var fullCmd = "echo '" + name + "' >> ~/.cache/qs_recents && (" + cleanCmd + " & disown) && hyprctl dispatch warpcursor 50 50";
+        // History was already updated/persisted by rememberRecent().
+        var fullCmd = "(" + cleanCmd + " & disown) && hyprctl dispatch warpcursor 50 50";
 
         execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
@@ -1390,13 +1976,39 @@ PanelWindow {
 
     function toggle() {
         if (visible_state) {
+            // Hide immediately, but also clear transient modal state so it can
+            // never survive into the next opening.
             visible_state = false;
+            launcherWindow.cleanupConfirmVisible = false;
+            launcherWindow.cleanupConfirmSelection = 0;
             closeTimer.start();
         } else {
+            // Every fresh opening starts from the normal applications view,
+            // even if the previous session was closed from Cleanup/Wi-Fi/etc.
+            closeTimer.stop();
+            launcherWindow.currentMode = 0;
+            launcherWindow.activeHeaderButton = 0;
+            launcherWindow.cleanupConfirmVisible = false;
+            launcherWindow.cleanupConfirmSelection = 0;
+            launcherWindow.cleanupSelection = 1;
+            launcherWindow.recentKeyboardActive = false;
+            recentGrid.currentIndex = -1;
+            launcherWindow.targetWifiSsid = "";
+            searchInput.echoMode = TextInput.Normal;
+            searchInput.text = "";
+            launcherWindow.calcResult = "";
+
+            // La vista de apps ya se precarga al iniciar y también al terminar
+            // el cierre. No volvemos a lanzar provider.sh aquí: evita carreras,
+            // duplicados y hace que el launcher reaparezca de forma inmediata.
+            updateFilter();
+
             isReallyVisible = true;
             visible_state = true;
             WlrLayershell.keyboardFocus = WlrLayershell.OnDemand;
-            loadRecents();
+
+            // App grid and Recent row are already cached in memory.
+            rebuildRecentModel();
             searchInput.forceActiveFocus();
         }
     }
