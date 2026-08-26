@@ -14,7 +14,7 @@ PanelWindow {
     property bool isReallyVisible: false
     property string calcResult: "" 
     
-    // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password
+    // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup
     property int currentMode: 0 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
@@ -23,6 +23,14 @@ PanelWindow {
     property bool isWifiLoading: false
     property bool isBtLoading: false
     property bool isFileLoading: false
+
+    // Estado del panel Cleanup. Los datos vienen de ~/.local/bin/cleanup.py --status-json.
+    property bool isCleanupLoading: false
+    property bool isCleanupCleaning: false
+    property bool cleanupConfirmVisible: false
+    property string cleanupError: ""
+    property string cleanupLastMessage: ""
+    property var cleanupData: ({})
     
     property int activeHeaderButton: 0
 
@@ -137,6 +145,56 @@ PanelWindow {
     Process { id: execProc }
 
     Process {
+        id: cleanupStatusProc
+        property string output: ""
+        stdout: SplitParser {
+            onRead: (line) => {
+                if (!line || line.trim() === "") return;
+                cleanupStatusProc.output += line;
+            }
+        }
+        onExited: function(exitCode) {
+            launcherWindow.isCleanupLoading = false;
+            if (exitCode !== 0) {
+                launcherWindow.cleanupError = "Unable to read cleanup status.";
+                return;
+            }
+            try {
+                launcherWindow.cleanupData = JSON.parse(cleanupStatusProc.output);
+                launcherWindow.cleanupError = "";
+            } catch (error) {
+                launcherWindow.cleanupError = "Invalid response from cleanup.py";
+            }
+        }
+    }
+
+    Process {
+        id: cleanupActionProc
+        property string output: ""
+        stdout: SplitParser {
+            onRead: (line) => {
+                if (!line || line.trim() === "") return;
+                cleanupActionProc.output += line;
+            }
+        }
+        onExited: function(exitCode) {
+            launcherWindow.isCleanupCleaning = false;
+            launcherWindow.cleanupConfirmVisible = false;
+            if (exitCode === 0) {
+                try {
+                    var result = JSON.parse(cleanupActionProc.output);
+                    launcherWindow.cleanupLastMessage = result.message || "Cleanup complete.";
+                } catch (error) {
+                    launcherWindow.cleanupLastMessage = "Cleanup complete.";
+                }
+                loadCleanupStatus();
+            } else {
+                launcherWindow.cleanupError = "Cleanup failed. Run cleanup.py in a terminal for details.";
+            }
+        }
+    }
+
+    Process {
         id: netConnectProc
         property string targetName: ""
         onExited: function(exitCode) {
@@ -166,7 +224,8 @@ PanelWindow {
     GlassSurface {
         id: mainCard
         property int targetWidth: {
-            if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420; 
+            if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
+            if (launcherWindow.currentMode === 10) return 620;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -187,6 +246,51 @@ PanelWindow {
         Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
 
         MouseArea { anchors.fill: parent }
+
+        Rectangle {
+            z: 50
+            anchors.fill: parent
+            visible: launcherWindow.cleanupConfirmVisible
+            color: Qt.rgba(0, 0, 0, 0.34)
+
+            MouseArea { anchors.fill: parent; onClicked: launcherWindow.cleanupConfirmVisible = false }
+
+            Rectangle {
+                width: 370
+                height: 178
+                radius: 20
+                anchors.centerIn: parent
+                color: Qt.alpha(Theme.bg0, 0.94)
+                border.color: Qt.alpha(Theme.white, 0.20)
+                border.width: 1
+
+                MouseArea { anchors.fill: parent }
+
+                Column {
+                    anchors.fill: parent; anchors.margins: 20; spacing: 10
+                    Text { text: "Clear removable cache?"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 17; font.bold: true }
+                    Text {
+                        width: parent.width
+                        text: "This will clear the configured yay, paru, Spotify and Mozilla caches. It will not wipe all of ~/.cache."
+                        color: Qt.alpha(Theme.white, 0.62); font.family: Theme.fontMain; font.pixelSize: 12; wrapMode: Text.WordWrap
+                    }
+                    Item { width: 1; height: 2 }
+                    Row {
+                        width: parent.width; spacing: 10
+                        Rectangle {
+                            width: (parent.width - 10) / 2; height: 38; radius: 12; color: Qt.alpha(Theme.white, 0.09)
+                            Text { anchors.centerIn: parent; text: "Cancel"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: launcherWindow.cleanupConfirmVisible = false }
+                        }
+                        Rectangle {
+                            width: (parent.width - 10) / 2; height: 38; radius: 12; color: Theme.white
+                            Text { anchors.centerIn: parent; text: "Clear cache"; color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: runCleanup() }
+                        }
+                    }
+                }
+            }
+        }
 
         Column {
             id: contentColumn
@@ -299,7 +403,7 @@ PanelWindow {
                                 if (event.key === Qt.Key_Backspace && searchInput.text === "") {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
-                                    } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
+                                    } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6 || launcherWindow.currentMode === 10) {
                                         launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; loadTabData("--apps");
                                     }
                                     event.accepted = true;
@@ -500,7 +604,7 @@ PanelWindow {
                 // C) CONTROLES DE SISTEMA Y ARCHIVOS (Modos 1 y 4)
                 Item {
                     width: parent.width; height: parent.height
-                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4
+                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10
 
                     Rectangle {
                         id: backBtnSys
@@ -514,7 +618,7 @@ PanelWindow {
                     }
 
                     Text {
-                        text: launcherWindow.currentMode === 1 ? "File Search Results" : "System Options"
+                        text: launcherWindow.currentMode === 1 ? "File Search Results" : (launcherWindow.currentMode === 10 ? "Cleanup" : "System Options")
                         color: Theme.white; font.pixelSize: 16; font.bold: true
                         anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
@@ -522,7 +626,190 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 2. APLICACIONES (Modo 0)
+            // 2. CLEANUP (Modo 10)
+            // ------------------------------------------
+            Column {
+                id: cleanupPanel
+                width: parent.width
+                spacing: 14
+                visible: launcherWindow.currentMode === 10
+
+                Rectangle {
+                    width: parent.width
+                    height: 108
+                    radius: 18
+                    color: Qt.alpha(Theme.white, 0.06)
+                    border.color: Qt.alpha(Theme.white, 0.12)
+                    border.width: 1
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 8
+
+                        Row {
+                            width: parent.width
+                            spacing: 10
+                            Text { text: "󰋊"; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 19 }
+                            Text { text: "Disk"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 15; font.bold: true }
+                            Item { width: Math.max(0, parent.width - 190); height: 1 }
+                            Text {
+                                text: launcherWindow.cleanupData.disk ? launcherWindow.cleanupData.disk.used_human + " / " + launcherWindow.cleanupData.disk.total_human : "—"
+                                color: Qt.alpha(Theme.white, 0.58); font.family: Theme.fontMain; font.pixelSize: 12
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 9
+                            radius: 4.5
+                            color: Qt.alpha(Theme.white, 0.10)
+                            Rectangle {
+                                width: parent.width * Math.max(0, Math.min(1, launcherWindow.cleanupData.disk ? launcherWindow.cleanupData.disk.percentage / 100 : 0))
+                                height: parent.height
+                                radius: parent.radius
+                                color: Theme.white
+                            }
+                        }
+
+                        Text {
+                            text: launcherWindow.cleanupData.disk ? Math.round(launcherWindow.cleanupData.disk.percentage) + "% used  •  " + launcherWindow.cleanupData.disk.free_human + " available" : "Scanning storage…"
+                            color: Qt.alpha(Theme.white, 0.58); font.family: Theme.fontMain; font.pixelSize: 12
+                        }
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 12
+
+                    Rectangle {
+                        width: (parent.width - 12) / 2
+                        height: 128
+                        radius: 18
+                        color: Qt.alpha(Theme.white, 0.06)
+                        border.color: Qt.alpha(Theme.white, 0.12)
+                        border.width: 1
+
+                        Column {
+                            anchors.fill: parent; anchors.margins: 16; spacing: 8
+                            Text { text: "Removable cache"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 14; font.bold: true }
+                            Text {
+                                text: launcherWindow.cleanupData.removable_cache ? launcherWindow.cleanupData.removable_cache.total_human : "—"
+                                color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 26; font.bold: true
+                            }
+                            Text {
+                                width: parent.width
+                                text: launcherWindow.cleanupData.removable_cache ? launcherWindow.cleanupData.removable_cache.summary : "yay • paru • Spotify • Mozilla"
+                                color: Qt.alpha(Theme.white, 0.52); font.family: Theme.fontMain; font.pixelSize: 11
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: (parent.width - 12) / 2
+                        height: 128
+                        radius: 18
+                        color: Qt.alpha(Theme.white, 0.06)
+                        border.color: Qt.alpha(Theme.white, 0.12)
+                        border.width: 1
+
+                        Column {
+                            anchors.fill: parent; anchors.margins: 16; spacing: 8
+                            Text { text: "System"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 14; font.bold: true }
+                            Text {
+                                text: "Package cache  " + (launcherWindow.cleanupData.package_cache ? launcherWindow.cleanupData.package_cache.human : "—")
+                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+                            }
+                            Text {
+                                text: "Journal  " + (launcherWindow.cleanupData.journal ? launcherWindow.cleanupData.journal.human : "—")
+                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+                            }
+                            Text {
+                                text: "Orphan packages  " + (launcherWindow.cleanupData.orphans ? launcherWindow.cleanupData.orphans.count : "—")
+                                color: Qt.alpha(Theme.white, 0.75); font.family: Theme.fontMain; font.pixelSize: 12
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 7
+                    visible: launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.entries
+
+                    Repeater {
+                        model: launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.entries ? launcherWindow.cleanupData.removable_cache.entries : []
+                        delegate: Rectangle {
+                            required property var modelData
+                            width: cleanupPanel.width
+                            height: 34
+                            radius: 10
+                            color: Qt.alpha(Theme.white, 0.035)
+                            Row {
+                                anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: modelData.name; color: Qt.alpha(Theme.white, 0.76); font.family: Theme.fontMain; font.pixelSize: 12 }
+                                Item { width: Math.max(0, parent.width - 150); height: 1 }
+                                Text { anchors.verticalCenter: parent.verticalCenter; text: modelData.human; color: Qt.alpha(Theme.white, 0.52); font.family: Theme.fontMain; font.pixelSize: 12 }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    width: parent.width
+                    visible: launcherWindow.cleanupError !== "" || launcherWindow.cleanupLastMessage !== ""
+                    text: launcherWindow.cleanupError !== "" ? launcherWindow.cleanupError : launcherWindow.cleanupLastMessage
+                    color: launcherWindow.cleanupError !== "" ? "#ff6961" : Qt.alpha(Theme.white, 0.65)
+                    font.family: Theme.fontMain; font.pixelSize: 12
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 12
+
+                    Rectangle {
+                        width: (parent.width - 12) / 2
+                        height: 42
+                        radius: 14
+                        color: refreshCleanupMouse.containsMouse ? Qt.alpha(Theme.white, 0.14) : Qt.alpha(Theme.white, 0.08)
+                        border.color: Qt.alpha(Theme.white, 0.13); border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: launcherWindow.isCleanupLoading ? "Scanning…" : "↻  Scan again"
+                            color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true
+                        }
+                        MouseArea {
+                            id: refreshCleanupMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            enabled: !launcherWindow.isCleanupLoading && !launcherWindow.isCleanupCleaning
+                            onClicked: loadCleanupStatus()
+                        }
+                    }
+
+                    Rectangle {
+                        width: (parent.width - 12) / 2
+                        height: 42
+                        radius: 14
+                        color: clearCleanupMouse.containsMouse ? Theme.white : Qt.alpha(Theme.white, 0.90)
+                        opacity: launcherWindow.isCleanupCleaning ? 0.55 : 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: launcherWindow.isCleanupCleaning ? "Cleaning…" : "Clear removable cache"
+                            color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true
+                        }
+                        MouseArea {
+                            id: clearCleanupMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            enabled: !launcherWindow.isCleanupLoading && !launcherWindow.isCleanupCleaning && launcherWindow.cleanupData.removable_cache && launcherWindow.cleanupData.removable_cache.total_bytes > 0
+                            onClicked: launcherWindow.cleanupConfirmVisible = true
+                        }
+                    }
+                }
+            }
+
+            // ------------------------------------------
+            // 3. APLICACIONES (Modo 0)
             // ------------------------------------------
 
             // Fila independiente de aplicaciones usadas recientemente.
@@ -983,10 +1270,26 @@ PanelWindow {
         }
 
         var results = [];
+
+        // Acción interna del launcher; no depende de provider.sh y se mantiene junto
+        // a las apps normales para que también pueda encontrarse buscando "cleanup".
+        var cleanupItem = { name: "Cleanup", comment: "Storage & cache cleanup", icon: "user-trash", exec: "qs_cleanup", type: "cmd" };
+        if (launcherWindow.currentMode === 0) {
+            if (search === "" || cleanupItem.name.toLowerCase().includes(search) || cleanupItem.comment.toLowerCase().includes(search)) {
+                var cleanupScore = 0;
+                if (search !== "") {
+                    cleanupScore = cleanupItem.name.toLowerCase().startsWith(search) ? 1
+                                 : cleanupItem.name.toLowerCase().includes(search) ? 2
+                                 : 3;
+                }
+                results.push({ item: cleanupItem, score: cleanupScore });
+            }
+        }
+
         for (var j = 0; j < rawModel.count; j++) {
             var item = rawModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt") continue; 
+                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -1009,6 +1312,15 @@ PanelWindow {
         if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
+        if (cmd === "qs_cleanup") {
+            launcherWindow.currentMode = 10;
+            launcherWindow.activeHeaderButton = 0;
+            launcherWindow.cleanupConfirmVisible = false;
+            launcherWindow.cleanupLastMessage = "";
+            searchInput.text = "";
+            loadCleanupStatus();
+            return;
+        }
         
         if (cmd.startsWith("qs_wifi_pass:")) { 
             targetWifiSsid = cmd.substring(13); 
@@ -1056,6 +1368,24 @@ PanelWindow {
         execProc.running = true;
 
         toggle();
+    }
+
+
+    function loadCleanupStatus() {
+        launcherWindow.isCleanupLoading = true;
+        launcherWindow.cleanupError = "";
+        cleanupStatusProc.output = "";
+        cleanupStatusProc.command = ["/home/javier/.local/bin/cleanup.py", "--status-json"];
+        cleanupStatusProc.running = true;
+    }
+
+    function runCleanup() {
+        launcherWindow.isCleanupCleaning = true;
+        launcherWindow.cleanupError = "";
+        launcherWindow.cleanupLastMessage = "";
+        cleanupActionProc.output = "";
+        cleanupActionProc.command = ["/home/javier/.local/bin/cleanup.py", "--clear-cache-json"];
+        cleanupActionProc.running = true;
     }
 
     function toggle() {
