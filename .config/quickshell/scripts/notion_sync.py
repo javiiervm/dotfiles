@@ -27,10 +27,10 @@ headers = {
 
 all_events = []
 now = datetime.now(timezone.utc)
-two_weeks_later = now + timedelta(days=14)
+one_month_later = now + timedelta(days=30)
 
 start_date_str = now.strftime("%Y-%m-%d")
-end_date_str = two_weeks_later.strftime("%Y-%m-%d")
+end_date_str = one_month_later.strftime("%Y-%m-%d")
 
 def fetch_database(db_id):
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -76,7 +76,11 @@ def fetch_database(db_id):
                 if dt_end <= now:
                     continue
 
-                time_str = "All day" if is_allday else dt_start.strftime("%H:%M")
+                time_str = (
+                    "All day"
+                    if is_allday
+                    else f"{dt_start.strftime('%H:%M')} - {dt_end.strftime('%H:%M')}"
+                )
             except Exception:
                 continue
 
@@ -100,7 +104,7 @@ if ICAL_URL:
         cal_resp = requests.get(ICAL_URL)
         cal_resp.raise_for_status()
         cal = icalendar.Calendar.from_ical(cal_resp.text)
-        events_in_range = recurring_ical_events.of(cal).between(now, two_weeks_later)
+        events_in_range = recurring_ical_events.of(cal).between(now, one_month_later)
         
         for component in events_in_range:
             dtstart = component.get('dtstart')
@@ -132,7 +136,9 @@ if ICAL_URL:
                             dt_end = dt_end_raw
                     else:
                         dt_end = dt_start + timedelta(hours=1)
-                    time_str = dt_start.strftime("%H:%M")
+                    time_str = (
+                        f"{dt_start.strftime('%H:%M')} - {dt_end.strftime('%H:%M')}"
+                    )
 
                 # FILTRO CLAVE: Si ya ha terminado, lo ignoramos
                 if dt_end <= now:
@@ -167,6 +173,7 @@ for ev in all_events:
         else: day_label = ev["_raw_start"].strftime("%A")
 
         days_dict[date_key] = {
+            "date_key": date_key,
             "day_label": day_label,
             "date_label": ev["_raw_start"].strftime("%d %b"),
             "events": []

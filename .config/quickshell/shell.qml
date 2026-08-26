@@ -28,6 +28,7 @@ ShellRoot {
  
     property int notifCount: 0
     property bool hasUnread: false
+    property int lastNotifId: -1
     property int cpuUsage: 0
     property int memUsage: 0
 
@@ -308,8 +309,16 @@ ShellRoot {
     }
 
     onIsNotifOpenChanged: {
-        if (!isNotifOpen) {
+        // Opening the Notification Center marks the current notifications
+        // as seen and immediately removes any popup that is still visible.
+        //
+        // New notifications received while the center is open are still
+        // added to sharedNotifModel through STATE, but the POPUP branch below
+        // ignores them because isNotifOpen is true. The backend can therefore
+        // keep playing the notification sound normally.
+        if (isNotifOpen) {
             hasUnread = false
+            popupModel.clear()
         }
     }
 
@@ -413,17 +422,48 @@ ShellRoot {
             onRead: (line) => {
                 if (line.startsWith("STATE|")) {
                     var state = JSON.parse(line.substring(6))
+                    var previousCount = root.notifCount
+                    var newTopId = state.notifications.length > 0
+                        ? Number(state.notifications[0].id)
+                        : -1
+
                     root.dnd = state.dnd
                     root.notifCount = state.count
+
+                    // STATE is emitted for every notification even when DND
+                    // suppresses POPUP and sound. Therefore the bell can still
+                    // light up without showing a popup.
+                    if (!root.isNotifOpen
+                            && (state.count > previousCount
+                                || (newTopId !== -1
+                                    && newTopId !== root.lastNotifId))) {
+                        root.hasUnread = true
+                    }
+
+                    root.lastNotifId = newTopId
+
                     sharedNotifModel.clear()
                     for (var i = 0; i < state.notifications.length; i++) {
                         sharedNotifModel.append(state.notifications[i])
                     }
                 } else if (line.startsWith("POPUP|")) {
-                    if (!root.isNotifOpen) {
+                    // Never create popup UI while:
+                    //  - Do Not Disturb is enabled, or
+                    //  - the Notification Center is already open.
+                    //
+                    // STATE still updates sharedNotifModel, so notifications
+                    // received while the center is open appear there directly.
+                    if (!root.isNotifOpen && !root.dnd) {
                         root.hasUnread = true
                         var n = JSON.parse(line.substring(6))
-                        popupModel.insert(0, { "nId": n.id, "pApp": n.app, "pTitle": n.title, "pBody": n.body, "pIcon": n.icon, "pUrgency": n.urgency })
+                        popupModel.insert(0, {
+                            "nId": n.id,
+                            "pApp": n.app,
+                            "pTitle": n.title,
+                            "pBody": n.body,
+                            "pIcon": n.icon,
+                            "pUrgency": n.urgency
+                        })
                     }
                 }
             }
