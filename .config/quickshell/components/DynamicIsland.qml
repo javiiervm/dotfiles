@@ -104,6 +104,24 @@ PanelWindow {
     property int currentTab: 0
     property int totalTabs: 3
 
+    // Devuelve la posición visual más cercana de una pestaña respecto a la activa.
+    // A diferencia de (tabIndex - currentTab), esta distancia "envuelve" los extremos
+    // del carrusel. Así, desde la pestaña 2, la 0 está a +1 isla (no a -2), y
+    // desde la pestaña 0, la 2 está a -1 isla (no a +2).
+    // Resultado: los saltos 2 -> 0 y 0 -> 2 se animan exactamente una pestaña
+    // en la misma dirección que el resto del carrusel.
+    function circularTabOffset(tabIndex) {
+        var delta = tabIndex - currentTab;
+        var half = totalTabs / 2;
+
+        if (delta > half)
+            delta -= totalTabs;
+        else if (delta < -half)
+            delta += totalTabs;
+
+        return delta;
+    }
+
     onIsExpandedChanged: {
         if (isExpanded && currentTab === 1) {
             watchdogTimer.restart()
@@ -125,11 +143,14 @@ PanelWindow {
     property int todayDayIndex: 0
     ListModel { id: appUsageModel }
 
+    // Todas las pestañas expandidas comparten exactamente el mismo tamaño.
+    // Punto medio entre Stats (420x160) y App Usage (460x235): 440x198.
+    property int expandedWidth: 440
+    property int expandedHeight: 198
+
     property int targetWidth: {
         if (isExpanded) {
-            if (currentTab === 0) return isPlayerAvailable ? 420 : 210;
-            if (currentTab === 1) return 420; 
-            if (currentTab === 2) return 460;
+            return expandedWidth;
         }
         if (isNotifying) {
             return notifyText !== "" ? 300 : 220; 
@@ -141,9 +162,7 @@ PanelWindow {
 
     property int targetHeight: {
         if (isExpanded) {
-            if (currentTab === 0) return isPlayerAvailable ? 160 : 60;
-            if (currentTab === 1) return 160; 
-            if (currentTab === 2) return 235; // Actividad
+            return expandedHeight;
         }
         return 32;
     }
@@ -551,10 +570,15 @@ PanelWindow {
             
             onWheel: (wheel) => {
                 if (!islandWindow.isExpanded || wheelCooldown.running) return;
-                if (wheel.angleDelta.x < -40 && currentTab < totalTabs - 1) { 
-                    currentTab++; wheelCooldown.restart(); 
-                } else if (wheel.angleDelta.x > 40 && currentTab > 0) { 
-                    currentTab--; wheelCooldown.restart(); 
+
+                if (wheel.angleDelta.x < -40) {
+                    // Scroll circular hacia la derecha: 0 -> 1 -> 2 -> 0
+                    currentTab = (currentTab + 1) % totalTabs;
+                    wheelCooldown.restart();
+                } else if (wheel.angleDelta.x > 40) {
+                    // Scroll circular hacia la izquierda: 0 -> 2 -> 1 -> 0
+                    currentTab = (currentTab - 1 + totalTabs) % totalTabs;
+                    wheelCooldown.restart();
                 }
             }
         }
@@ -716,7 +740,7 @@ PanelWindow {
             Item {
                 width: parent.width
                 height: parent.height
-                x: (0 - currentTab) * width
+                x: islandWindow.circularTabOffset(0) * width
                 opacity: currentTab === 0 ? 1 : 0
                 Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
                 Behavior on opacity { NumberAnimation { duration: 250 } }
@@ -724,7 +748,7 @@ PanelWindow {
 
                 ColumnLayout {
                     anchors.centerIn: parent
-                    anchors.verticalCenterOffset: -8
+                    anchors.verticalCenterOffset: 0
                     width: parent.width * 0.90
                     height: parent.height * 0.85
                     spacing: 12
@@ -953,7 +977,7 @@ PanelWindow {
             Item {
                 width: parent.width
                 height: parent.height
-                x: (1 - currentTab) * width
+                x: islandWindow.circularTabOffset(1) * width
                 opacity: currentTab === 1 ? 1 : 0
                 Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
                 Behavior on opacity { NumberAnimation { duration: 250 } }
@@ -1069,7 +1093,7 @@ PanelWindow {
             Item {
                 width: parent.width
                 height: parent.height
-                x: (2 - currentTab) * width
+                x: islandWindow.circularTabOffset(2) * width
                 opacity: currentTab === 2 ? 1 : 0
                 Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
                 Behavior on opacity { NumberAnimation { duration: 250 } }
@@ -1077,13 +1101,16 @@ PanelWindow {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 8
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    anchors.topMargin: 10
+                    anchors.bottomMargin: 10
+                    spacing: 6
 
                     // --- 1. CABECERA RESUMEN ---
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 30
+                        Layout.preferredHeight: 28
                         color: Qt.alpha(Theme.white, 0.03)
                         radius: 8
                         border.color: Qt.alpha(Theme.white, 0.05)
@@ -1130,14 +1157,14 @@ PanelWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        spacing: 10
+                        spacing: 8
 
                         // COLUMNA IZQUIERDA: APPS (60%)
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredWidth: 200
-                            spacing: 6
+                            spacing: 4
 
                             Text {
                                 text: "Most Used Applications"
@@ -1159,14 +1186,14 @@ PanelWindow {
 
                                 ListView {
                                     anchors.fill: parent
-                                    anchors.margins: 8
+                                    anchors.margins: 6
                                     model: appUsageModel
-                                    spacing: 8
+                                    spacing: 5
                                     clip: true
 
                                     delegate: Item {
                                         width: ListView.view.width
-                                        height: 24
+                                        height: 22
 
                                         RowLayout {
                                             anchors.fill: parent
@@ -1207,7 +1234,7 @@ PanelWindow {
                         ColumnLayout {
                             Layout.fillHeight: true
                             Layout.preferredWidth: 120
-                            spacing: 6
+                            spacing: 4
 
                             Text {
                                 text: "Weekly Usage"
@@ -1241,8 +1268,8 @@ PanelWindow {
 
                                 RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 6
+                                    anchors.margins: 8
+                                    spacing: 4
 
                                     Repeater {
                                         model: weekChartData 
@@ -1300,31 +1327,6 @@ PanelWindow {
                 }
             }
 
-            // ================================
-            // PAGINATION INDICATOR (Dots)
-            // ================================
-            Row {
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 6
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 6
-                
-                visible: totalTabs > 1 && islandWindow.isExpanded
-                
-                Repeater {
-                    model: totalTabs
-                    Rectangle {
-                        width: currentTab === index ? 16 : 6
-                        height: 6
-                        radius: 3
-                        color: Theme.white
-                        opacity: currentTab === index ? 0.9 : 0.3
-                        
-                        Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutExpo } }
-                        Behavior on opacity { NumberAnimation { duration: 300 } }
-                    }
-                }
-            }
         }
     }
 }
