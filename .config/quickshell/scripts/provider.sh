@@ -158,11 +158,13 @@ except:
 # NUEVO: MENÚ DE SISTEMA
 # =================================================================
 elif [ "$MODE" = "--system" ]; then
-    echo "Lock|Lock the current session|system-lock-screen|hyprlock|sys"
-    echo "Suspend|Suspend the system|system-suspend|systemctl suspend|sys"
-    echo "Logout|Exit current session|system-log-out|hyprctl dispatch exit|sys"
-    echo "Reboot|Restart the system|system-reboot|systemctl reboot|sys"
-    echo "Shutdown|Power off the system|system-shutdown|systemctl poweroff|sys"
+    # Semantic tokens: Launcher.qml owns the actual commands. This avoids
+    # shell quoting problems and keeps system/session actions explicit.
+    echo "Lock|Lock the current session|system-lock-screen|qs_lock|sys"
+    echo "Suspend|Suspend the system|system-suspend|qs_suspend|sys"
+    echo "Logout|Exit current session|system-log-out|qs_logout|sys"
+    echo "Reboot|Restart the system|system-reboot|qs_reboot|sys"
+    echo "Shutdown|Power off the system|system-shutdown|qs_shutdown|sys"
 
 # =================================================================
 # NUEVO: BÚSQUEDA DE ARCHIVOS (Profundidad controlada para 0 lag)

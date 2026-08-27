@@ -38,6 +38,10 @@ PanelWindow {
     // 0 = Cancel, 1 = Clear cache
     property int cleanupConfirmSelection: 0
     property bool recentKeyboardActive: false
+
+    // System actions are queued until the Launcher has fully released
+    // its layer-shell surface / keyboard focus.
+    property string pendingSystemAction: ""
     
     property int activeHeaderButton: 0
 
@@ -108,6 +112,36 @@ PanelWindow {
             launcherWindow.cleanupConfirmSelection = 0;
             searchInput.text = "";
             searchInput.echoMode = TextInput.Normal;
+        }
+    }
+
+    Timer {
+        id: systemActionTimer
+        interval: 420
+        repeat: false
+
+        onTriggered: {
+            var action = launcherWindow.pendingSystemAction;
+            launcherWindow.pendingSystemAction = "";
+
+            execProc.running = false;
+
+            if (action === "lock") {
+                execProc.command = ["loginctl", "lock-session"];
+            } else if (action === "suspend") {
+                execProc.command = ["systemctl", "suspend"];
+            } else if (action === "logout") {
+                // Hyprland >= 0.55 Lua dispatcher syntax.
+                execProc.command = ["hyprctl", "dispatch", "hl.dsp.exit()"];
+            } else if (action === "reboot") {
+                execProc.command = ["systemctl", "reboot"];
+            } else if (action === "shutdown") {
+                execProc.command = ["systemctl", "poweroff"];
+            } else {
+                return;
+            }
+
+            execProc.startDetached();
         }
     }
 
@@ -1944,11 +1978,70 @@ PanelWindow {
             return;
         }
 
+        // System actions come from provider.sh as semantic tokens instead of
+        // shell command strings. This avoids quoting/parsing issues and keeps
+        // session-control logic out of the generic application launcher path.
+        if (cmd === "qs_lock" || cmd === "qs_suspend" || cmd === "qs_logout"
+                || cmd === "qs_reboot" || cmd === "qs_shutdown") {
+            if (cmd === "qs_lock") launcherWindow.pendingSystemAction = "lock";
+            else if (cmd === "qs_suspend") launcherWindow.pendingSystemAction = "suspend";
+            else if (cmd === "qs_logout") launcherWindow.pendingSystemAction = "logout";
+            else if (cmd === "qs_reboot") launcherWindow.pendingSystemAction = "reboot";
+            else if (cmd === "qs_shutdown") launcherWindow.pendingSystemAction = "shutdown";
+
+            // Release the Launcher surface/focus first. Lock is deliberately
+            // started after the close animation so WlSessionLock does not race
+            // with the overlay that initiated it.
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
         var cleanCmd = cmd.replace(/%[fFuUdDnNickvm]/g, "").replace("~", "/home/javier");
         WlrLayershell.keyboardFocus = WlrLayershell.None;
 
+        // Backward compatibility for stale cached/provider entries.
+        if (cleanCmd === "loginctl lock-session" || cleanCmd === "hyprlock") {
+            launcherWindow.pendingSystemAction = "lock";
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
+        if (cleanCmd === "systemctl suspend") {
+            launcherWindow.pendingSystemAction = "suspend";
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
+        if (cleanCmd === "hyprctl dispatch exit"
+                || cleanCmd === "hyprctl dispatch 'hl.dsp.exit()'") {
+            launcherWindow.pendingSystemAction = "logout";
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
+        if (cleanCmd === "systemctl reboot") {
+            launcherWindow.pendingSystemAction = "reboot";
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
+        if (cleanCmd === "systemctl poweroff") {
+            launcherWindow.pendingSystemAction = "shutdown";
+            toggle();
+            systemActionTimer.restart();
+            return;
+        }
+
+        // Normal applications/files keep the existing launcher behaviour.
+        // Hyprland >= 0.55 requires Lua dispatcher syntax.
         // History was already updated/persisted by rememberRecent().
-        var fullCmd = "(" + cleanCmd + " & disown) && hyprctl dispatch warpcursor 50 50";
+        var fullCmd = "(" + cleanCmd + " & disown) && "
+                    + "hyprctl dispatch 'hl.dsp.cursor.move({ x = 50, y = 50 })'";
 
         execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
