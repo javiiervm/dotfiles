@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Services.Mpris
@@ -25,7 +26,11 @@ PanelWindow {
     Region {
         id: islandBlurRegion
         item: visualBg
-        radius: visualBg.radius
+        // La región de blur debe seguir exactamente el radio visual real
+        // de GlassSurface. Usar `radius` aquí dejaba la región rectangular
+        // durante el estado expandido y producía pequeñas líneas rectas en
+        // las tangencias superiores de las esquinas.
+        radius: visualBg.glassRadius
     }
 
     implicitWidth: 480
@@ -33,6 +38,8 @@ PanelWindow {
 
     mask: Region {
         item: visualBg
+        // Igualamos también el input/mask de Wayland a la silueta de la isla.
+        radius: visualBg.glassRadius
     }
 
     // --- PROPIEDAD REQUERIDA POR SHELL.QML ---
@@ -531,6 +538,13 @@ PanelWindow {
         glassRadius: isExpanded ? 28 : height / 2
         clip: true
 
+        // GlassSurface dibuja por defecto un highlight horizontal de 1 px
+        // en el borde superior. En una superficie tan grande y redondeada
+        // como la Dynamic Island se percibe como una línea recta en las
+        // tangencias superiores de las esquinas, así que lo desactivamos
+        // únicamente aquí. El borde glass normal permanece intacto.
+        showHighlight: false
+
         border.color: baseAlertColor !== "transparent" ? baseAlertColor : Glass.borderColor
         border.width: baseAlertColor !== "transparent" ? 2 : Glass.borderWidth
         
@@ -729,13 +743,30 @@ PanelWindow {
 
         // ── EXPANDED STATE: TABS ──
         Item {
+            id: expandedTabsViewport
             anchors.fill: parent
             visible: islandWindow.isExpanded && !visualBg.isAnimating
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 100 } }
 
+            // Una única máscara FIJA para todo el carrusel.
+            // Las pestañas se deslizan por debajo de esta silueta, así que
+            // durante la transición nunca se ve su bounding-box rectangular.
+            layer.enabled: visible
+            layer.smooth: true
+            layer.effect: OpacityMask {
+                cached: false
+
+                maskSource: Rectangle {
+                    width: expandedTabsViewport.width
+                    height: expandedTabsViewport.height
+                    radius: visualBg.glassRadius
+                    color: "white"
+                }
+            }
+
             // ================================
-            // TAB 0: MUSIC PLAYER (SIN CAVA)
+            // TAB 0: MUSIC PLAYER
             // ================================
             Item {
                 width: parent.width
@@ -744,228 +775,381 @@ PanelWindow {
                 opacity: currentTab === 0 ? 1 : 0
                 Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
                 Behavior on opacity { NumberAnimation { duration: 250 } }
-                visible: opacity > 0 
+                visible: opacity > 0
 
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    anchors.verticalCenterOffset: 0
-                    width: parent.width * 0.90
-                    height: parent.height * 0.85
-                    spacing: 12
+                // ========================================================
+                // NOTHING PLAYING
+                // Visualmente idéntico al MediaPlayerCard de la lockscreen.
+                // ========================================================
+                Item {
+                    anchors.fill: parent
+                    visible: !islandWindow.isPlayerAvailable
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 18 // Separar un poco más la portada de los textos
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 10
 
-                        // 1. CARÁTULA DEL ÁLBUM
-                        Rectangle {
-                            Layout.preferredWidth: 85 // Subimos de 70 a 85
-                            Layout.preferredHeight: 85
-                            Layout.alignment: Qt.AlignVCenter
-                            radius: 14 // Curvatura ligeramente mayor
-                            color: Theme.bg1
-                            clip: true
-                            visible: islandWindow.isPlayerAvailable
-
-                            Image { 
-                                anchors.fill: parent
-                                source: islandWindow.songArt
-                                fillMode: Image.PreserveAspectCrop
-                                visible: source !== "" 
-                            }
-                            Text { 
-                                anchors.centerIn: parent
-                                text: "󰎈"
-                                font.family: Theme.fontIcons
-                                color: Theme.white
-                                font.pixelSize: 34 // Icono por defecto más grande
-                                visible: parent.children[0].source == "" 
-                            }
+                        Text {
+                            text: "󰎆"
+                            color: Qt.alpha(Theme.white, 0.45)
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 18
+                            anchors.verticalCenter: parent.verticalCenter
                         }
 
-                        // 2. TEXTOS Y CONTROLES
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4 // Más separación entre título y artista
-                            Layout.alignment: Qt.AlignVCenter
-                            
-                            Text { 
+                        Text {
+                            text: "Nothing playing"
+                            color: Qt.alpha(Theme.white, 0.55)
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+                }
+
+                // ========================================================
+                // ACTIVE PLAYER
+                // La carátula se usa como fondo de toda la pestaña,
+                // inspirándose en el reproductor de One UI.
+                // ========================================================
+                Item {
+                    anchors.fill: parent
+                    visible: islandWindow.isPlayerAvailable
+
+                    // ----------------------------------------------------
+                    // FULL-BLEED ALBUM ART BACKGROUND
+                    //
+                    // El recorte redondeado lo realiza expandedTabsViewport
+                    // de forma fija. La portada puede actualizarse directamente
+                    // sin una máscara individual que se desplace con la pestaña.
+                    // ----------------------------------------------------
+                    Image {
+                        id: islandBackgroundArtwork
+                        anchors.fill: parent
+                        source: islandWindow.songArt
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        smooth: true
+                        mipmap: true
+                        retainWhileLoading: true
+                        sourceSize.width: islandWindow.expandedWidth
+                        sourceSize.height: islandWindow.expandedWidth
+                        opacity: 0.50
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "#000000"
+                        opacity: islandWindow.songArt !== "" ? 0.48 : 0.20
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 82
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.30) }
+                            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.00) }
+                        }
+                    }
+
+                    // ----------------------------------------------------
+                    // PLAYER CONTENT
+                    // ----------------------------------------------------
+                    Item {
+                        id: islandPlayerContent
+                        anchors.fill: parent
+                        anchors.leftMargin: 20
+                        anchors.rightMargin: 20
+                        anchors.topMargin: 14
+                        anchors.bottomMargin: 14
+
+                        Column {
+                            id: islandMetadata
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.topMargin: 8
+                            spacing: 3
+
+                            Text {
+                                width: parent.width
                                 text: islandWindow.songTitle
                                 color: Theme.white
                                 font.family: Theme.fontMain
-                                font.pixelSize: 16 // Subimos de 15 a 16
+                                font.pixelSize: 17
                                 font.bold: true
                                 elide: Text.ElideRight
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter 
-                            }
-                            Text { 
-                                text: islandWindow.songArtist
-                                color: Theme.grey1
-                                font.family: Theme.fontMain
-                                font.pixelSize: 13 // Subimos de 12 a 13
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter 
+                                maximumLineCount: 1
+                                style: Text.Raised
+                                styleColor: Qt.rgba(0, 0, 0, 0.35)
                             }
 
-                            // CONTROLES DE REPRODUCCIÓN
-                            RowLayout {
-                                Layout.alignment: Qt.AlignHCenter
-                                Layout.topMargin: 10 // Mayor margen respecto al artista
-                                spacing: 18 // Botones más separados entre sí
-                                visible: islandWindow.isPlayerAvailable
-                                
-                                Text { 
+                            Text {
+                                width: parent.width
+                                text: islandWindow.songArtist
+                                color: Qt.alpha(Theme.white, 0.74)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                                maximumLineCount: 1
+                                style: Text.Raised
+                                styleColor: Qt.rgba(0, 0, 0, 0.30)
+                            }
+                        }
+
+                        // Shuffle + previous + play/pause + next + repeat.
+                        // El bloque queda centrado respecto a la barra inferior.
+                        RowLayout {
+                            id: islandPlaybackControls
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: islandProgressRow.top
+                            // Franja reservada para el próximo elemento que quieras añadir.
+                            anchors.bottomMargin: 18
+                            height: 38
+                            spacing: 16
+
+                            Item { Layout.fillWidth: true }
+
+                            Item {
+                                Layout.preferredWidth: 28
+                                Layout.preferredHeight: 30
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.centerIn: parent
                                     text: "󰒟"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 18 
-                                    color: islandWindow.isShuffle ? Theme.white : Qt.alpha(Theme.white, 0.4)
-                                    MouseArea { 
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.shuffle = !islandWindow.activePlayer.shuffle; 
-                                    } 
+                                    font.pixelSize: 18
+                                    color: islandWindow.isShuffle ? Theme.white : Qt.alpha(Theme.white, 0.48)
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
                                 }
-                                Text { 
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (islandWindow.isPlayerAvailable)
+                                            islandWindow.activePlayer.shuffle = !islandWindow.activePlayer.shuffle;
+                                    }
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 30
+                                Layout.preferredHeight: 30
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.centerIn: parent
                                     text: "󰒮"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 22 // Icono más grande
+                                    font.pixelSize: 21
                                     color: Theme.white
-                                    MouseArea { 
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.previous() 
-                                    } 
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
                                 }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.previous()
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 40
+                                Layout.preferredHeight: 40
+                                Layout.alignment: Qt.AlignVCenter
+
                                 Rectangle {
-                                    width: 36 // Botón Play/Pause crecido a 36x36
-                                    height: 36
+                                    anchors.centerIn: parent
+                                    width: 38
+                                    height: 38
                                     radius: width / 2
-                                    color: Theme.white
-                                    Layout.alignment: Qt.AlignVCenter
-                                    Text { 
+                                    color: Qt.alpha(Theme.white, 0.94)
+
+                                    Text {
                                         anchors.centerIn: parent
                                         text: islandWindow.isPlaying ? "󰏤" : "󰐊"
                                         font.family: Theme.fontIcons
                                         font.pixelSize: 18
-                                        color: Theme.bg0 
-                                    }
-                                    MouseArea { 
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: { 
-                                            if (!islandWindow.isPlayerAvailable) return;
-                                            if (islandWindow.isPlaying) islandWindow.activePlayer.pause(); 
-                                            else islandWindow.activePlayer.play(); 
-                                        } 
+                                        color: Theme.bg0
                                     }
                                 }
-                                Text { 
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (!islandWindow.isPlayerAvailable) return;
+                                        if (islandWindow.isPlaying) islandWindow.activePlayer.pause();
+                                        else islandWindow.activePlayer.play();
+                                    }
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 30
+                                Layout.preferredHeight: 30
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.centerIn: parent
                                     text: "󰒭"
                                     font.family: Theme.fontIcons
-                                    font.pixelSize: 22 // Icono más grande
+                                    font.pixelSize: 21
                                     color: Theme.white
-                                    MouseArea { 
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.next() 
-                                    } 
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
                                 }
-                                Text { 
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: if (islandWindow.isPlayerAvailable) islandWindow.activePlayer.next()
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 28
+                                Layout.preferredHeight: 30
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.centerIn: parent
                                     text: islandWindow.liveLoopStatus === "Track" ? "󰑘" : "󰑖"
                                     font.family: Theme.fontIcons
                                     font.pixelSize: 18
-                                    color: islandWindow.liveLoopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.4)
-                                    MouseArea { 
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: { 
-                                            if (!islandWindow.isPlayerAvailable) return;
-                                            
-                                            let current = islandWindow.liveLoopStatus; 
-                                            let next = "None";
-                                            if (current === "None") next = "Playlist";
-                                            else if (current === "Playlist") next = "Track";
-                                            else next = "None";
-                                            
-                                            // Actualización optimista: refleja el cambio en el ícono al instante
-                                            islandWindow.liveLoopStatus = next;
-                                            
-                                            // Escribimos directamente en el objeto MPRIS que ya maneja Quickshell
-                                            // (misma vía que usa el shuffle), en vez de un subproceso playerctl
-                                            // que puede no heredar DBUS_SESSION_BUS_ADDRESS correctamente.
-                                            islandWindow.activePlayer.loopStatus = next;
-                                        } 
-                                    } 
+                                    color: islandWindow.liveLoopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.48)
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
                                 }
-                            }
-                        }
-                    }
 
-                    // 3. BARRA DE PROGRESO
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.topMargin: 0
-                        visible: islandWindow.isPlayerAvailable
-                        spacing: 8
-                        
-                        Text { 
-                            text: islandWindow.formatTime(islandWindow.trackPosition)
-                            color: Qt.alpha(Theme.white, 0.6)
-                            font.pixelSize: 11
-                            font.family: Theme.fontMain
-                            Layout.minimumWidth: 35
-                            horizontalAlignment: Text.AlignRight 
-                        }
-                        
-                        MouseArea {
-                            id: progressArea
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 16
-                            Layout.alignment: Qt.AlignVCenter
-                            cursorShape: Qt.PointingHandCursor
-                            
-                            onPressed: { islandWindow.isUserSeeking = true; seekToMouse(); }
-                            onPositionChanged: { if (pressed) seekToMouse(); }
-                            onReleased: { 
-                                islandWindow.isUserSeeking = false;
-                                if (islandWindow.activePlayer) islandWindow.activePlayer.position = islandWindow.trackPosition; 
-                            }
-                            onCanceled: islandWindow.isUserSeeking = false;
-                            function seekToMouse() { 
-                                if (!islandWindow.isPlayerAvailable || islandWindow.trackLength <= 0) return;
-                                var percent = Math.max(0, Math.min(1, mouseX / width)); 
-                                var newPos = percent * islandWindow.trackLength; 
-                                islandWindow.trackPosition = newPos;
-                                if (islandWindow.activePlayer) islandWindow.activePlayer.position = newPos; 
-                            }
-                            
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width
-                                height: 6
-                                radius: 3
-                                color: Qt.alpha(Theme.white, 0.2)
-                                
-                                Rectangle {
-                                    height: parent.height
-                                    radius: 3
-                                    color: Theme.white
-                                    property double progress: (islandWindow.trackLength > 0) ? (islandWindow.trackPosition / islandWindow.trackLength) : 0
-                                    Behavior on width { enabled: !islandWindow.isUserSeeking; NumberAnimation { duration: 500; easing.type: Easing.Linear } }
-                                    width: parent.width * Math.max(0, Math.min(1, progress))
-                                    
-                                    Rectangle { 
-                                        width: 10; height: 10; radius: 5; color: Theme.white
-                                        anchors.verticalCenter: parent.verticalCenter; anchors.right: parent.right; anchors.rightMargin: -4
-                                        scale: islandWindow.isUserSeeking ? 1.3 : 1.0
-                                        Behavior on scale { NumberAnimation { duration: 150 } } 
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (!islandWindow.isPlayerAvailable) return;
+
+                                        let current = islandWindow.liveLoopStatus;
+                                        let next = "None";
+                                        if (current === "None") next = "Playlist";
+                                        else if (current === "Playlist") next = "Track";
+                                        else next = "None";
+
+                                        islandWindow.liveLoopStatus = next;
+                                        islandWindow.activePlayer.loopStatus = next;
                                     }
                                 }
                             }
+
+                            Item { Layout.fillWidth: true }
                         }
-                        Text { 
-                            text: islandWindow.formatTime(islandWindow.trackLength)
-                            color: Qt.alpha(Theme.white, 0.6)
-                            font.pixelSize: 11
-                            font.family: Theme.fontMain
-                            Layout.minimumWidth: 35 
+
+                        // Barra de reproducción completa, ahora aprovechando todo
+                        // el ancho disponible al desaparecer la carátula lateral.
+                        RowLayout {
+                            id: islandProgressRow
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            spacing: 9
+
+                            Text {
+                                text: islandWindow.formatTime(islandWindow.trackPosition)
+                                color: Qt.alpha(Theme.white, 0.76)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                font.bold: true
+                                Layout.minimumWidth: 34
+                                horizontalAlignment: Text.AlignLeft
+                                style: Text.Raised
+                                styleColor: Qt.rgba(0, 0, 0, 0.30)
+                            }
+
+                            MouseArea {
+                                id: progressArea
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 22
+                                Layout.alignment: Qt.AlignVCenter
+                                cursorShape: Qt.PointingHandCursor
+
+                                function seekToMouse() {
+                                    if (!islandWindow.isPlayerAvailable || islandWindow.trackLength <= 0) return;
+                                    var percent = Math.max(0, Math.min(1, mouseX / width));
+                                    var newPos = percent * islandWindow.trackLength;
+                                    islandWindow.trackPosition = newPos;
+                                    if (islandWindow.activePlayer) islandWindow.activePlayer.position = newPos;
+                                }
+
+                                onPressed: {
+                                    islandWindow.isUserSeeking = true;
+                                    seekToMouse();
+                                }
+                                onPositionChanged: {
+                                    if (pressed) seekToMouse();
+                                }
+                                onReleased: {
+                                    if (islandWindow.activePlayer)
+                                        islandWindow.activePlayer.position = islandWindow.trackPosition;
+                                    islandWindow.isUserSeeking = false;
+                                }
+                                onCanceled: islandWindow.isUserSeeking = false
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: 5
+                                    radius: height / 2
+                                    color: Qt.alpha(Theme.white, 0.26)
+
+                                    Rectangle {
+                                        height: parent.height
+                                        radius: parent.radius
+                                        color: Qt.alpha(Theme.white, 0.96)
+                                        property double progress: islandWindow.trackLength > 0
+                                            ? Math.max(0, Math.min(1, islandWindow.trackPosition / islandWindow.trackLength))
+                                            : 0
+                                        width: parent.width * progress
+
+                                        Behavior on width {
+                                            enabled: !islandWindow.isUserSeeking
+                                            NumberAnimation { duration: 500; easing.type: Easing.Linear }
+                                        }
+
+                                        Rectangle {
+                                            width: islandWindow.isUserSeeking ? 10 : 8
+                                            height: width
+                                            radius: width / 2
+                                            color: Theme.white
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.rightMargin: -width / 2
+                                            opacity: 0.96
+
+                                            Behavior on width { NumberAnimation { duration: 120 } }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: islandWindow.formatTime(islandWindow.trackLength)
+                                color: Qt.alpha(Theme.white, 0.76)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                font.bold: true
+                                Layout.minimumWidth: 34
+                                horizontalAlignment: Text.AlignRight
+                                style: Text.Raised
+                                styleColor: Qt.rgba(0, 0, 0, 0.30)
+                            }
                         }
                     }
                 }
