@@ -1067,6 +1067,7 @@ PanelWindow {
                                 font.pixelSize: 10
                                 font.bold: true
                                 Layout.minimumWidth: 34
+                                Layout.topMargin: 10
                                 horizontalAlignment: Text.AlignLeft
                                 style: Text.Raised
                                 styleColor: Qt.rgba(0, 0, 0, 0.30)
@@ -1075,9 +1076,52 @@ PanelWindow {
                             MouseArea {
                                 id: progressArea
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 22
+                                Layout.preferredHeight: 26
                                 Layout.alignment: Qt.AlignVCenter
                                 cursorShape: Qt.PointingHandCursor
+
+                                // La onda es puramente visual: no analiza el audio.
+                                // Solo se repinta mientras la pestaña musical está
+                                // realmente abierta, así que cerrada no añade trabajo.
+                                property real wavePhase: 0
+                                property real visualProgress: islandWindow.trackLength > 0
+                                    ? Math.max(0, Math.min(1, islandWindow.trackPosition / islandWindow.trackLength))
+                                    : 0
+
+                                Behavior on visualProgress {
+                                    enabled: !islandWindow.isUserSeeking
+                                    NumberAnimation { duration: 420; easing.type: Easing.Linear }
+                                }
+
+                                Timer {
+                                    id: progressWaveTimer
+                                    interval: 40 // 25 FPS: suficientemente suave para una onda tan pequeña.
+                                    repeat: true
+                                    running: islandWindow.isExpanded
+                                             && islandWindow.currentTab === 0
+                                             && islandWindow.isPlayerAvailable
+                                             && islandWindow.isPlaying
+                                    onTriggered: {
+                                        progressArea.wavePhase += 0.085;
+                                        // No hacemos wrap corto tipo 2π porque puede percibirse
+                                        // como reinicio visual del patrón. Solo saneamos muy de vez en
+                                        // cuando para evitar crecimiento infinito del número.
+                                        if (progressArea.wavePhase > 1000000)
+                                            progressArea.wavePhase = 0;
+                                        progressWave.requestPaint();
+                                    }
+                                }
+
+                                onVisualProgressChanged: progressWave.requestPaint()
+                                onWidthChanged: progressWave.requestPaint()
+                                onHeightChanged: progressWave.requestPaint()
+
+                                Connections {
+                                    target: islandWindow
+                                    function onIsPlayingChanged() {
+                                        progressWave.requestPaint();
+                                    }
+                                }
 
                                 function seekToMouse() {
                                     if (!islandWindow.isPlayerAvailable || islandWindow.trackLength <= 0) return;
@@ -1101,40 +1145,163 @@ PanelWindow {
                                 }
                                 onCanceled: islandWindow.isUserSeeking = false
 
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    height: 5
-                                    radius: height / 2
-                                    color: Qt.alpha(Theme.white, 0.26)
+                                Canvas {
+                                    id: progressWave
+                                    anchors.fill: parent
 
-                                    Rectangle {
-                                        height: parent.height
-                                        radius: parent.radius
-                                        color: Qt.alpha(Theme.white, 0.96)
-                                        property double progress: islandWindow.trackLength > 0
-                                            ? Math.max(0, Math.min(1, islandWindow.trackPosition / islandWindow.trackLength))
-                                            : 0
-                                        width: parent.width * progress
+                                    onPaint: {
+                                        var ctx = getContext("2d");
+                                        ctx.reset();
 
-                                        Behavior on width {
-                                            enabled: !islandWindow.isUserSeeking
-                                            NumberAnimation { duration: 500; easing.type: Easing.Linear }
+                                        var w = width;
+                                        var h = height;
+                                        if (w <= 0 || h <= 0) return;
+
+                                        var p = Math.max(0, Math.min(1, progressArea.visualProgress));
+                                        var phase = progressArea.wavePhase;
+
+                                        // Geometría base de la barra.
+                                        // Usamos una pista interior para que el thumb nunca se recorte
+                                        // en 0% ni en 100%, y para que los extremos sigan siendo redondeados.
+                                        var baseY = Math.round(h * 0.70);
+                                        var lineWidth = 4.0;
+                                        var thumbRadius = islandWindow.isUserSeeking ? 7.4 : 6.4;
+                                        var haloRadius = islandWindow.isUserSeeking ? 11.5 : 9.5;
+                                        var trackInset = thumbRadius + 1.5;
+                                        var trackStart = trackInset;
+                                        var trackEnd = Math.max(trackStart, w - trackInset);
+                                        var trackWidth = Math.max(1, trackEnd - trackStart);
+                                        var thumbX = trackStart + p * trackWidth;
+                                        var playedWidth = Math.max(0, thumbX - trackStart);
+
+                                        // -----------------------------------------
+                                        // 1. ONDAS SOBRE LA ZONA YA REPRODUCIDA
+                                        // -----------------------------------------
+                                        if (islandWindow.isPlaying && playedWidth > 2) {
+                                            ctx.save();
+
+                                            ctx.beginPath();
+                                            ctx.rect(trackStart, 0, playedWidth, baseY + 1);
+                                            ctx.clip();
+
+                                            function drawWave(amplitude, periodPx, speedPx, alpha, verticalBias) {
+                                                ctx.beginPath();
+                                                ctx.moveTo(trackStart, baseY);
+
+                                                var step = 3;
+                                                var omega = (Math.PI * 2) / Math.max(1, periodPx);
+                                                var travel = phase * speedPx;
+
+                                                for (var x = trackStart; x <= thumbX; x += step) {
+                                                    var localX = x - trackStart;
+
+                                                    // Visible desde el inicio, con un arranque suave.
+                                                    var startFade = 0.82 + 0.18 * Math.min(1, localX / 8);
+
+                                                    // Se desvanece cerca del thumb para conectar limpio.
+                                                    var endFade = Math.min(1, Math.max(0, (thumbX - x) / 24));
+                                                    var envelope = startFade * endFade;
+
+                                                    var s1 = 0.5 + 0.5 * Math.sin((localX - travel) * omega);
+                                                    var s2 = 0.5 + 0.5 * Math.sin((localX - travel * 0.62) * omega * 0.58 + 1.15);
+                                                    var shape = (s1 * 0.72 + s2 * 0.28);
+
+                                                    var y = baseY - verticalBias - shape * amplitude * envelope;
+
+                                                    if (x === trackStart)
+                                                        ctx.moveTo(x, baseY);
+                                                    ctx.lineTo(x, y);
+                                                }
+
+                                                ctx.lineTo(thumbX, baseY);
+                                                ctx.closePath();
+                                                ctx.fillStyle = Qt.alpha(Theme.white, alpha);
+                                                ctx.fill();
+                                            }
+
+                                            drawWave(7.8, 120, 30, 0.18, 0.0);
+                                            drawWave(5.8, 92, -22, 0.25, 0.25);
+                                            drawWave(4.2, 68, 16, 0.34, 0.45);
+
+                                            // Cresta superior sutil.
+                                            ctx.beginPath();
+                                            var crestStep = 3;
+                                            var crestOmega = (Math.PI * 2) / 90;
+                                            for (var cx = trackStart; cx <= thumbX; cx += crestStep) {
+                                                var localCX = cx - trackStart;
+                                                var cStart = 0.84 + 0.16 * Math.min(1, localCX / 8);
+                                                var cEnd = Math.min(1, Math.max(0, (thumbX - cx) / 24));
+                                                var cEnv = cStart * cEnd;
+
+                                                var c1 = 0.5 + 0.5 * Math.sin((localCX - phase * 22) * crestOmega);
+                                                var c2 = 0.5 + 0.5 * Math.sin((localCX - phase * 14) * crestOmega * 0.54 + 0.9);
+                                                var cShape = c1 * 0.72 + c2 * 0.28;
+                                                var cy = baseY - 0.35 - cShape * 5.2 * cEnv;
+
+                                                if (cx === trackStart)
+                                                    ctx.moveTo(cx, baseY);
+                                                else
+                                                    ctx.lineTo(cx, cy);
+                                            }
+                                            ctx.lineTo(thumbX, baseY);
+                                            ctx.lineWidth = 1.1;
+                                            ctx.lineJoin = "round";
+                                            ctx.lineCap = "round";
+                                            ctx.strokeStyle = Qt.alpha(Theme.white, 0.64);
+                                            ctx.stroke();
+
+                                            ctx.restore();
                                         }
 
-                                        Rectangle {
-                                            width: islandWindow.isUserSeeking ? 10 : 8
-                                            height: width
-                                            radius: width / 2
-                                            color: Theme.white
-                                            anchors.right: parent.right
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            anchors.rightMargin: -width / 2
-                                            opacity: 0.96
+                                        // -----------------------------------------
+                                        // 2. BARRA RECTA COMPLETA CON EXTREMOS REDONDOS
+                                        // -----------------------------------------
+                                        ctx.beginPath();
+                                        ctx.moveTo(trackStart, baseY);
+                                        ctx.lineTo(trackEnd, baseY);
+                                        ctx.lineWidth = lineWidth;
+                                        ctx.lineCap = "round";
+                                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.28);
+                                        ctx.stroke();
 
-                                            Behavior on width { NumberAnimation { duration: 120 } }
+                                        if (playedWidth > 0) {
+                                            ctx.beginPath();
+                                            ctx.moveTo(trackStart, baseY);
+                                            ctx.lineTo(thumbX, baseY);
+                                            ctx.lineWidth = lineWidth;
+                                            ctx.lineCap = "round";
+                                            ctx.strokeStyle = Qt.alpha(Theme.white, 0.96);
+                                            ctx.stroke();
                                         }
+
+                                        // -----------------------------------------
+                                        // 3. THUMB TIPO ONE UI
+                                        // -----------------------------------------
+                                        var halo = ctx.createRadialGradient(
+                                            thumbX, baseY, 1,
+                                            thumbX, baseY, haloRadius
+                                        );
+                                        halo.addColorStop(0.0, Qt.rgba(1, 1, 1, 0.28));
+                                        halo.addColorStop(0.58, Qt.rgba(1, 1, 1, 0.11));
+                                        halo.addColorStop(1.0, Qt.rgba(1, 1, 1, 0.0));
+
+                                        ctx.beginPath();
+                                        ctx.arc(thumbX, baseY, haloRadius, 0, Math.PI * 2);
+                                        ctx.fillStyle = halo;
+                                        ctx.fill();
+
+                                        // Interior relleno pero distinguible del borde.
+                                        ctx.beginPath();
+                                        ctx.arc(thumbX, baseY, thumbRadius, 0, Math.PI * 2);
+                                        ctx.fillStyle = Qt.rgba(0.82, 0.82, 0.82, 0.86);
+                                        ctx.fill();
+
+                                        // Aro blanco externo.
+                                        ctx.beginPath();
+                                        ctx.arc(thumbX, baseY, thumbRadius, 0, Math.PI * 2);
+                                        ctx.lineWidth = 2.4;
+                                        ctx.strokeStyle = Qt.alpha(Theme.white, 0.99);
+                                        ctx.stroke();
                                     }
                                 }
                             }
@@ -1146,6 +1313,7 @@ PanelWindow {
                                 font.pixelSize: 10
                                 font.bold: true
                                 Layout.minimumWidth: 34
+                                Layout.topMargin: 10
                                 horizontalAlignment: Text.AlignRight
                                 style: Text.Raised
                                 styleColor: Qt.rgba(0, 0, 0, 0.30)
