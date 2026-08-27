@@ -121,6 +121,7 @@ alias ls="lsd -lag"
 alias cex="python3 ~/.scripts/cex.py"
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.mis-dotfiles/ --work-tree=$HOME'
 alias cleanup="$HOME/.local/bin/cleanup.py"
+alias plmedit="QT_QPA_PLATFORMTHEME=kde kcmshell6 kcm_plasmalogin"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
