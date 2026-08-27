@@ -96,6 +96,13 @@ PanelWindow {
         var art = activePlayer.trackArtUrl || (activePlayer.metadata ? activePlayer.metadata["mpris:artUrl"] : null);
         return art ? String(art) : "";
     }
+
+    // --- PALETA DINÁMICA DE LA CARÁTULA ---
+    property color artworkPalettePrimary: "#d8d8d8"
+    property color artworkPaletteSecondary: "#eeeeee"
+    property color artworkPaletteAccent: "#ffffff"
+
+    onSongArtChanged: updateArtworkPalette()
     
     property bool isPlaying: activePlayer ? (activePlayer.playbackState === 1 || activePlayer.playbackStatus === "Playing") : false
     property bool isShuffle: activePlayer ? (activePlayer.shuffle || false) : false
@@ -230,6 +237,62 @@ PanelWindow {
 
     Process { id: quickCommand }
     function execCmd(cmd) { quickCommand.command = ["bash", "-c", cmd]; quickCommand.running = true; }
+
+    // --- PALETA DE LA CARÁTULA MUSICAL ---
+    // Event-driven: solo se ejecuta cuando cambia songArt.
+    Process {
+        id: artworkPaletteProc
+        property string requestedArt: ""
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                if (artworkPaletteProc.requestedArt !== islandWindow.songArt)
+                    return;
+
+                var colors = data.trim().split(";");
+                var hexRe = /^#[0-9a-fA-F]{6}$/;
+
+                if (colors.length < 3
+                    || !hexRe.test(colors[0])
+                    || !hexRe.test(colors[1])
+                    || !hexRe.test(colors[2])) {
+                    return;
+                }
+
+                islandWindow.artworkPalettePrimary = colors[0];
+                islandWindow.artworkPaletteSecondary = colors[1];
+                islandWindow.artworkPaletteAccent = colors[2];
+                progressWave.requestPaint();
+            }
+        }
+    }
+
+    function updateArtworkPalette() {
+        var art = islandWindow.songArt;
+
+        if (!art || art === "") {
+            artworkPalettePrimary = "#d8d8d8";
+            artworkPaletteSecondary = "#eeeeee";
+            artworkPaletteAccent = "#ffffff";
+            return;
+        }
+
+        if (artworkPaletteProc.running)
+            artworkPaletteProc.running = false;
+
+        artworkPaletteProc.requestedArt = art;
+        artworkPaletteProc.command = [
+            "python3",
+            "/home/javier/.config/quickshell/scripts/cava_color.py",
+            "--palette",
+            art
+        ];
+
+        Qt.callLater(function() {
+            if (artworkPaletteProc.requestedArt === islandWindow.songArt)
+                artworkPaletteProc.running = true;
+        });
+    }
 
     // --- SISTEMA DE COLA DE NOTIFICACIONES ---
     property bool isNotifying: false
@@ -608,6 +671,58 @@ PanelWindow {
             opacity: (!visualBg.isAnimating && visible) ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150 } }
 
+            // ---------------------------------------------------------
+            // ARTWORK DE FONDO DEL RELOJ
+            // ---------------------------------------------------------
+            // Totalmente event-driven: depende únicamente de isPlaying/songArt.
+            // No añade timers, polling ni procesos adicionales.
+            Item {
+                id: collapsedArtworkLayer
+                anchors.fill: parent
+                visible: islandWindow.isPlaying && islandWindow.songArt !== ""
+                z: -1
+
+                // Fuente pequeña: el reloj mide solo 32 px de alto, así que no
+                // necesitamos decodificar una textura grande para esta vista.
+                Image {
+                    id: collapsedArtworkSource
+                    anchors.fill: parent
+                    source: islandWindow.isPlaying ? islandWindow.songArt : ""
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    cache: true
+                    smooth: true
+                    retainWhileLoading: true
+                    sourceSize.width: Math.max(160, Math.ceil(collapsedArtworkLayer.width * 1.5))
+                    sourceSize.height: 64
+                    visible: false
+                }
+
+                // Recorte real de píldora. cached:false evita quedarse con una
+                // portada antigua cuando MPRIS cambia de canción.
+                OpacityMask {
+                    anchors.fill: parent
+                    source: collapsedArtworkSource
+                    cached: false
+
+                    maskSource: Rectangle {
+                        width: collapsedArtworkLayer.width
+                        height: collapsedArtworkLayer.height
+                        radius: height / 2
+                        color: "white"
+                    }
+                }
+
+                // Oscurecimiento para que reloj e indicadores mantengan
+                // contraste independientemente de la carátula.
+                Rectangle {
+                    anchors.fill: parent
+                    radius: height / 2
+                    color: "#000000"
+                    opacity: 0.60
+                }
+            }
+
             Text {
                 id: customClock
                 anchors.centerIn: parent
@@ -907,10 +1022,11 @@ PanelWindow {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: islandProgressRow.top
-                            // Franja reservada para el próximo elemento que quieras añadir.
-                            anchors.bottomMargin: 18
-                            height: 38
-                            spacing: 16
+                            // Compensamos la subida de la barra para conservar
+                            // prácticamente la misma posición de los controles.
+                            anchors.bottomMargin: 12
+                            height: 46
+                            spacing: 14
 
                             Item { Layout.fillWidth: true }
 
@@ -940,18 +1056,26 @@ PanelWindow {
                             }
 
                             Item {
-                                Layout.preferredWidth: 30
-                                Layout.preferredHeight: 30
+                                Layout.preferredWidth: 38
+                                Layout.preferredHeight: 38
                                 Layout.alignment: Qt.AlignVCenter
 
-                                Text {
+                                Rectangle {
                                     anchors.centerIn: parent
-                                    text: "󰒮"
-                                    font.family: Theme.fontIcons
-                                    font.pixelSize: 21
-                                    color: Theme.white
-                                    style: Text.Raised
-                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                    width: 36
+                                    height: 36
+                                    radius: width / 2
+                                    color: Qt.rgba(0, 0, 0, 0.28)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "󰒮"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 20
+                                        color: Theme.white
+                                        style: Text.Raised
+                                        styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                    }
                                 }
 
                                 MouseArea {
@@ -962,23 +1086,25 @@ PanelWindow {
                             }
 
                             Item {
-                                Layout.preferredWidth: 40
-                                Layout.preferredHeight: 40
+                                Layout.preferredWidth: 46
+                                Layout.preferredHeight: 46
                                 Layout.alignment: Qt.AlignVCenter
 
                                 Rectangle {
                                     anchors.centerIn: parent
-                                    width: 38
-                                    height: 38
+                                    width: 44
+                                    height: 44
                                     radius: width / 2
-                                    color: Qt.alpha(Theme.white, 0.94)
+                                    color: Qt.rgba(0, 0, 0, 0.30)
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: islandWindow.isPlaying ? "󰏤" : "󰐊"
                                         font.family: Theme.fontIcons
-                                        font.pixelSize: 18
-                                        color: Theme.bg0
+                                        font.pixelSize: 20
+                                        color: Theme.white
+                                        style: Text.Raised
+                                        styleColor: Qt.rgba(0, 0, 0, 0.30)
                                     }
                                 }
 
@@ -994,18 +1120,26 @@ PanelWindow {
                             }
 
                             Item {
-                                Layout.preferredWidth: 30
-                                Layout.preferredHeight: 30
+                                Layout.preferredWidth: 38
+                                Layout.preferredHeight: 38
                                 Layout.alignment: Qt.AlignVCenter
 
-                                Text {
+                                Rectangle {
                                     anchors.centerIn: parent
-                                    text: "󰒭"
-                                    font.family: Theme.fontIcons
-                                    font.pixelSize: 21
-                                    color: Theme.white
-                                    style: Text.Raised
-                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                    width: 36
+                                    height: 36
+                                    radius: width / 2
+                                    color: Qt.rgba(0, 0, 0, 0.28)
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "󰒭"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 20
+                                        color: Theme.white
+                                        style: Text.Raised
+                                        styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                    }
                                 }
 
                                 MouseArea {
@@ -1058,25 +1192,34 @@ PanelWindow {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            spacing: 9
+                            anchors.bottomMargin: 6
+                            spacing: 6
 
-                            Text {
-                                text: islandWindow.formatTime(islandWindow.trackPosition)
-                                color: Qt.alpha(Theme.white, 0.76)
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                                font.bold: true
-                                Layout.minimumWidth: 34
-                                Layout.topMargin: 10
-                                horizontalAlignment: Text.AlignLeft
-                                style: Text.Raised
-                                styleColor: Qt.rgba(0, 0, 0, 0.30)
+                            Item {
+                                Layout.preferredWidth: 32
+                                Layout.preferredHeight: 34
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: 1
+
+                                    text: islandWindow.formatTime(islandWindow.trackPosition)
+                                    color: Qt.alpha(Theme.white, 0.76)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignRight
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                }
                             }
 
                             MouseArea {
                                 id: progressArea
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 26
+                                Layout.preferredHeight: 34
                                 Layout.alignment: Qt.AlignVCenter
                                 cursorShape: Qt.PointingHandCursor
 
@@ -1087,6 +1230,13 @@ PanelWindow {
                                 property real visualProgress: islandWindow.trackLength > 0
                                     ? Math.max(0, Math.min(1, islandWindow.trackPosition / islandWindow.trackLength))
                                     : 0
+
+                                // Geometría compartida para que el thumb y su glow nunca se recorten
+                                // en los extremos de la barra.
+                                property real progressThumbRadius: islandWindow.isUserSeeking ? 7.4 : 6.4
+                                property real progressHaloRadius: islandWindow.isUserSeeking ? 11.5 : 9.5
+                                property real progressGlowRadius: progressHaloRadius + 7.0
+                                property real progressEdgePadding: progressGlowRadius + 1.5
 
                                 Behavior on visualProgress {
                                     enabled: !islandWindow.isUserSeeking
@@ -1125,7 +1275,12 @@ PanelWindow {
 
                                 function seekToMouse() {
                                     if (!islandWindow.isPlayerAvailable || islandWindow.trackLength <= 0) return;
-                                    var percent = Math.max(0, Math.min(1, mouseX / width));
+
+                                    var left = progressEdgePadding;
+                                    var right = Math.max(left + 1, width - progressEdgePadding);
+                                    var percent = (mouseX - left) / (right - left);
+                                    percent = Math.max(0, Math.min(1, percent));
+
                                     var newPos = percent * islandWindow.trackLength;
                                     islandWindow.trackPosition = newPos;
                                     if (islandWindow.activePlayer) islandWindow.activePlayer.position = newPos;
@@ -1163,11 +1318,16 @@ PanelWindow {
                                         // Geometría base de la barra.
                                         // Usamos una pista interior para que el thumb nunca se recorte
                                         // en 0% ni en 100%, y para que los extremos sigan siendo redondeados.
-                                        var baseY = Math.round(h * 0.70);
+                                        // El eje vertical de la barra se calcula a partir del glow,
+                                        // para que el brillo del thumb nunca se recorte por abajo.
+                                        var baseY = Math.max(
+                                            progressArea.progressGlowRadius + 0.5,
+                                            h - progressArea.progressGlowRadius - 1.0
+                                        );
                                         var lineWidth = 4.0;
-                                        var thumbRadius = islandWindow.isUserSeeking ? 7.4 : 6.4;
-                                        var haloRadius = islandWindow.isUserSeeking ? 11.5 : 9.5;
-                                        var trackInset = thumbRadius + 1.5;
+                                        var thumbRadius = progressArea.progressThumbRadius;
+                                        var haloRadius = progressArea.progressHaloRadius;
+                                        var trackInset = progressArea.progressEdgePadding;
                                         var trackStart = trackInset;
                                         var trackEnd = Math.max(trackStart, w - trackInset);
                                         var trackWidth = Math.max(1, trackEnd - trackStart);
@@ -1180,27 +1340,34 @@ PanelWindow {
                                         if (islandWindow.isPlaying && playedWidth > 2) {
                                             ctx.save();
 
-                                            ctx.beginPath();
-                                            ctx.rect(trackStart, 0, playedWidth, baseY + 1);
-                                            ctx.clip();
+                                            // Las ondas deben quedarse dentro del tramo reproducido,
+                                            // pero sin ese corte feo en los extremos. La solución es
+                                            // hacer fade a cero dentro del propio rango [trackStart, thumbX].
+                                            var waveStart = trackStart;
+                                            var waveEnd = thumbX;
+                                            var edgeFadePx = 18;
 
-                                            function drawWave(amplitude, periodPx, speedPx, alpha, verticalBias) {
+                                            function drawWave(amplitude, periodPx, speedPx, alpha, verticalBias, waveColor) {
                                                 ctx.beginPath();
-                                                ctx.moveTo(trackStart, baseY);
+                                                ctx.moveTo(waveStart, baseY);
 
                                                 var step = 3;
                                                 var omega = (Math.PI * 2) / Math.max(1, periodPx);
                                                 var travel = phase * speedPx;
 
-                                                for (var x = trackStart; x <= thumbX; x += step) {
+                                                for (var x = waveStart; x <= waveEnd; x += step) {
                                                     var localX = x - trackStart;
 
-                                                    // Visible desde el inicio, con un arranque suave.
-                                                    var startFade = 0.82 + 0.18 * Math.min(1, localX / 8);
-
-                                                    // Se desvanece cerca del thumb para conectar limpio.
-                                                    var endFade = Math.min(1, Math.max(0, (thumbX - x) / 24));
-                                                    var envelope = startFade * endFade;
+                                                    // Fade interno suave en ambos bordes.
+                                                    var fadeIn = Math.min(
+                                                        1,
+                                                        Math.max(0, (x - waveStart) / edgeFadePx)
+                                                    );
+                                                    var fadeOut = Math.min(
+                                                        1,
+                                                        Math.max(0, (waveEnd - x) / edgeFadePx)
+                                                    );
+                                                    var envelope = fadeIn * fadeOut;
 
                                                     var s1 = 0.5 + 0.5 * Math.sin((localX - travel) * omega);
                                                     var s2 = 0.5 + 0.5 * Math.sin((localX - travel * 0.62) * omega * 0.58 + 1.15);
@@ -1208,46 +1375,54 @@ PanelWindow {
 
                                                     var y = baseY - verticalBias - shape * amplitude * envelope;
 
-                                                    if (x === trackStart)
+                                                    if (x === waveStart)
                                                         ctx.moveTo(x, baseY);
                                                     ctx.lineTo(x, y);
                                                 }
 
-                                                ctx.lineTo(thumbX, baseY);
+                                                ctx.lineTo(waveEnd, baseY);
                                                 ctx.closePath();
-                                                ctx.fillStyle = Qt.alpha(Theme.white, alpha);
+                                                ctx.fillStyle = Qt.alpha(waveColor, alpha);
                                                 ctx.fill();
                                             }
 
-                                            drawWave(7.8, 120, 30, 0.18, 0.0);
-                                            drawWave(5.8, 92, -22, 0.25, 0.25);
-                                            drawWave(4.2, 68, 16, 0.34, 0.45);
+                                            drawWave(12.0, 120, 30, 0.34, 0.0, islandWindow.artworkPalettePrimary);
+                                            drawWave(9.0, 92, -22, 0.40, 0.25, islandWindow.artworkPaletteSecondary);
+                                            drawWave(6.8, 68, 16, 0.46, 0.45, islandWindow.artworkPaletteAccent);
 
-                                            // Cresta superior sutil.
+                                            // Cresta superior: mismo fade interno, sin salirse
+                                            // del tramo reproducido.
                                             ctx.beginPath();
                                             var crestStep = 3;
                                             var crestOmega = (Math.PI * 2) / 90;
-                                            for (var cx = trackStart; cx <= thumbX; cx += crestStep) {
+                                            for (var cx = waveStart; cx <= waveEnd; cx += crestStep) {
                                                 var localCX = cx - trackStart;
-                                                var cStart = 0.84 + 0.16 * Math.min(1, localCX / 8);
-                                                var cEnd = Math.min(1, Math.max(0, (thumbX - cx) / 24));
-                                                var cEnv = cStart * cEnd;
+
+                                                var cFadeIn = Math.min(
+                                                    1,
+                                                    Math.max(0, (cx - waveStart) / edgeFadePx)
+                                                );
+                                                var cFadeOut = Math.min(
+                                                    1,
+                                                    Math.max(0, (waveEnd - cx) / edgeFadePx)
+                                                );
+                                                var cEnv = cFadeIn * cFadeOut;
 
                                                 var c1 = 0.5 + 0.5 * Math.sin((localCX - phase * 22) * crestOmega);
                                                 var c2 = 0.5 + 0.5 * Math.sin((localCX - phase * 14) * crestOmega * 0.54 + 0.9);
                                                 var cShape = c1 * 0.72 + c2 * 0.28;
-                                                var cy = baseY - 0.35 - cShape * 5.2 * cEnv;
+                                                var cy = baseY - 0.35 - cShape * 8.0 * cEnv;
 
-                                                if (cx === trackStart)
+                                                if (cx === waveStart)
                                                     ctx.moveTo(cx, baseY);
                                                 else
                                                     ctx.lineTo(cx, cy);
                                             }
-                                            ctx.lineTo(thumbX, baseY);
+                                            ctx.lineTo(waveEnd, baseY);
                                             ctx.lineWidth = 1.1;
                                             ctx.lineJoin = "round";
                                             ctx.lineCap = "round";
-                                            ctx.strokeStyle = Qt.alpha(Theme.white, 0.64);
+                                            ctx.strokeStyle = Qt.alpha(islandWindow.artworkPaletteAccent, 0.76);
                                             ctx.stroke();
 
                                             ctx.restore();
@@ -1277,23 +1452,50 @@ PanelWindow {
                                         // -----------------------------------------
                                         // 3. THUMB TIPO ONE UI
                                         // -----------------------------------------
-                                        var halo = ctx.createRadialGradient(
+                                        // Glow suave tipo One UI alrededor del thumb.
+                                        // Se apoya en el color principal extraído de la portada.
+                                        var glowRadius = haloRadius + 7.0;
+
+                                        var outerGlow = ctx.createRadialGradient(
+                                            thumbX, baseY, thumbRadius * 0.20,
+                                            thumbX, baseY, glowRadius
+                                        );
+                                        outerGlow.addColorStop(0.0, Qt.alpha(islandWindow.artworkPalettePrimary, 0.58));
+                                        outerGlow.addColorStop(0.38, Qt.alpha(islandWindow.artworkPalettePrimary, 0.32));
+                                        outerGlow.addColorStop(0.74, Qt.alpha(islandWindow.artworkPalettePrimary, 0.14));
+                                        outerGlow.addColorStop(1.0, Qt.rgba(0, 0, 0, 0.0));
+
+                                        ctx.beginPath();
+                                        ctx.arc(thumbX, baseY, glowRadius, 0, Math.PI * 2);
+                                        ctx.fillStyle = outerGlow;
+                                        ctx.fill();
+
+                                        // Halo blanco interior sutil para conservar el look brillante
+                                        // de One UI sin perder el color dinámico de la portada.
+                                        var innerHalo = ctx.createRadialGradient(
                                             thumbX, baseY, 1,
                                             thumbX, baseY, haloRadius
                                         );
-                                        halo.addColorStop(0.0, Qt.rgba(1, 1, 1, 0.28));
-                                        halo.addColorStop(0.58, Qt.rgba(1, 1, 1, 0.11));
-                                        halo.addColorStop(1.0, Qt.rgba(1, 1, 1, 0.0));
+                                        innerHalo.addColorStop(0.0, Qt.rgba(1, 1, 1, 0.34));
+                                        innerHalo.addColorStop(0.52, Qt.rgba(1, 1, 1, 0.18));
+                                        innerHalo.addColorStop(1.0, Qt.rgba(1, 1, 1, 0.0));
 
                                         ctx.beginPath();
                                         ctx.arc(thumbX, baseY, haloRadius, 0, Math.PI * 2);
-                                        ctx.fillStyle = halo;
+                                        ctx.fillStyle = innerHalo;
                                         ctx.fill();
 
-                                        // Interior relleno pero distinguible del borde.
+                                        // Interior coloreado según la carátula.
+                                        // El aro blanco se conserva para mantener contraste.
                                         ctx.beginPath();
                                         ctx.arc(thumbX, baseY, thumbRadius, 0, Math.PI * 2);
-                                        ctx.fillStyle = Qt.rgba(0.82, 0.82, 0.82, 0.86);
+                                        ctx.fillStyle = Qt.alpha(islandWindow.artworkPalettePrimary, 0.98);
+                                        ctx.fill();
+
+                                        // Pequeño brillo central para que el relleno no se vea plano.
+                                        ctx.beginPath();
+                                        ctx.arc(thumbX, baseY, Math.max(1.6, thumbRadius - 2.2), 0, Math.PI * 2);
+                                        ctx.fillStyle = Qt.alpha(Theme.white, 0.24);
                                         ctx.fill();
 
                                         // Aro blanco externo.
@@ -1306,17 +1508,23 @@ PanelWindow {
                                 }
                             }
 
-                            Text {
-                                text: islandWindow.formatTime(islandWindow.trackLength)
-                                color: Qt.alpha(Theme.white, 0.76)
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                                font.bold: true
-                                Layout.minimumWidth: 34
-                                Layout.topMargin: 10
-                                horizontalAlignment: Text.AlignRight
-                                style: Text.Raised
-                                styleColor: Qt.rgba(0, 0, 0, 0.30)
+                            Item {
+                                Layout.preferredWidth: 32
+                                Layout.preferredHeight: 34
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: islandWindow.formatTime(islandWindow.trackLength)
+                                    color: Qt.alpha(Theme.white, 0.76)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignLeft
+                                    style: Text.Raised
+                                    styleColor: Qt.rgba(0, 0, 0, 0.30)
+                                }
                             }
                         }
                     }
