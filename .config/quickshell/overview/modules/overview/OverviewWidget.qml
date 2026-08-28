@@ -208,28 +208,6 @@ Item {
         );
     }
 
-    function activateWindow(windowData) {
-        if (!windowData)
-            return;
-
-        const address = `${windowData.address ?? ""}`.trim();
-        if (address.length === 0)
-            return;
-
-        const workspaceName = `${windowData?.workspace?.name ?? ""}`;
-        const workspaceId = Number(windowData?.workspace?.id);
-
-        // Close the layershell/focus grab first. For normal workspaces, switch
-        // explicitly to the window's workspace; then focus the exact window on
-        // the next QML event-loop turn, once the overview is releasing focus.
-        GlobalStates.overviewOpen = false;
-
-        if (!workspaceName.startsWith("special:") && Number.isFinite(workspaceId) && workspaceId > 0)
-            root.focusWorkspace(workspaceId);
-
-        Qt.callLater(() => root.focusWindow(address));
-    }
-
     function closeWindow(address) {
         const value = `${address ?? ""}`.trim();
         if (value.length === 0)
@@ -903,7 +881,11 @@ Item {
                                                     if (!windowData)
                                                         return;
                                                     if (event.button === Qt.LeftButton) {
-                                                        root.activateWindow(windowData);
+                                                        root.panelWindow.requestWindowActivation(
+                                                            windowData.address,
+                                                            windowData?.workspace?.id ?? -1,
+                                                            modelData
+                                                        );
                                                         event.accepted = true;
                                                     } else if (event.button === Qt.MiddleButton) {
                                                         root.closeWindow(windowData.address);
@@ -1156,7 +1138,11 @@ Item {
                             if (!windowData) return;
 
                             if (event.button === Qt.LeftButton) {
-                                root.activateWindow(windowData)
+                                root.panelWindow.requestWindowActivation(
+                                    windowData.address,
+                                    windowData?.workspace?.id ?? -1,
+                                    modelData
+                                )
                                 event.accepted = true
                             } else if (event.button === Qt.MiddleButton) {
                                 root.closeWindow(windowData.address)

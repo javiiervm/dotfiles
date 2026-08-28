@@ -23,6 +23,75 @@ Scope {
             property bool backdropEnabled: Config.options.overview.effects.enableBackdrop
             property real backdropOpacity: Math.max(0, Math.min(1, Config.options.overview.effects.backdropOpacity))
             property bool closeOnFocusLoss: Config.options.overview.closeOnFocusLoss ?? true
+
+            // Window activation is intentionally owned by the persistent PanelWindow,
+            // not OverviewWidget. The widget Loader is destroyed as soon as the
+            // overview closes, so delayed callbacks inside OverviewWidget never get
+            // a chance to run reliably.
+            property string pendingActivationAddress: ""
+            property int pendingActivationWorkspaceId: -1
+            property var pendingActivationToplevel: null
+
+            function luaQuote(value) {
+                return JSON.stringify(`${value ?? ""}`);
+            }
+
+            function requestWindowActivation(address, workspaceId, toplevel) {
+                const cleanAddress = `${address ?? ""}`.trim();
+                if (cleanAddress.length === 0)
+                    return;
+
+                pendingActivationAddress = cleanAddress;
+                pendingActivationWorkspaceId = Number(workspaceId);
+                pendingActivationToplevel = toplevel ?? null;
+
+                // First hide the layer-shell surface and release HyprlandFocusGrab.
+                GlobalStates.overviewOpen = false;
+                activationWorkspaceTimer.restart();
+            }
+
+            Timer {
+                id: activationWorkspaceTimer
+                // One-shot only when the user clicks a window. This is deliberately
+                // longer than one event-loop tick so the layer-shell focus grab is
+                // actually gone before asking Hyprland to focus another surface.
+                interval: Math.max(80, Config.options.hacks.arbitraryRaceConditionDelay ?? 0)
+                repeat: false
+                onTriggered: {
+                    const workspaceId = root.pendingActivationWorkspaceId;
+                    if (Number.isFinite(workspaceId) && workspaceId > 0)
+                        Hyprland.dispatch(`hl.dsp.focus({ workspace = ${Math.trunc(workspaceId)} })`);
+
+                    activationWindowTimer.restart();
+                }
+            }
+
+            Timer {
+                id: activationWindowTimer
+                interval: 35
+                repeat: false
+                onTriggered: {
+                    const address = root.pendingActivationAddress;
+                    const toplevel = root.pendingActivationToplevel;
+
+                    // Ask through the standard Wayland toplevel protocol too. This is
+                    // cheap and gives us a compositor-native activation path.
+                    if (toplevel && typeof toplevel.activate === "function")
+                        toplevel.activate();
+
+                    // Exact Hyprland-address focus is the authoritative fallback.
+                    if (address.length > 0) {
+                        Hyprland.dispatch(
+                            `hl.dsp.focus({ window = ${root.luaQuote(`address:${address}`)} })`
+                        );
+                    }
+
+                    root.pendingActivationAddress = "";
+                    root.pendingActivationWorkspaceId = -1;
+                    root.pendingActivationToplevel = null;
+                }
+            }
+
             screen: modelData
             visible: GlobalStates.overviewOpen
 
