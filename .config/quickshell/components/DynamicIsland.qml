@@ -136,16 +136,18 @@ PanelWindow {
         return delta;
     }
 
+    // Stats is strictly on-demand. The Process below only exists while the
+    // island is expanded AND tab 1 is visible. Clear transient network data
+    // immediately when leaving it so the collapsed island never keeps a stale
+    // download indicator alive.
     onIsExpandedChanged: {
-        if (isExpanded && currentTab === 1) {
-            watchdogTimer.restart()
-        }
+        if (!isExpanded)
+            dlSpeed = 0
     }
 
     onCurrentTabChanged: {
-        if (isExpanded && currentTab === 1) {
-            watchdogTimer.restart()
-        }
+        if (currentTab !== 1)
+            dlSpeed = 0
     }
 
     // --- ACTUALIZAR EN LAS PROPIEDADES DE LA ISLA ---
@@ -452,8 +454,44 @@ PanelWindow {
         }
     }
 
-    // 4. RENDIMIENTO DINÁMICO (El "Watchdog")
-    // Lee a fondo solo cuando la pestaña 1 está abierta. Si está cerrada, lee a nivel súper superficial.
+    // 4. CÁMARA: detector por eventos, separado por completo de Stats.
+    // inotifywait duerme bloqueado hasta que un nodo /dev/video* se abre/cierra;
+    // solo entonces ejecutamos fuser una vez para conocer el estado real.
+    Process {
+        id: cameraUsageProc
+        command: [
+            "bash", "-c",
+            "shopt -s nullglob; devs=(/dev/video*); " +
+            "if [ ${#devs[@]} -eq 0 ]; then exit 0; fi; " +
+            "echo STATE; " +
+            "inotifywait -m -q -e open -e close_nowrite -e close_write --format STATE \"${devs[@]}\" 2>/dev/null"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: function(data) {
+                if (data.trim() !== "STATE") return;
+                cameraStateProbe.running = true;
+            }
+        }
+    }
+
+    Process {
+        id: cameraStateProbe
+        command: ["bash", "-c", "fuser /dev/video* >/dev/null 2>&1 && echo 1 || echo 0"]
+        running: false
+        stdout: SplitParser {
+            onRead: function(data) {
+                globalCamActive = data.trim() === "1";
+            }
+        }
+    }
+
+    // 5. STATS DEL SISTEMA — ESTRICTAMENTE ON-DEMAND
+    // ------------------------------------------------
+    // Un único bash permanece vivo SOLO mientras esta pestaña es visible.
+    // Lee CPU/RAM/red/temperatura directamente desde /proc y /sys. La RTX se
+    // consulta con nvidia-smi cada 2 s y el disco cada 5 s. Al cambiar de pestaña
+    // o cerrar la isla Quickshell detiene el proceso: 0 polling de Stats fuera.
     property real dlSpeed: 0
     property real globalCt: 0
     property real globalGt: 0
@@ -461,93 +499,182 @@ PanelWindow {
     property bool globalMicActive: false
     property real globalCu: 0
     property real globalGu: 0
+
     property real sysRamUsage: 0
+    property real sysRamTotal: 32
+    property real sysRamPercent: 0
+    property real sysStorageFree: 0
+    property real sysStorageTotal: 0
+    property real sysStoragePercent: 0
     property string sysStorage: "0/0GB"
-    
+    property real sysLoad1: 0
+    property string sysUptime: "0m"
+
     // Alias para la UI del Tab 1
     property real sysGpuTemp: globalGt
-    property real sysGpuUsage: globalGu 
+    property real sysGpuUsage: globalGu
     property real sysCpuTemp: globalCt
-    property real sysCpuUsage: globalCu 
+    property real sysCpuUsage: globalCu
 
-    Timer {
-        id: watchdogTimer
-        // 1s abierto, 10s cerrado
-        interval: (islandWindow.isExpanded && currentTab === 1) ? 1000 : 10000
-        running: true
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: {
-            watchdogProc.tabOpen = (islandWindow.isExpanded && currentTab === 1) ? "1" : "0";
-            watchdogProc.running = true;
-        }
+    function formatUptime(seconds) {
+        var s = Math.max(0, Math.floor(seconds || 0));
+        var days = Math.floor(s / 86400);
+        var hours = Math.floor((s % 86400) / 3600);
+        var mins = Math.floor((s % 3600) / 60);
+        if (days > 0) return days + "d " + hours + "h";
+        if (hours > 0) return hours + "h " + mins + "m";
+        return mins + "m";
     }
 
     Process {
-        id: watchdogProc
-        property string tabOpen: "0"
+        id: statsProc
+        running: islandWindow.isExpanded && currentTab === 1
         command: [
             "bash", "-c",
-            "tabOpen=\"" + watchdogProc.tabOpen + "\"; " +
             "LC_ALL=C; " +
-
-            // 1. Red (Cero subprocesos, puramente bash)
-            "F_RX=\"/tmp/qs_rx_bytes\"; [ ! -f \"$F_RX\" ] && echo 0 > \"$F_RX\"; " +
-            "read prev_rx < \"$F_RX\" 2>/dev/null || prev_rx=0; curr_rx=0; " +
-            "for f in /sys/class/net/w*/statistics/rx_bytes; do [ -f \"$f\" ] && { read v < \"$f\"; curr_rx=$((curr_rx+v)); }; done; " +
-            "echo \"$curr_rx\" > \"$F_RX\"; " +
-            "inter=$([ \"$tabOpen\" = \"1\" ] && echo 1 || echo 10); " +
-            "if [ \"$curr_rx\" -lt \"$prev_rx\" ]; then dl=0; else dl=$(( (curr_rx - prev_rx) / inter / 1048576 )); fi; " +
-
-            // 2. CPU Temp (Driver k10temp para Ryzen AI)
-            // Lee el hardware directo, sin llamar al binario 'sensors', impacto literal de 0% CPU.
-            "ct=0; for f in /sys/class/hwmon/hwmon*/name; do " +
-            "  read name < \"$f\" 2>/dev/null; " +
-            "  if [ \"$name\" = \"k10temp\" ] || [ \"$name\" = \"zenpower\" ]; then " +
-            "    read t < \"${f%/*}/temp1_input\" 2>/dev/null; " +
-            "    ct=$((t / 1000)); break; " +
-            "  fi; " +
-            "done; " +
-
-            // 3. Lógica inteligente para preservar la batería
-            "if [ \"$tabOpen\" = \"1\" ]; then " +
-            "  cu=$(top -bn1 | awk '/Cpu\\(s\\)/ {print $2 + $4}'); " +
-            // Se agrupa uso y temperatura de la RTX 5070 en una sola llamada, 
-            // SOLAMENTE cuando la pestaña está abierta viéndola.
-            "  gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo \"0, 0\"); " +
-            "  gu=$(echo \"$gpu_info\" | cut -d',' -f1); " +
-            "  gt=$(echo \"$gpu_info\" | cut -d',' -f2 | tr -d ' '); " +
-            "  ru=$(free -m | awk '/Mem:/ {printf \"%.1f\", $3/1024}'); " +
-            "  st=$(df -BG / | awk 'NR==2 {gsub(\"G\",\"GB\",$4); gsub(\"G\",\"GB\",$2); print $4\"/\"$2}'); " +
-            "else " +
-            // MODO AHORRO BATERÍA: Si la isla está colapsada, no despertamos la dGPU y ahorramos los procesos de RAM/Disco
-            "  cu=0; gu=0; gt=0; ru=0; st=\"0/0GB\"; " +
-            "fi; " +
-
-            "cam=$(fuser /dev/video* 2>/dev/null | wc -w); " +
-            "echo \"${dl:-0};${ct:-0};${gt:-0};${cam:-0};${cu:-0};${gu:-0};${ru:-0};${st:-0/0GB}\""
+            "prev_total=0; prev_idle=0; prev_rx=0; tick=0; gu=0; gt=0; st_free=0; st_total=0; " +
+            "while true; do " +
+            "  tick=$((tick+1)); " +
+            // CPU usage from /proc/stat, no top/awk.
+            "  read _ user nice system idle iowait irq softirq steal _ < /proc/stat; " +
+            "  total=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle_all=$((idle+iowait)); " +
+            "  if [ $prev_total -gt 0 ]; then dt=$((total-prev_total)); di=$((idle_all-prev_idle)); [ $dt -gt 0 ] && cu=$((100*(dt-di)/dt)) || cu=0; else cu=0; fi; " +
+            "  prev_total=$total; prev_idle=$idle_all; " +
+            // CPU temperature directly from hwmon.
+            "  ct=0; for f in /sys/class/hwmon/hwmon*/name; do read name < \"$f\" 2>/dev/null || continue; if [ \"$name\" = \"k10temp\" ] || [ \"$name\" = \"zenpower\" ]; then read t < \"${f%/*}/temp1_input\" 2>/dev/null || t=0; ct=$((t/1000)); break; fi; done; " +
+            // RAM directly from /proc/meminfo. MemAvailable is a better measure than free RAM.
+            "  mt=0; ma=0; while read key val _; do case \"$key\" in MemTotal:) mt=$val ;; MemAvailable:) ma=$val; break ;; esac; done < /proc/meminfo; " +
+            "  mu=$((mt-ma)); if [ $mt -gt 0 ]; then rp=$((100*mu/mt)); else rp=0; fi; " +
+            // Aggregate received bytes for non-loopback interfaces.
+            "  rx=0; for f in /sys/class/net/*/statistics/rx_bytes; do case \"$f\" in */lo/*) continue ;; esac; read v < \"$f\" 2>/dev/null || v=0; rx=$((rx+v)); done; " +
+            "  if [ $prev_rx -gt 0 ] && [ $rx -ge $prev_rx ]; then dl=$((rx-prev_rx)); else dl=0; fi; prev_rx=$rx; " +
+            // System load and uptime from procfs.
+            "  read load1 _ < /proc/loadavg; read up _ < /proc/uptime; up=${up%%.*}; " +
+            // dGPU: one nvidia-smi every 2 seconds, and only while this Process exists.
+            "  if [ $((tick%2)) -eq 1 ]; then gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null); if [ -n \"$gpu_info\" ]; then IFS=',' read -r gu gt <<< \"$gpu_info\"; gu=${gu// /}; gt=${gt// /}; else gu=0; gt=0; fi; fi; " +
+            // Storage changes slowly; refresh every 5 seconds instead of every frame.
+            "  if [ $tick -eq 1 ] || [ $((tick%5)) -eq 0 ]; then while read a b; do [ \"$a\" = \"Size\" ] && continue; st_total=${a%G}; st_free=${b%G}; done < <(df -BG --output=size,avail / 2>/dev/null); st_total=${st_total:-0}; st_free=${st_free:-0}; fi; " +
+            "  echo \"${cu:-0};${ct:-0};${gu:-0};${gt:-0};${mu:-0};${mt:-1};${rp:-0};${dl:-0};${st_free:-0};${st_total:-0};${load1:-0};${up:-0}\"; " +
+            "  sleep 1; " +
+            "done"
         ]
-        running: false
         stdout: SplitParser {
             onRead: function(data) {
                 var p = data.trim().split(";");
-                if (p.length >= 8) {
-                    dlSpeed = parseFloat(p[0]) || 0;
-                    globalCt = parseFloat(p[1]) || 0;
-                    
-                    // Solo actualizamos gt si nos han devuelto un valor útil (>0)
-                    var readGt = parseFloat(p[2]) || 0;
-                    if (readGt > 0) globalGt = readGt; 
-                    
-                    globalCamActive = parseInt(p[3]) > 0;
-                    
-                    if (watchdogProc.tabOpen === "1") {
-                        globalCu = parseFloat(p[4]) || 0;
-                        globalGu = parseFloat(p[5]) || 0;
-                        sysRamUsage = parseFloat(p[6]) || 0;
-                        sysStorage = p[7] || "0/0GB";
-                    }
+                if (p.length < 12) return;
+
+                globalCu = parseFloat(p[0]) || 0;
+                globalCt = parseFloat(p[1]) || 0;
+                globalGu = parseFloat(p[2]) || 0;
+                globalGt = parseFloat(p[3]) || 0;
+
+                var usedKb = parseFloat(p[4]) || 0;
+                var totalKb = parseFloat(p[5]) || 1;
+                sysRamUsage = usedKb / 1048576.0;
+                sysRamTotal = totalKb / 1048576.0;
+                sysRamPercent = parseFloat(p[6]) || 0;
+
+                // p[7] llega en bytes por intervalo (~1 s). Convertimos aquí
+                // a MiB/s con punto flotante para no perder velocidades < 1 MB/s.
+                dlSpeed = (parseFloat(p[7]) || 0) / 1048576.0;
+                sysStorageFree = parseFloat(p[8]) || 0;
+                sysStorageTotal = parseFloat(p[9]) || 0;
+                sysStoragePercent = sysStorageTotal > 0
+                    ? Math.max(0, Math.min(100, 100 * (sysStorageTotal - sysStorageFree) / sysStorageTotal))
+                    : 0;
+                sysStorage = Math.round(Math.max(0, sysStorageTotal - sysStorageFree))
+                    + "GB/" + Math.round(sysStorageTotal) + "GB";
+                sysLoad1 = parseFloat(p[10]) || 0;
+                sysUptime = formatUptime(parseFloat(p[11]) || 0);
+            }
+        }
+    }
+
+    // 5B. WATCHDOG DE ALERTAS — MUY BAJO CONSUMO
+    // ------------------------------------------------
+    // El dashboard detallado sigue siendo 100% on-demand. Este proceso existe
+    // únicamente cuando Stats NO está abierta y sirve solo para mantener vivas
+    // las alertas del borde.
+    //
+    // Coste:
+    //  - un único bash dormido casi todo el tiempo;
+    //  - cada 15 s lee /proc y /sys (sin top/free/sensors);
+    //  - nvidia-smi SOLO se ejecuta si la dGPU NVIDIA ya está runtime-active,
+    //    evitando despertarla solo para comprobar una alerta.
+    //
+    // Al abrir Stats se detiene automáticamente y statsProc pasa a proporcionar
+    // las medidas detalladas cada segundo.
+    Process {
+        id: alertWatchdogProc
+        running: !(islandWindow.isExpanded && currentTab === 1)
+        command: [
+            "bash", "-c",
+            "LC_ALL=C; " +
+            "prev_total=0; prev_idle=0; " +
+            // Localiza una GPU NVIDIA PCI una sola vez.
+            "nvidia_dev=''; " +
+            "for d in /sys/bus/pci/devices/*; do " +
+            "  [ -r \"$d/vendor\" ] || continue; read v < \"$d/vendor\"; " +
+            "  [ \"$v\" = \"0x10de\" ] || continue; " +
+            "  [ -r \"$d/class\" ] || continue; read c < \"$d/class\"; " +
+            "  case \"$c\" in 0x030000|0x030200) nvidia_dev=\"$d\"; break ;; esac; " +
+            "done; " +
+            "while true; do " +
+            // CPU usage: diferencia entre dos muestras del contador del kernel.
+            "  read _ user nice system idle iowait irq softirq steal _ < /proc/stat; " +
+            "  total=$((user+nice+system+idle+iowait+irq+softirq+steal)); idle_all=$((idle+iowait)); " +
+            "  if [ $prev_total -gt 0 ]; then dt=$((total-prev_total)); di=$((idle_all-prev_idle)); [ $dt -gt 0 ] && cu=$((100*(dt-di)/dt)) || cu=0; else cu=0; fi; " +
+            "  prev_total=$total; prev_idle=$idle_all; " +
+            // Temperatura CPU directamente desde hwmon.
+            "  ct=0; for f in /sys/class/hwmon/hwmon*/name; do " +
+            "    read name < \"$f\" 2>/dev/null || continue; " +
+            "    if [ \"$name\" = \"k10temp\" ] || [ \"$name\" = \"zenpower\" ]; then " +
+            "      read t < \"${f%/*}/temp1_input\" 2>/dev/null || t=0; ct=$((t/1000)); break; " +
+            "    fi; " +
+            "  done; " +
+            // RAM: solo porcentaje, desde /proc/meminfo.
+            "  mt=0; ma=0; while read key val _; do case \"$key\" in MemTotal:) mt=$val ;; MemAvailable:) ma=$val; break ;; esac; done < /proc/meminfo; " +
+            "  if [ $mt -gt 0 ]; then rp=$((100*(mt-ma)/mt)); else rp=0; fi; " +
+            // GPU: NO despertamos la NVIDIA. Solo preguntamos si ya está activa.
+            "  gu=0; gt=0; gpu_active=0; " +
+            "  if [ -n \"$nvidia_dev\" ]; then " +
+            "    if [ -r \"$nvidia_dev/power/runtime_status\" ]; then read rs < \"$nvidia_dev/power/runtime_status\"; [ \"$rs\" = \"active\" ] && gpu_active=1; " +
+            "    else gpu_active=1; fi; " +
+            "  fi; " +
+            "  if [ $gpu_active -eq 1 ]; then " +
+            "    gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null); " +
+            "    if [ -n \"$gpu_info\" ]; then IFS=',' read -r gu gt <<< \"$gpu_info\"; gu=${gu// /}; gt=${gt// /}; fi; " +
+            "  fi; " +
+            "  echo \"${cu:-0};${ct:-0};${gu:-0};${gt:-0};${rp:-0};${gpu_active:-0}\"; " +
+            "  sleep 15; " +
+            "done"
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                // Si Stats se ha abierto mientras llegaba una última línea del
+                // watchdog, dejamos que statsProc sea la única fuente de datos.
+                if (islandWindow.isExpanded && currentTab === 1)
+                    return;
+
+                var p = data.trim().split(";");
+                if (p.length < 6)
+                    return;
+
+                globalCu = parseFloat(p[0]) || 0;
+                globalCt = parseFloat(p[1]) || 0;
+
+                var gpuWasActive = p[5] === "1";
+                if (gpuWasActive) {
+                    globalGu = parseFloat(p[2]) || 0;
+                    globalGt = parseFloat(p[3]) || 0;
+                } else {
+                    // Una dGPU suspendida no puede estar generando carga/temperatura
+                    // peligrosa; evitamos además conservar una alerta antigua.
+                    globalGu = 0;
+                    globalGt = 0;
                 }
+
+                sysRamPercent = parseFloat(p[4]) || 0;
             }
         }
     }
@@ -581,10 +708,10 @@ PanelWindow {
     // --- LÍMITES CONFIGURABLES ---
     property real maxTemp: 85
     property real maxLoad: 90
-    property real maxRam: 28
+    property real maxRam: 90
     
     property bool isOverheating: globalCt > maxTemp || globalGt > maxTemp
-    property bool isOverloaded: globalCu > maxLoad || sysRamUsage >= maxRam
+    property bool isOverloaded: globalCu > maxLoad || sysRamPercent >= maxRam
     property bool isBtConnected: false 
     
     property string colorTemp: "#ff3b30"
@@ -749,7 +876,7 @@ PanelWindow {
                 Text { 
                     text: "󰇚"
                     color: Qt.alpha(Theme.white, 0.5)
-                    font.family: Theme.fontIcons
+                    font.family: Theme.fontIconss
                     font.pixelSize: 12
                     visible: dlSpeed >= 5 
                 }
@@ -1110,7 +1237,7 @@ PanelWindow {
                 
                 Text {
                     text: islandWindow.notifyIcon
-                    font.family: Theme.fontIcons
+                    font.family: Theme.fontIconss
                     font.pixelSize: 16
                     color: islandWindow.notifyMuted ? Qt.alpha(islandWindow.notifyColor, 0.4) : islandWindow.notifyColor
                 }
@@ -1208,7 +1335,7 @@ PanelWindow {
                         Text {
                             text: "󰎆"
                             color: Qt.alpha(Theme.white, 0.45)
-                            font.family: Theme.fontIcons
+                            font.family: Theme.fontIconss
                             font.pixelSize: 18
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -1339,7 +1466,7 @@ PanelWindow {
                                 Text {
                                     anchors.centerIn: parent
                                     text: "󰒟"
-                                    font.family: Theme.fontIcons
+                                    font.family: Theme.fontIconss
                                     font.pixelSize: 18
                                     color: islandWindow.isShuffle ? Theme.white : Qt.alpha(Theme.white, 0.48)
                                     style: Text.Raised
@@ -1371,7 +1498,7 @@ PanelWindow {
                                     Text {
                                         anchors.centerIn: parent
                                         text: "󰒮"
-                                        font.family: Theme.fontIcons
+                                        font.family: Theme.fontIconss
                                         font.pixelSize: 20
                                         color: Theme.white
                                         style: Text.Raised
@@ -1401,7 +1528,7 @@ PanelWindow {
                                     Text {
                                         anchors.centerIn: parent
                                         text: islandWindow.isPlaying ? "󰏤" : "󰐊"
-                                        font.family: Theme.fontIcons
+                                        font.family: Theme.fontIconss
                                         font.pixelSize: 20
                                         color: Theme.white
                                         style: Text.Raised
@@ -1435,7 +1562,7 @@ PanelWindow {
                                     Text {
                                         anchors.centerIn: parent
                                         text: "󰒭"
-                                        font.family: Theme.fontIcons
+                                        font.family: Theme.fontIconss
                                         font.pixelSize: 20
                                         color: Theme.white
                                         style: Text.Raised
@@ -1458,7 +1585,7 @@ PanelWindow {
                                 Text {
                                     anchors.centerIn: parent
                                     text: islandWindow.liveLoopStatus === "Track" ? "󰑘" : "󰑖"
-                                    font.family: Theme.fontIcons
+                                    font.family: Theme.fontIconss
                                     font.pixelSize: 18
                                     color: islandWindow.liveLoopStatus !== "None" ? Theme.white : Qt.alpha(Theme.white, 0.48)
                                     style: Text.Raised
@@ -1832,7 +1959,7 @@ PanelWindow {
             }
 
             // ================================
-            // TAB 1: REAL PERFORMANCE MONITOR
+            // TAB 1: MODERN SYSTEM DASHBOARD
             // ================================
             Item {
                 width: parent.width
@@ -1843,104 +1970,326 @@ PanelWindow {
                 Behavior on opacity { NumberAnimation { duration: 250 } }
                 visible: opacity > 0
 
-                RowLayout {
+                ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 20
-                    
-                    Repeater {
-                        model: [ 
-                            { temp: sysGpuTemp, usage: sysGpuUsage, tLabel: "GPU temp", uLabel: "Usage" }, 
-                            { temp: sysCpuTemp, usage: sysCpuUsage, tLabel: "CPU temp", uLabel: "Usage" } 
-                        ]
-                        
-                        Item {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            
-                            Item {
-                                width: 100
-                                height: 100
+                    anchors.margins: 13
+                    spacing: 8
+
+                    // Header: title + two useful context values that cost nothing extra.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 24
+                        spacing: 8
+
+                        Text {
+                            text: "System"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 15
+                            font.bold: true
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: loadText.implicitWidth + 14
+                            Layout.preferredHeight: 20
+                            radius: 10
+                            color: Qt.alpha(Theme.white, 0.08)
+                            border.width: 1
+                            border.color: Qt.alpha(Theme.white, 0.08)
+                            Text {
+                                id: loadText
                                 anchors.centerIn: parent
-                                
-                                Canvas {
+                                text: "Load " + sysLoad1.toFixed(2)
+                                color: Qt.alpha(Theme.white, 0.68)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: "Up " + sysUptime
+                            color: Qt.alpha(Theme.white, 0.52)
+                            font.family: Theme.fontMain
+                            font.pixelSize: 9
+                            font.bold: true
+                        }
+                    }
+
+                    // Main row: CPU/GPU get visual priority; memory/storage stay compact.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: 8
+
+                        Repeater {
+                            model: [
+                                { name: "CPU", icon: "󰻠", usage: sysCpuUsage, temp: sysCpuTemp },
+                                { name: "GPU", icon: "󰢮", usage: sysGpuUsage, temp: sysGpuTemp }
+                            ]
+
+                            Rectangle {
+                                Layout.preferredWidth: 116
+                                Layout.fillHeight: true
+                                radius: 16
+                                color: Qt.alpha(Theme.white, 0.075)
+                                border.width: 1
+                                border.color: Qt.alpha(Theme.white, 0.10)
+
+                                ColumnLayout {
                                     anchors.fill: parent
-                                    property real progress: modelData.usage / 100.0
-                                    Behavior on progress { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
-                                    onProgressChanged: requestPaint()
-                                    onPaint: { 
-                                        var ctx = getContext("2d");
-                                        ctx.clearRect(0, 0, width, height); 
-                                        var center = width / 2; var radius = center - 4;
-                                        var start = 0.75 * Math.PI; var end = 2.25 * Math.PI; 
-                                        ctx.lineCap = "round"; 
-                                        ctx.beginPath(); ctx.arc(center, center, radius, start, end); 
-                                        ctx.lineWidth = 5; ctx.strokeStyle = Qt.alpha(Theme.white, 0.1); ctx.stroke();
-                                        if(progress > 0) { 
-                                            ctx.beginPath(); ctx.arc(center, center, radius, start, start + (progress * (end - start))); 
-                                            ctx.lineWidth = 5; ctx.strokeStyle = Theme.white; ctx.stroke();
-                                        } 
+                                    anchors.margins: 10
+                                    spacing: 4
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 5
+                                        Text {
+                                            text: modelData.icon
+                                            color: Qt.alpha(Theme.white, 0.78)
+                                            font.family: Theme.fontIcons
+                                            font.pixelSize: 13
+                                        }
+                                        Text {
+                                            text: modelData.name
+                                            color: Qt.alpha(Theme.white, 0.66)
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: Math.round(modelData.temp) + "°"
+                                            color: modelData.temp > maxTemp ? colorTemp : Qt.alpha(Theme.white, 0.78)
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
                                     }
-                                }
-                                
-                                Column { 
-                                    anchors.centerIn: parent
-                                    spacing: -2
-                                    Text { 
-                                        text: Math.round(modelData.temp) + "°C"
-                                        color: modelData.temp > maxTemp ? colorTemp : Theme.white
-                                        font.family: Theme.fontMain; font.pixelSize: 22; font.bold: true
-                                        anchors.horizontalCenter: parent.horizontalCenter 
-                                    }
-                                    Text { text: modelData.tLabel; color: Qt.alpha(Theme.white, 0.6); font.family: Theme.fontMain; font.pixelSize: 10; anchors.horizontalCenter: parent.horizontalCenter } 
-                                }
-                                
-                                Column { 
-                                    anchors.bottom: parent.bottom; anchors.right: parent.right; anchors.bottomMargin: 0
-                                    spacing: -2
-                                    Text { 
+
+                                    Text {
                                         text: Math.round(modelData.usage) + "%"
                                         color: modelData.usage > maxLoad ? colorLoad : Theme.white
-                                        font.family: Theme.fontMain; font.pixelSize: 11; font.bold: true
-                                        anchors.right: parent.right 
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 27
+                                        font.bold: true
+                                        Layout.topMargin: 1
                                     }
-                                    Text { text: modelData.uLabel; color: Qt.alpha(Theme.white, 0.6); font.family: Theme.fontMain; font.pixelSize: 9; anchors.right: parent.right } 
+
+                                    Item { Layout.fillHeight: true }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 5
+                                        radius: 2.5
+                                        color: Qt.alpha(Theme.white, 0.10)
+                                        Rectangle {
+                                            width: parent.width * Math.max(0, Math.min(1, modelData.usage / 100))
+                                            height: parent.height
+                                            radius: parent.radius
+                                            color: modelData.usage > maxLoad ? colorLoad : Theme.white
+                                            Behavior on width { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: 8
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                radius: 14
+                                color: Qt.alpha(Theme.white, 0.065)
+                                border.width: 1
+                                border.color: Qt.alpha(Theme.white, 0.09)
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 9
+                                    spacing: 8
+
+                                    Text {
+                                        text: "󰍛"
+                                        color: Qt.alpha(Theme.white, 0.72)
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 15
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        Text {
+                                            text: "Memory"
+                                            color: Qt.alpha(Theme.white, 0.54)
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: sysRamUsage.toFixed(1) + " / " + sysRamTotal.toFixed(0) + " GB"
+                                            color: sysRamPercent >= maxRam ? colorLoad : Theme.white
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: Math.round(sysRamPercent) + "%"
+                                        color: sysRamPercent >= maxRam ? colorLoad : Qt.alpha(Theme.white, 0.82)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                radius: 14
+                                color: Qt.alpha(Theme.white, 0.065)
+                                border.width: 1
+                                border.color: Qt.alpha(Theme.white, 0.09)
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 9
+                                    spacing: 8
+
+                                    Text {
+                                        text: "󰋊"
+                                        color: Qt.alpha(Theme.white, 0.72)
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 15
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 0
+                                        Text {
+                                            text: "Storage"
+                                            color: Qt.alpha(Theme.white, 0.54)
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            // Igual que Memory: espacio usado / capacidad total.
+                                            text: sysStorage
+                                            color: Theme.white
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                    }
+                                    Text {
+                                        text: Math.round(sysStoragePercent) + "%"
+                                        color: Qt.alpha(Theme.white, 0.82)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
                                 }
                             }
                         }
                     }
-                    
-                    Item { 
-                        Layout.fillWidth: true; Layout.fillHeight: true
-                        
-                        Item {
-                            width: 100; height: 100; anchors.centerIn: parent
-                            
-                            Canvas {
-                                anchors.fill: parent
-                                property real progress: sysRamUsage / 32.0
-                                Behavior on progress { NumberAnimation { duration: 500; easing.type: Easing.OutCubic } }
-                                onProgressChanged: requestPaint()
-                                onPaint: { 
-                                    var ctx = getContext("2d"); ctx.clearRect(0, 0, width, height); 
-                                    var center = width/2; var radius = center-4; 
-                                    var start = 0.75*Math.PI; var end = 2.25*Math.PI;
-                                    ctx.lineCap="round"; ctx.beginPath(); ctx.arc(center, center, radius, start, end); 
-                                    ctx.lineWidth=5; ctx.strokeStyle=Qt.alpha(Theme.white, 0.1); ctx.stroke();
-                                    if(progress>0){ ctx.beginPath(); ctx.arc(center, center, radius, start, start+(progress*(end-start))); ctx.lineWidth=5; ctx.strokeStyle=Theme.white; ctx.stroke(); } 
+
+                    // Bottom strip: network throughput. No extra command is needed;
+                    // it is derived from the same /sys read as the main sampler.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 25
+                        radius: 12
+                        color: Qt.alpha(Theme.white, 0.055)
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 6
+
+                            Text {
+                                text: "󰇚"
+                                color: dlSpeed >= 5 ? "#30d158" : Qt.alpha(Theme.white, 0.58)
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 12
+                            }
+                            Text {
+                                text: dlSpeed < 1 ? Math.round(dlSpeed * 1024) + " KB/s" : dlSpeed.toFixed(dlSpeed < 10 ? 1 : 0) + " MB/s"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Download"
+                                color: Qt.alpha(Theme.white, 0.42)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Item {
+                                Layout.preferredWidth: 20
+                                Layout.preferredHeight: 11
+                                Layout.alignment: Qt.AlignVCenter
+
+                                property color batteryColor: batCap <= 20 && batStatus === "Discharging"
+                                    ? colorTemp
+                                    : Qt.alpha(Theme.white, 0.72)
+
+                                // Cuerpo horizontal de la batería.
+                                Rectangle {
+                                    id: statsBatteryBody
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 17
+                                    height: 9
+                                    radius: 2.2
+                                    color: "transparent"
+                                    border.width: 1.25
+                                    border.color: parent.batteryColor
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: Math.max(1, (parent.width - 4) * Math.max(0, Math.min(1, batCap / 100)))
+                                        height: parent.height - 4
+                                        radius: 1
+                                        color: statsBatteryBody.parent.batteryColor
+                                    }
+                                }
+
+                                // Terminal positivo.
+                                Rectangle {
+                                    anchors.left: statsBatteryBody.right
+                                    anchors.leftMargin: 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 2
+                                    height: 4
+                                    radius: 1
+                                    color: parent.batteryColor
                                 }
                             }
-                            
-                            Column { 
-                                anchors.centerIn: parent; spacing: -2
-                                Text { text: sysRamUsage.toFixed(1) + "GB"; color: sysRamUsage >= maxRam ? colorLoad : Theme.white; font.family: Theme.fontMain; font.pixelSize: 19; font.bold: true; anchors.horizontalCenter: parent.horizontalCenter }
-                                Text { text: "Memory"; color: Qt.alpha(Theme.white, 0.6); font.family: Theme.fontMain; font.pixelSize: 10; anchors.horizontalCenter: parent.horizontalCenter } 
+                            Text {
+                                text: Math.round(batCap) + "%"
+                                color: batCap <= 20 && batStatus === "Discharging" ? colorTemp : Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                font.bold: true
                             }
-                            
-                            Column { 
-                                anchors.bottom: parent.bottom; anchors.right: parent.right; anchors.bottomMargin: 0; spacing: -2
-                                Text { text: sysStorage; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 10; font.bold: true; anchors.right: parent.right }
-                                Text { text: "Storage"; color: Qt.alpha(Theme.white, 0.6); font.family: Theme.fontMain; font.pixelSize: 9; anchors.right: parent.right } 
+                            Text {
+                                text: batStatus === "Charging" ? "Charging" : "Battery"
+                                color: Qt.alpha(Theme.white, 0.42)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
                             }
                         }
                     }
