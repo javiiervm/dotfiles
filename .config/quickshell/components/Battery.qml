@@ -13,7 +13,26 @@ Rectangle {
     Layout.alignment: Qt.AlignVCenter
 
     radius: height / 2
-    color: Theme.grey1
+
+    // Fondo de la batería: ahora con gradiente en vez de gris plano
+    gradient: Gradient {
+        orientation: Gradient.Vertical
+
+        GradientStop {
+            position: 0.0
+            color: '#818181'
+        }
+
+        GradientStop {
+            position: 0.5
+            color: '#606060'
+        }
+
+        GradientStop {
+            position: 1.0
+            color: '#5a5a5a'
+        }
+    }
 
     readonly property bool lowBattery: percentage < 21
 
@@ -42,12 +61,12 @@ Rectangle {
 
         GradientStop {
             position: 0.5
-            color: '#c4c4c4'
+            color: "#c4c4c4"
         }
 
         GradientStop {
             position: 1.0
-            color: '#bebebe'
+            color: "#bebebe"
         }
     }
 
@@ -61,7 +80,7 @@ Rectangle {
 
         GradientStop {
             position: 0.0
-            color: '#65efe8'
+            color: "#65efe8"
         }
 
         GradientStop {
@@ -85,7 +104,7 @@ Rectangle {
 
         GradientStop {
             position: 0.0
-            color: '#ff9d60'
+            color: "#ff9d60"
         }
 
         GradientStop {
@@ -102,12 +121,11 @@ Rectangle {
     /*
      * RELLENO
      *
-     * Esta es exactamente la misma geometría del icono original:
-     *
+     * Mantenemos exactamente la misma geometría del icono original:
      * - empieza en el borde izquierdo
      * - ocupa toda la altura
-     * - tiene exactamente el mismo radio que el fondo
-     * - únicamente se recorta según el porcentaje
+     * - mismo radio que el fondo
+     * - solo se recorta horizontalmente según el porcentaje
      */
     Item {
         anchors.left: parent.left
@@ -115,13 +133,11 @@ Rectangle {
         anchors.bottom: parent.bottom
 
         width: batteryRoot.fillWidth
-
         clip: true
 
         Rectangle {
             width: batteryRoot.width
             height: batteryRoot.height
-
             radius: batteryRoot.radius
 
             gradient: batteryRoot.charging
@@ -143,13 +159,10 @@ Rectangle {
 
         Text {
             text: percentage
-
             color: Theme.bg0
-
             font.family: Theme.fontMain
             font.pixelSize: 11
             font.bold: true
-
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
