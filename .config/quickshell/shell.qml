@@ -554,21 +554,50 @@ ShellRoot {
     }
 
     function alttab_commit() {
-        if (root.isAltTabVisible) {
-            if (root.altTabList.length > 0 && root.altTabCurrentIndex < root.altTabList.length) {
-                var target = root.altTabList[root.altTabCurrentIndex];
-                var addr = "address:" + target.address;
+        if (!root.isAltTabVisible)
+            return;
+
+        if (root.altTabList.length > 0 && root.altTabCurrentIndex >= 0
+                && root.altTabCurrentIndex < root.altTabList.length) {
+            var target = root.altTabList[root.altTabCurrentIndex];
+
+            if (target && target.address) {
                 if (target.minimized) {
-                    altTabFocusProc.command = ["bash", "-c",
-                        "~/.config/hypr/scripts/macos_restore_minimized.sh '" + target.address + "'"];
+                    // Las ventanas "minimizadas" por nuestros scripts necesitan restaurarse
+                    // primero; el script se ocupa de devolverlas a su workspace y enfocarlas.
+                    altTabFocusProc.command = [
+                        "bash", "-c",
+                        "~/.config/hypr/scripts/macos_restore_minimized.sh '" + target.address + "'"
+                    ];
                 } else {
-                    altTabFocusProc.command = ["bash", "-c",
-                        "hyprctl dispatch focuswindow '" + addr + "' && hyprctl dispatch alterzorder 'top," + addr + "'"];
+                    // Hyprland >= 0.55 usa dispatchers Lua. focus() acepta un selector
+                    // address:0x... y cambia automáticamente al workspace/monitor de la
+                    // ventana antes de enfocarla. Después la elevamos por si es flotante.
+                    //
+                    // Se conserva un fallback al dispatcher legacy para que el Alt+Tab
+                    // siga funcionando si se arranca temporalmente una versión antigua.
+                    var selector = "address:" + target.address;
+                    altTabFocusProc.command = [
+                        "bash", "-c",
+                        "selector='" + selector + "'; "
+                        + "out=$(hyprctl dispatch \"hl.dsp.focus({ window = '$selector' })\" 2>&1); "
+                        + "rc=$?; "
+                        + "if [ $rc -eq 0 ] && ! printf '%s' \"$out\" | grep -qiE 'invalid dispatcher|error'; then "
+                        + "  hyprctl dispatch \"hl.dsp.window.bring_to_top()\" >/dev/null 2>&1 || true; "
+                        + "else "
+                        + "  hyprctl dispatch focuswindow \"$selector\" >/dev/null 2>&1; "
+                        + "fi"
+                    ];
                 }
-                altTabFocusProc.running = true;
+
+                // El mismo Process se reutiliza en cada cambio. Solo arrancamos una nueva
+                // ejecución cuando la anterior ya ha terminado (normalmente es instantáneo).
+                if (!altTabFocusProc.running)
+                    altTabFocusProc.running = true;
             }
-            root.isAltTabVisible = false;
         }
+
+        root.isAltTabVisible = false;
     }
 
     // Expone alttab_next / alttab_commit por IPC para que Hyprland pueda invocarlos
