@@ -169,7 +169,11 @@ PanelWindow {
         if (isNotifying) {
             return notifyText !== "" ? 300 : 220; 
         }
-        var leftSideWidth = (isPlaying ? 22 : 0) + (dlSpeed >= 5 ? 18 : 0);
+        // La reproducción musical ya no necesita ensanchar la isla:
+        // la mini-onda vive dentro del ancho normal del reloj.
+        // Solo reservamos espacio extra para indicadores que realmente
+        // ocupan los laterales del estado colapsado.
+        var leftSideWidth = (dlSpeed >= 5 ? 18 : 0);
         var rightSideWidth = (globalMicActive ? 12 : 0) + (globalCamActive ? 12 : 0);
         return 120 + (Math.max(leftSideWidth, rightSideWidth) * 2);
     }
@@ -746,28 +750,321 @@ PanelWindow {
                     visible: dlSpeed >= 5 
                 }
                 
-                Row {
-                    spacing: 3
-                    visible: isPlaying
-                    anchors.verticalCenter: parent.verticalCenter
-                    
-                    Repeater {
-                        model: [ {d: 800, max: 12, min: 4}, {d: 650, max: 9, min: 3}, {d: 900, max: 11, min: 4} ]
-                        
-                        Rectangle {
-                            width: 3
-                            radius: 1.5
-                            color: Theme.white
-                            height: modelData.min
-                            anchors.verticalCenter: parent.verticalCenter
-                            
-                            SequentialAnimation on height {
-                                running: isPlaying && !islandWindow.isExpanded
-                                loops: Animation.Infinite
-                                NumberAnimation { to: modelData.max; duration: modelData.d; easing.type: Easing.InOutQuad }
-                                NumberAnimation { to: modelData.min; duration: modelData.d; easing.type: Easing.InOutQuad }
-                            }
+            }
+
+            // ---------------------------------------------------------
+            // MINI ONDA ONE UI EN EL BORDE INFERIOR DEL RELOJ
+            // ---------------------------------------------------------
+            // Sustituye a las antiguas tres barras verticales.
+            //
+            // Coste mínimo:
+            //  - Canvas diminuto.
+            //  - Sin CAVA, FFT ni procesos externos.
+            //  - ~15 FPS.
+            //  - Solo se anima con música reproduciéndose y la isla cerrada.
+            //  - Reutiliza la paleta ya calculada de la carátula.
+            Item {
+                id: collapsedWaveArea
+                anchors.bottom: parent.bottom
+                anchors.horizontalCenter: parent.horizontalCenter
+
+                width: Math.min(parent.width * 0.62, 92)
+                height: 9
+
+                visible: islandWindow.isPlaying
+                         && !islandWindow.isExpanded
+                         && !islandWindow.isNotifying
+
+                property real phase: 0
+
+                Timer {
+                    id: collapsedWaveTimer
+                    interval: 66 // ~15 FPS
+                    repeat: true
+                    running: collapsedWaveArea.visible
+
+                    onTriggered: {
+                        collapsedWaveArea.phase += 0.095;
+
+                        if (collapsedWaveArea.phase > 1000000)
+                            collapsedWaveArea.phase = 0;
+
+                        collapsedWaveCanvas.requestPaint();
+                    }
+                }
+
+                Connections {
+                    target: islandWindow
+
+                    function onArtworkPalettePrimaryChanged() {
+                        collapsedWaveCanvas.requestPaint();
+                    }
+
+                    function onArtworkPaletteSecondaryChanged() {
+                        collapsedWaveCanvas.requestPaint();
+                    }
+
+                    function onArtworkPaletteAccentChanged() {
+                        collapsedWaveCanvas.requestPaint();
+                    }
+
+                    function onIsPlayingChanged() {
+                        collapsedWaveCanvas.requestPaint();
+                    }
+                }
+
+                Canvas {
+                    id: collapsedWaveCanvas
+                    anchors.fill: parent
+
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    onPaint: {
+                        var ctx = getContext("2d");
+                        ctx.reset();
+
+                        var w = width;
+                        var h = height;
+
+                        if (
+                            w <= 0
+                            || h <= 0
+                            || !islandWindow.isPlaying
+                        ) {
+                            return;
                         }
+
+                        // La base coincide prácticamente con el borde inferior
+                        // interior de la píldora y las ondas crecen hacia arriba.
+                        var baseY = h - 0.8;
+                        var phase = collapsedWaveArea.phase;
+                        var edgeFade = 10;
+
+                        function drawMiniWave(
+                            amplitude,
+                            periodPx,
+                            speedPx,
+                            alpha,
+                            waveColor
+                        ) {
+                            ctx.beginPath();
+                            ctx.moveTo(0, baseY);
+
+                            var step = 2;
+                            var omega = (
+                                Math.PI * 2
+                            ) / Math.max(
+                                1,
+                                periodPx
+                            );
+
+                            var travel = (
+                                phase * speedPx
+                            );
+
+                            for (
+                                var x = 0;
+                                x <= w;
+                                x += step
+                            ) {
+                                // Fade interno en los dos extremos para que
+                                // no aparezcan paredes verticales.
+                                var fadeIn = Math.min(
+                                    1,
+                                    Math.max(
+                                        0,
+                                        x / edgeFade
+                                    )
+                                );
+
+                                var fadeOut = Math.min(
+                                    1,
+                                    Math.max(
+                                        0,
+                                        (w - x) / edgeFade
+                                    )
+                                );
+
+                                var envelope = (
+                                    fadeIn * fadeOut
+                                );
+
+                                var s1 = (
+                                    0.5
+                                    + 0.5
+                                    * Math.sin(
+                                        (x - travel)
+                                        * omega
+                                    )
+                                );
+
+                                var s2 = (
+                                    0.5
+                                    + 0.5
+                                    * Math.sin(
+                                        (x - travel * 0.62)
+                                        * omega
+                                        * 0.58
+                                        + 1.15
+                                    )
+                                );
+
+                                var shape = (
+                                    s1 * 0.72
+                                    + s2 * 0.28
+                                );
+
+                                var y = (
+                                    baseY
+                                    - shape
+                                    * amplitude
+                                    * envelope
+                                );
+
+                                if (x === 0)
+                                    ctx.moveTo(
+                                        x,
+                                        baseY
+                                    );
+
+                                ctx.lineTo(
+                                    x,
+                                    y
+                                );
+                            }
+
+                            ctx.lineTo(
+                                w,
+                                baseY
+                            );
+                            ctx.closePath();
+
+                            ctx.fillStyle = Qt.alpha(
+                                waveColor,
+                                alpha
+                            );
+                            ctx.fill();
+                        }
+
+                        // Tres capas como en el reproductor expandido,
+                        // escaladas al tamaño de la isla cerrada.
+                        drawMiniWave(
+                            6.3,
+                            66,
+                            18,
+                            0.36,
+                            islandWindow.artworkPalettePrimary
+                        );
+
+                        drawMiniWave(
+                            4.7,
+                            50,
+                            -13,
+                            0.43,
+                            islandWindow.artworkPaletteSecondary
+                        );
+
+                        drawMiniWave(
+                            3.3,
+                            38,
+                            10,
+                            0.50,
+                            islandWindow.artworkPaletteAccent
+                        );
+
+                        // Cresta fina que define mejor la silueta.
+                        ctx.beginPath();
+
+                        var crestStep = 2;
+                        var crestOmega = (
+                            Math.PI * 2
+                        ) / 50;
+
+                        for (
+                            var cx = 0;
+                            cx <= w;
+                            cx += crestStep
+                        ) {
+                            var cFadeIn = Math.min(
+                                1,
+                                Math.max(
+                                    0,
+                                    cx / edgeFade
+                                )
+                            );
+
+                            var cFadeOut = Math.min(
+                                1,
+                                Math.max(
+                                    0,
+                                    (w - cx) / edgeFade
+                                )
+                            );
+
+                            var cEnv = (
+                                cFadeIn
+                                * cFadeOut
+                            );
+
+                            var c1 = (
+                                0.5
+                                + 0.5
+                                * Math.sin(
+                                    (cx - phase * 13)
+                                    * crestOmega
+                                )
+                            );
+
+                            var c2 = (
+                                0.5
+                                + 0.5
+                                * Math.sin(
+                                    (cx - phase * 8)
+                                    * crestOmega
+                                    * 0.54
+                                    + 0.9
+                                )
+                            );
+
+                            var cShape = (
+                                c1 * 0.72
+                                + c2 * 0.28
+                            );
+
+                            var cy = (
+                                baseY
+                                - cShape
+                                * 4.4
+                                * cEnv
+                            );
+
+                            if (cx === 0)
+                                ctx.moveTo(
+                                    cx,
+                                    baseY
+                                );
+                            else
+                                ctx.lineTo(
+                                    cx,
+                                    cy
+                                );
+                        }
+
+                        ctx.lineTo(
+                            w,
+                            baseY
+                        );
+                        ctx.lineWidth = 0.9;
+                        ctx.lineJoin = "round";
+                        ctx.lineCap = "round";
+
+                        ctx.strokeStyle = Qt.alpha(
+                            islandWindow.artworkPaletteAccent,
+                            0.74
+                        );
+
+                        ctx.stroke();
                     }
                 }
             }
@@ -1204,7 +1501,6 @@ PanelWindow {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
                                     anchors.verticalCenterOffset: 1
-
                                     text: islandWindow.formatTime(islandWindow.trackPosition)
                                     color: Qt.alpha(Theme.white, 0.76)
                                     font.family: Theme.fontMain
