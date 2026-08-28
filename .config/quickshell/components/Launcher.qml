@@ -2037,11 +2037,11 @@ PanelWindow {
             return;
         }
 
-        // Normal applications/files keep the existing launcher behaviour.
-        // Hyprland >= 0.55 requires Lua dispatcher syntax.
+        // Normal applications/files: launch them without touching the pointer.
         // History was already updated/persisted by rememberRecent().
-        var fullCmd = "(" + cleanCmd + " & disown) && "
-                    + "hyprctl dispatch 'hl.dsp.cursor.move({ x = 50, y = 50 })'";
+        // The previous implementation explicitly dispatched cursor.move()
+        // after every launch, which warped the mouse to the top-left area.
+        var fullCmd = "(" + cleanCmd + " & disown)";
 
         execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
