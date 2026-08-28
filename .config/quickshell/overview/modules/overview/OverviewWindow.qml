@@ -94,6 +94,17 @@ Item { // Window
     property bool dragInProgress: false
     property bool suspendPositionAnimation: false
     property bool animateSize: true
+
+    // Liquid-glass-friendly geometry for the miniature windows.
+    // A slightly larger radius than the old overview theme makes the previews
+    // visually fit inside the rounded workspace containers.
+    property real windowCornerRadius: Math.max(10, Math.min(18, Math.min(width, height) * 0.14))
+    property color windowFrameBaseColor: Qt.alpha(Glass.tint, root.glassMode ? Math.min(1.0, Glass.opacity + 0.08) : 0.55)
+    property color windowFrameBorderColor: pressed
+        ? Qt.alpha("#FFFFFF", 0.34)
+        : hovered
+            ? Qt.alpha("#FFFFFF", 0.26)
+            : Glass.borderColor
     
     x: initX
     y: initY
@@ -133,10 +144,8 @@ Item { // Window
     Rectangle {
         visible: (root.windowData?.monitor ?? -1) === root.widgetMonitorId
         anchors.fill: parent
-        radius: Appearance.rounding.windowRounding * root.scale
-        color: root.glassMode
-            ? ColorUtils.mix(Appearance.colors.colLayer2, Appearance.colors.colLayer0, 0.38)
-            : Appearance.colors.colLayer2
+        radius: root.windowCornerRadius
+        color: root.windowFrameBaseColor
     }
 
     ScreencopyView {
@@ -167,16 +176,13 @@ Item { // Window
 
     Rectangle {
         anchors.fill: parent
-        radius: Appearance.rounding.windowRounding * root.scale
-        color: pressed ? ColorUtils.applyAlpha(Appearance.colors.colLayer2Active, Math.min(1, root.effectiveWindowOverlayOpacity + 0.30)) :
-            hovered ? ColorUtils.applyAlpha(Appearance.colors.colLayer2Hover, Math.min(1, root.effectiveWindowOverlayOpacity + 0.20)) :
-            ColorUtils.applyAlpha(
-                root.glassMode ? ColorUtils.mix(Appearance.colors.colLayer2, Appearance.colors.colLayer0, 0.38) : Appearance.colors.colLayer2,
-                root.effectiveWindowOverlayOpacity
-            )
-        border.color: root.glassMode
-            ? ColorUtils.applyAlpha(Appearance.m3colors.m3outline, 0.62)
-            : ColorUtils.transparentize(Appearance.m3colors.m3outline, 0.7)
+        radius: root.windowCornerRadius
+        color: pressed
+            ? Qt.alpha("#FFFFFF", 0.14)
+            : hovered
+                ? Qt.alpha("#FFFFFF", 0.08)
+                : Qt.alpha(Glass.tint, root.glassMode ? 0.10 : root.effectiveWindowOverlayOpacity)
+        border.color: root.windowFrameBorderColor
         border.width: 1
 
         Rectangle {
@@ -235,7 +241,7 @@ Item { // Window
             anchors.centerIn: parent
             width: root.width
             height: root.height
-            radius: Appearance.rounding.windowRounding * root.scale
+            radius: root.windowCornerRadius
         }
     }
 

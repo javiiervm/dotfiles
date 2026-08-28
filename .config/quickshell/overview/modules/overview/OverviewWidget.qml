@@ -424,7 +424,7 @@ Item {
     StyledRectangularShadow {
         target: overviewBackground
     }
-    Rectangle { // Background
+    GlassSurface { // Background
         id: overviewBackground
         property real padding: Config.options.overview.backgroundPadding
         anchors.fill: parent
@@ -432,14 +432,11 @@ Item {
 
         implicitWidth: contentLayout.implicitWidth + padding * 2
         implicitHeight: contentLayout.implicitHeight + padding * 2
-        radius: Appearance.rounding.screenRounding * root.scale + padding
+        glassRadius: 26
+        glassOpacity: Math.min(1.0, root.effectivePanelOpacity)
+        showBorder: true
+        showHighlight: true
         clip: true
-        
-        // --- TUS NUEVOS COLORES ---
-        color: Qt.rgba(30/255, 30/255, 36/255, 0.6)
-        border.width: 1
-        border.color: Qt.alpha("#FFFFFF", 0.15)
-        // --------------------------
 
         MouseArea {
             anchors.fill: parent
@@ -447,27 +444,6 @@ Item {
             onPressed: mouse => mouse.accepted = true
         }
 
-        Rectangle {
-            visible: root.glassMode
-            anchors.fill: parent
-            radius: parent.radius
-            color: "transparent"
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: ColorUtils.applyAlpha("#FFFFFF", root.glassShineOpacity * 0.35) }
-                GradientStop { position: 0.42; color: ColorUtils.applyAlpha("#FFFFFF", 0.0) }
-                GradientStop { position: 1.0; color: ColorUtils.applyAlpha("#000000", root.glassShineOpacity * 0.22) }
-            }
-        }
-
-        Rectangle {
-            visible: root.glassMode
-            anchors.fill: parent
-            anchors.margins: 1
-            radius: Math.max(parent.radius - 1, 0)
-            color: "transparent"
-            border.width: 1
-            border.color: ColorUtils.applyAlpha("#FFFFFF", root.glassBorderOpacity * 0.20)
-        }
 
         ColumnLayout { // Workspaces
             id: contentLayout
@@ -491,7 +467,7 @@ Item {
 
                     Repeater { // Workspace repeater
                         model: Config.options.overview.columns
-                        Rectangle { // Workspace
+                        GlassSurface { // Workspace
                             id: workspace
                             property int colIndex: index
                             property int workspaceValue: root.getWorkspaceInCell(rowIndex, colIndex)
@@ -504,13 +480,13 @@ Item {
                             implicitWidth: root.workspaceImplicitWidth
                             implicitHeight: root.workspaceImplicitHeight
                             
-                            // --- TUS NUEVOS COLORES ---
-                            color: showWallpaper ? "transparent" : Qt.rgba(30/255, 30/255, 36/255, 0.4)
-                            radius: Appearance.rounding.screenRounding * root.scale
-                            border.width: 1
-                            // Hacemos que el borde brille un poco más si arrastras una ventana encima
-                            border.color: hoveredWhileDragging ? Qt.alpha("#FFFFFF", 0.4) : Qt.alpha("#FFFFFF", 0.15)
-                            // --------------------------
+                            glassRadius: 20
+                            glassOpacity: hoveredWhileDragging
+                                ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.14)
+                                : root.effectiveWorkspaceOpacity
+                            showBorder: true
+                            showHighlight: true
+                            clip: true
 
                             Image {
                                 id: workspaceWallpaper
@@ -548,37 +524,14 @@ Item {
                                 visible: workspace.showWallpaper
                                 anchors.fill: parent
                                 radius: parent.radius
-                                color: ColorUtils.applyAlpha(
-                                    root.glassMode
-                                        ? ColorUtils.mix(workspace.hoveredWhileDragging ? workspace.hoveredWorkspaceColor : workspace.defaultWorkspaceColor, Appearance.colors.colLayer0, 0.40)
-                                        : (workspace.hoveredWhileDragging ? workspace.hoveredWorkspaceColor : workspace.defaultWorkspaceColor),
+                                color: Qt.alpha(
+                                    Glass.tint,
                                     workspace.hoveredWhileDragging
-                                        ? Math.min(0.28, root.emptyWorkspaceWallpaperOverlayOpacity + 0.08)
-                                        : root.emptyWorkspaceWallpaperOverlayOpacity
+                                        ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.14)
+                                        : root.effectiveWorkspaceOpacity
                                 )
                             }
 
-                            Rectangle {
-                                visible: root.glassMode
-                                anchors.fill: parent
-                                radius: parent.radius
-                                color: "transparent"
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: ColorUtils.applyAlpha("#FFFFFF", root.glassShineOpacity * 0.22) }
-                                    GradientStop { position: 0.46; color: ColorUtils.applyAlpha("#FFFFFF", 0.0) }
-                                    GradientStop { position: 1.0; color: ColorUtils.applyAlpha("#000000", root.glassShineOpacity * 0.14) }
-                                }
-                            }
-
-                            Rectangle {
-                                visible: root.glassMode
-                                anchors.fill: parent
-                                anchors.margins: 1
-                                radius: Math.max(parent.radius - 1, 0)
-                                color: "transparent"
-                                border.width: 1
-                                border.color: ColorUtils.applyAlpha("#FFFFFF", root.glassBorderOpacity * 0.16)
-                            }
 
                             StyledText {
                                 anchors.centerIn: parent
@@ -589,7 +542,7 @@ Item {
                                     weight: Font.DemiBold
                                     family: Appearance.font.family.expressive
                                 }
-                                color: ColorUtils.transparentize(Appearance.colors.colOnLayer1, 0.8)
+                                color: Qt.alpha("#FFFFFF", 0.72)
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                             }
@@ -638,24 +591,13 @@ Item {
                 implicitWidth: root.specialSectionWidth
                 implicitHeight: root.specialStripHeight
 
-                Rectangle {
+                GlassSurface {
                     anchors.fill: parent
-                    radius: Appearance.rounding.normal * root.scale
-                    
-                    // --- TUS NUEVOS COLORES ---
-                    color: Qt.rgba(30/255, 30/255, 36/255, 0.6)
-                    border.width: 1
-                    border.color: Qt.alpha("#FFFFFF", 0.15)
-                    // --------------------------
-
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        height: Math.max(18 * root.scale, root.specialStripPadding + root.specialStripTitleHeight * 0.8)
-                        radius: parent.radius
-                        color: ColorUtils.applyAlpha(Appearance.colors.colSecondary, root.glassMode ? 0.12 : 0.08)
-                    }
+                    glassRadius: 22
+                    glassOpacity: Math.min(1.0, root.effectivePanelOpacity)
+                    showBorder: true
+                    showHighlight: true
+                    clip: true
 
                     StyledText {
                         anchors.left: parent.left
@@ -666,7 +608,7 @@ Item {
                         font.family: Appearance.font.family.title
                         font.pixelSize: root.specialStripTitleHeight
                         font.weight: Font.DemiBold
-                        color: ColorUtils.applyAlpha(Appearance.colors.colOnLayer1, 0.84)
+                        color: Qt.alpha("#FFFFFF", 0.82)
                     }
 
                     Grid {
@@ -680,7 +622,7 @@ Item {
 
                         Repeater {
                             model: root.visibleSpecialWorkspaces
-                            delegate: Rectangle {
+                            delegate: GlassSurface {
                                 id: specialWorkspaceTile
                                 required property string modelData
                                 property string specialName: modelData
@@ -700,13 +642,13 @@ Item {
                                 property real contentOffsetY: Math.max(0, (height - contentHeight) / 2)
                                 implicitWidth: root.specialWorkspaceTileWidth
                                 implicitHeight: root.specialWorkspaceTileHeight
-                                radius: Appearance.rounding.screenRounding * root.scale
+                                glassRadius: 20
+                                glassOpacity: root.draggingTargetSpecialWorkspace === specialWorkspaceTile.specialName
+                                    ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.14)
+                                    : root.effectiveWorkspaceOpacity
                                 clip: true
-                                // --- TUS NUEVOS COLORES ---
-                                color: showWallpaper ? "transparent" : Qt.rgba(30/255, 30/255, 36/255, 0.4)
-                                border.width: 1
-                                border.color: Qt.alpha("#FFFFFF", 0.15)
-                                // --------------------------
+                                showBorder: true
+                                showHighlight: true
 
                                 Image {
                                     visible: specialWorkspaceTile.showWallpaper
@@ -723,11 +665,11 @@ Item {
                                     visible: specialWorkspaceTile.showWallpaper
                                     anchors.fill: parent
                                     radius: parent.radius
-                                    color: ColorUtils.applyAlpha(
-                                        root.glassMode
-                                            ? ColorUtils.mix(specialWorkspaceTile.baseColor, Appearance.colors.colLayer0, 0.40)
-                                            : specialWorkspaceTile.baseColor,
-                                        root.emptyWorkspaceWallpaperOverlayOpacity
+                                    color: Qt.alpha(
+                                        Glass.tint,
+                                        root.draggingTargetSpecialWorkspace === specialWorkspaceTile.specialName
+                                            ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.14)
+                                            : root.effectiveWorkspaceOpacity
                                     )
                                 }
 
@@ -904,22 +846,17 @@ Item {
                                 }
                             }
                         }
-                        Rectangle {
+                        GlassSurface {
                             id: createSpecialWorkspaceTile
                             property bool showWallpaper: root.hasSpecialEmptyWorkspaceWallpaper
                             implicitWidth: root.specialWorkspaceTileWidth
                             implicitHeight: root.specialWorkspaceTileHeight
-                            radius: Appearance.rounding.screenRounding * root.scale
-                            color: showWallpaper ? "transparent" : ColorUtils.applyAlpha(
-                                root.glassMode
-                                    ? ColorUtils.mix(Appearance.colors.colSecondaryContainer, Appearance.colors.colLayer1, 0.58)
-                                    : ColorUtils.mix(Appearance.colors.colLayer2, Appearance.colors.colLayer1, 0.55),
-                                root.draggingTargetSpecialWorkspace === root.createSpecialWorkspaceTarget ? 0.90 : root.effectiveWorkspaceOpacity
-                            )
-                            border.width: 1
-                            border.color: root.draggingTargetSpecialWorkspace === root.createSpecialWorkspaceTarget
-                                ? ColorUtils.applyAlpha(root.activeBorderColor, 0.96)
-                                : ColorUtils.applyAlpha(Appearance.colors.colSecondary, 0.46)
+                            glassRadius: 20
+                            glassOpacity: root.draggingTargetSpecialWorkspace === root.createSpecialWorkspaceTarget
+                                ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.16)
+                                : root.effectiveWorkspaceOpacity
+                            showBorder: true
+                            showHighlight: true
 
                             Image {
                                 visible: createSpecialWorkspaceTile.showWallpaper
@@ -936,23 +873,12 @@ Item {
                                 visible: createSpecialWorkspaceTile.showWallpaper
                                 anchors.fill: parent
                                 radius: parent.radius
-                                color: ColorUtils.applyAlpha(
-                                    root.glassMode
-                                        ? ColorUtils.mix(Appearance.colors.colSecondaryContainer, Appearance.colors.colLayer0, 0.40)
-                                        : ColorUtils.mix(Appearance.colors.colLayer2, Appearance.colors.colLayer1, 0.55),
+                                color: Qt.alpha(
+                                    Glass.tint,
                                     root.draggingTargetSpecialWorkspace === root.createSpecialWorkspaceTarget
-                                        ? Math.min(0.28, root.emptyWorkspaceWallpaperOverlayOpacity + 0.08)
-                                        : root.emptyWorkspaceWallpaperOverlayOpacity
+                                        ? Math.min(1.0, root.effectiveWorkspaceOpacity + 0.16)
+                                        : root.effectiveWorkspaceOpacity
                                 )
-                            }
-
-                            Rectangle {
-                                anchors.fill: parent
-                                anchors.margins: 1
-                                radius: Math.max(parent.radius - 1, 0)
-                                color: "transparent"
-                                border.width: 1
-                                border.color: ColorUtils.applyAlpha("#FFFFFF", root.glassMode ? 0.12 : 0.08)
                             }
 
                             Column {
@@ -1169,9 +1095,9 @@ Item {
                 width: root.workspaceImplicitWidth
                 height: root.workspaceImplicitHeight
                 color: "transparent"
-                radius: Appearance.rounding.screenRounding * root.scale
+                radius: 20
                 border.width: 2
-                border.color: root.activeBorderColor
+                border.color: Qt.alpha("#FFFFFF", 0.74)
                 Behavior on x {
                     animation: Appearance.animation.elementMoveFast.numberAnimation.createObject(this)
                 }

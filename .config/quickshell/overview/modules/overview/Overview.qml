@@ -100,6 +100,21 @@ Scope {
             WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
             color: "transparent"
 
+            // Same real Liquid Glass blur used by the main Quickshell shell.
+            // The region follows only the overview card, not the full screen.
+            BackgroundEffect.blurRegion: Glass.blurEnabled && GlobalStates.overviewOpen
+                ? overviewGlassBlurRegion
+                : null
+
+            Region {
+                id: overviewGlassBlurRegion
+                x: Math.round(columnLayout.x + overviewLoader.x)
+                y: Math.round(columnLayout.y + overviewLoader.y)
+                width: Math.round(overviewLoader.width)
+                height: Math.round(overviewLoader.height)
+                radius: Glass.radiusLarge
+            }
+
             anchors {
                 top: true
                 bottom: true
@@ -169,8 +184,9 @@ Scope {
                     id: backdropLayer
                     anchors.fill: parent
                     visible: root.backdropEnabled
-                    // Accedemos a la propiedad global de forma segura
-                    color: root.theme.bgGlass 
+                    // Very subtle dimming only; the actual material lives in the
+                    // regional glass surfaces below.
+                    color: Qt.alpha(Glass.tint, 0.08)
                     z: 0
                 }
 
