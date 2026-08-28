@@ -340,6 +340,7 @@ PanelWindow {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.rightMargin: ncWindow.panelMargin
+        anchors.topMargin: 2
 
         transform: Translate {
             id: panelSlide
