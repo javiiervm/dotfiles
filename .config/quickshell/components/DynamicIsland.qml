@@ -403,7 +403,11 @@ PanelWindow {
             "  read cap < /sys/class/power_supply/BAT*/capacity 2>/dev/null || cap=100; " +
             "  read stat < /sys/class/power_supply/BAT*/status 2>/dev/null || stat=\"Unknown\"; " +
             "  echo \"$cap;$stat\"; " +
-            "}; check_bat; while read -r _ <&3; do check_bat; done"
+            // Comprobación híbrida: reaccionamos inmediatamente a eventos udev,
+            // pero como algunos drivers no emiten un evento al cambiar solo el
+            // porcentaje, despertamos este MISMO bash cada 30 s como respaldo.
+            // `read -t` es un builtin de bash: no crea procesos periódicos extra.
+            "}; check_bat; while true; do read -r -t 30 _ <&3 || true; check_bat; done"
         ]
         running: true
         stdout: SplitParser {
