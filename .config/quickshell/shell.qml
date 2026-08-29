@@ -1625,7 +1625,7 @@ ShellRoot {
             visible: opacity > 0
 
             transform: Translate {
-                y: parent.showDock ? 0 : 25
+                y: dockVisual.showDock ? 0 : 25
                 Behavior on y {
                     NumberAnimation { duration: 400; easing.type: Easing.OutQuint }
                 }
