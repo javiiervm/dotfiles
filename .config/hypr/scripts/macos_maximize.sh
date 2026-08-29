@@ -43,6 +43,21 @@ dispatch() {
 }
 
 
+macos_mode_active() {
+    [ -f "$MACOS_STATE_FILE" ] || return 1
+
+    local current_instance="${HYPRLAND_INSTANCE_SIGNATURE:-}"
+    local saved_instance
+
+    [ -n "$current_instance" ] || return 1
+
+    saved_instance=$(head -n 1 "$MACOS_STATE_FILE" 2>/dev/null || true)
+
+    [ -n "$saved_instance" ] || return 1
+    [ "$saved_instance" = "$current_instance" ]
+}
+
+
 # ============================================================
 # Get active window
 # ============================================================
@@ -60,7 +75,7 @@ fi
 # Normal Hyprland mode
 # ============================================================
 
-if [ ! -f "$MACOS_STATE_FILE" ]; then
+if ! macos_mode_active; then
 
     dispatch \
         "hl.dsp.window.fullscreen({

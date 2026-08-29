@@ -67,6 +67,9 @@ hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
 hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
 
 hl.on("hyprland.start", function ()
+    -- macOS mode is validated synchronously later in this file.
+    -- Do not clear its state asynchronously here.
+
     -- Startup commands to ensure the system knows we prefer dark theme
     hl.exec_cmd("gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'")
     hl.exec_cmd("gsettings set org.gnome.desktop.interface gtk-theme 'adw-gtk3-dark'")
@@ -506,18 +509,75 @@ hl.layer_rule({ match = { namespace = "quickshell" }, blur = true, ignore_alpha 
 -- adapt it, or load it with dofile() once it exists as .lua:
 dofile("/home/javier/.config/hypr/hyprland-gui.lua")
 
--- macos_rules.lua IS adapted: toggle_macos.sh now generates it directly in
--- Lua syntax (hl.window_rule / hl.config) instead of macos_rules.conf.
--- Loading it here executes its calls as-is.
--- Guarded with a file-exists check so a missing file (e.g. before
--- toggle_macos.sh has been run for the first time) doesn't crash the
--- whole config.
+-- ============================================================
+-- macOS mode: session-scoped state
+--
+-- This block runs synchronously while hyprland.lua is evaluated.
+--
+-- /tmp/hypr_macos_mode contains the HYPRLAND_INSTANCE_SIGNATURE
+-- of the instance that enabled macOS mode.
+--
+-- Result:
+--   hyprctl reload in same instance -> macOS mode is preserved
+--   logout/login                    -> starts in tiling
+--   reboot                          -> starts in tiling
+--   new Hyprland instance           -> starts in tiling
+-- ============================================================
+
+local macos_state_path = "/tmp/hypr_macos_mode"
+local macos_backup_path = "/tmp/hypr_macos_backup.json"
 local macos_rules_path = "/home/javier/.config/hypr/macos_rules.lua"
-local macos_rules_file = io.open(macos_rules_path, "r")
-if macos_rules_file then
-    macos_rules_file:close()
-    dofile(macos_rules_path)
+
+local function read_first_line(path)
+    local file = io.open(path, "r")
+
+    if not file then
+        return nil
+    end
+
+    local value = file:read("*l")
+    file:close()
+
+    return value
 end
+
+local function write_inactive_macos_rules()
+    local file = io.open(macos_rules_path, "w")
+
+    if file then
+        file:write("-- macOS mode inactive\n")
+        file:write("-- Auto-generated on Hyprland session start\n")
+        file:close()
+    end
+end
+
+local saved_instance = read_first_line(macos_state_path)
+local current_instance = os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+
+local macos_mode_valid =
+    saved_instance ~= nil
+    and saved_instance ~= ""
+    and current_instance ~= nil
+    and current_instance ~= ""
+    and saved_instance == current_instance
+
+if macos_mode_valid then
+    local rules_file = io.open(macos_rules_path, "r")
+
+    if rules_file then
+        rules_file:close()
+        dofile(macos_rules_path)
+    end
+else
+    -- Never let state from an older Hyprland instance leak into
+    -- the new session.
+    os.remove(macos_state_path)
+    os.remove(macos_backup_path)
+    os.execute("rm -rf /tmp/hypr_macos_maximize")
+
+    write_inactive_macos_rules()
+end
+
 
 -- Custom margins for any workspace hosted on the external monitor (HDMI-A-1)
 -- gaps_out order: top, right, bottom, left
