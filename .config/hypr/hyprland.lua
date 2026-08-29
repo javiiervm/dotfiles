@@ -383,6 +383,49 @@ hl.bind(mainMod .. " + right", hl.dsp.focus({ direction = "right" }))
 hl.bind(mainMod .. " + up", hl.dsp.focus({ direction = "up" }))
 hl.bind(mainMod .. " + down", hl.dsp.focus({ direction = "down" }))
 
+-- Resize active window with keyboard
+-- Works in both tiling and floating/macOS mode.
+-- Hold the shortcut to resize continuously.
+hl.bind(
+    mainMod .. " + CTRL + left",
+    hl.dsp.window.resize({
+        x = -40,
+        y = 0,
+        relative = true,
+    }),
+    { repeating = true }
+)
+
+hl.bind(
+    mainMod .. " + CTRL + right",
+    hl.dsp.window.resize({
+        x = 40,
+        y = 0,
+        relative = true,
+    }),
+    { repeating = true }
+)
+
+hl.bind(
+    mainMod .. " + CTRL + up",
+    hl.dsp.window.resize({
+        x = 0,
+        y = -40,
+        relative = true,
+    }),
+    { repeating = true }
+)
+
+hl.bind(
+    mainMod .. " + CTRL + down",
+    hl.dsp.window.resize({
+        x = 0,
+        y = 40,
+        relative = true,
+    }),
+    { repeating = true }
+)
+
 -- Switch workspaces with mainMod + [0-9]
 hl.bind(mainMod .. " + 1", hl.dsp.focus({ workspace = 1 }))
 hl.bind(mainMod .. " + 2", hl.dsp.focus({ workspace = 2 }))
