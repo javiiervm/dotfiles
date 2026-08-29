@@ -80,12 +80,21 @@ PanelWindow {
     readonly property int calendarHeight: topTileHeight * 2 + tileGap
     readonly property int smallButtonSize: 62
     readonly property int notificationHeight: 86
+    // Compact horizontal Volume/Brightness controls. They deliberately use
+    // almost the same height as the "Clear All" pill so this row feels
+    // lighter than the large connectivity tiles above it.
+    readonly property int mediaSliderHeight: 34
+    readonly property int mediaControlsHeight: mediaSliderHeight
 
     readonly property int notificationCount:
         ncWindow.modelData ? ncWindow.modelData.count : 0
 
+    // Height occupied before the notifications section. Besides the original
+    // top grid, this now includes the Volume/Brightness controls and the gap
+    // that separates both blocks.
     readonly property int topControlsHeight:
         calendarHeight + tileGap + topTileHeight
+        + tileGap + mediaControlsHeight
 
     // ---------------------------------------------------------------------
     // Helpers / backend bridge
@@ -231,6 +240,152 @@ PanelWindow {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Volume / brightness backend
+    // -----------------------------------------------------------------
+
+    property real volumeLevel: 0.0
+    property bool volumeMuted: false
+    property real brightnessLevel: 0.0
+    property bool volumeDragging: false
+    property bool brightnessDragging: false
+    property bool volumeApplyPending: false
+    property bool brightnessApplyPending: false
+
+    function clamp01(value) {
+        return Math.max(0.0, Math.min(1.0, value))
+    }
+
+    function setVolumePreviewFromX(mouseX, trackWidth) {
+        if (trackWidth <= 0)
+            return
+
+        volumeLevel = clamp01(mouseX / trackWidth)
+    }
+
+    function setBrightnessPreviewFromX(mouseX, trackWidth) {
+        if (trackWidth <= 0)
+            return
+
+        // Keep a tiny non-zero floor. Many laptop backlights accept 0%, but
+        // on some panels that effectively turns the screen completely black.
+        brightnessLevel = Math.max(0.01, clamp01(mouseX / trackWidth))
+    }
+
+    function applyVolume() {
+        if (volumeSetProc.running) {
+            volumeApplyPending = true
+            return
+        }
+
+        volumeApplyPending = false
+        volumeSetProc.command = [
+            "bash", "-c",
+            "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "
+            + volumeLevel.toFixed(3)
+            + "; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
+        ]
+        volumeSetProc.running = true
+    }
+
+    function applyBrightness() {
+        if (brightnessSetProc.running) {
+            brightnessApplyPending = true
+            return
+        }
+
+        brightnessApplyPending = false
+        var percent = Math.max(1, Math.min(100, Math.round(brightnessLevel * 100)))
+        brightnessSetProc.command = [
+            "brightnessctl", "set", percent + "%"
+        ]
+        brightnessSetProc.running = true
+    }
+
+    Process {
+        id: volumeSetProc
+        onRunningChanged: {
+            if (!running && ncWindow.volumeApplyPending)
+                Qt.callLater(ncWindow.applyVolume)
+        }
+    }
+
+    Process {
+        id: brightnessSetProc
+        onRunningChanged: {
+            if (!running && ncWindow.brightnessApplyPending)
+                Qt.callLater(ncWindow.applyBrightness)
+        }
+    }
+
+    Process {
+        id: volumeMuteProc
+    }
+
+    // Event-driven monitor, deliberately alive only while the Notification
+    // Center is open. It performs one initial read and then sleeps until
+    // PipeWire/PulseAudio or the kernel backlight emits a change event.
+    Process {
+        id: mediaControlsMonitor
+        running: ncWindow.visible_state
+        command: [
+            "bash", "-c",
+            "LC_ALL=C; " +
+            "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs_nc_media_$$\"; " +
+            "rm -f \"$F\"; mkfifo \"$F\"; exec 3<>\"$F\"; " +
+            "pactl subscribe 2>/dev/null | grep --line-buffered -E '(sink|server)' | while read -r _; do echo SND >&3; done & " +
+            "udevadm monitor --subsystem-match=backlight 2>/dev/null | grep --line-buffered 'change' | while read -r _; do echo BRI >&3; done & " +
+            "trap 'kill $(jobs -p) 2>/dev/null; rm -f \"$F\"' EXIT; " +
+            "read_values() { " +
+            "  vf=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0'); " +
+            "  vol=${vf#* }; vol=${vol% \\[MUTED\\]}; " +
+            "  [[ \"$vf\" == *MUTED* ]] && muted=1 || muted=0; " +
+            "  b_raw=$(brightnessctl -m 2>/dev/null || echo 'backlight,backlight,0,0%'); " +
+            "  IFS=, read -r _ _ _ pct _ <<< \"$b_raw\"; bri=${pct%%%}; " +
+            "  echo \"$vol;$muted;$bri\"; " +
+            "}; " +
+            "read_values; while read -r _ <&3; do read_values; done"
+        ]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var fields = data.trim().split(";")
+                if (fields.length < 3)
+                    return
+
+                var newVolume = parseFloat(fields[0])
+                var newBrightness = parseFloat(fields[2]) / 100.0
+
+                if (!ncWindow.volumeDragging && !isNaN(newVolume))
+                    ncWindow.volumeLevel = ncWindow.clamp01(newVolume)
+
+                ncWindow.volumeMuted = fields[1] === "1"
+
+                if (!ncWindow.brightnessDragging && !isNaN(newBrightness))
+                    ncWindow.brightnessLevel = ncWindow.clamp01(newBrightness)
+            }
+        }
+    }
+
+    // These timers only exist while the user is actively dragging a slider.
+    // They make the controls feel live without introducing periodic work in
+    // the background when the panel is idle or closed.
+    Timer {
+        id: volumeDragApplyTimer
+        interval: 45
+        repeat: true
+        running: ncWindow.volumeDragging
+        onTriggered: ncWindow.applyVolume()
+    }
+
+    Timer {
+        id: brightnessDragApplyTimer
+        interval: 45
+        repeat: true
+        running: ncWindow.brightnessDragging
+        onTriggered: ncWindow.applyBrightness()
     }
 
     onWifiStateChanged: wifiPending = false
@@ -1095,6 +1250,236 @@ PanelWindow {
                                     ncWindow.toggleAirplaneRequested()
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // =============================================================
+            // VOLUME / BRIGHTNESS
+            // Two compact pills side by side. They keep Dynamic Island's OSD
+            // language: icon, thin rounded progress track and percentage.
+            // =============================================================
+
+            Row {
+                id: mediaControls
+                width: parent.width
+                height: ncWindow.mediaControlsHeight
+                spacing: ncWindow.tileGap
+
+                GlassSurface {
+                    id: volumeControl
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: ncWindow.mediaSliderHeight
+                    glassRadius: height / 2
+                    glassOpacity: volumeControlMouse.containsMouse ? 0.43 : 0.34
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 11
+                        anchors.rightMargin: 11
+                        spacing: 8
+
+                        Item {
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: parent.height
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: ncWindow.volumeMuted || ncWindow.volumeLevel <= 0.001
+                                      ? "󰝟" : "󰕾"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15
+                                color: ncWindow.volumeMuted
+                                       ? Qt.alpha(Theme.white, 0.42)
+                                       : Theme.white
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (!volumeMuteProc.running) {
+                                        volumeMuteProc.command = [
+                                            "wpctl", "set-mute",
+                                            "@DEFAULT_AUDIO_SINK@", "toggle"
+                                        ]
+                                        volumeMuteProc.running = true
+                                    }
+                                }
+                            }
+                        }
+
+                        Item {
+                            id: volumeTrackHitbox
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: parent.height
+
+                            Rectangle {
+                                id: volumeTrack
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 5
+                                radius: height / 2
+                                color: Qt.alpha(Theme.white, 0.20)
+
+                                Rectangle {
+                                    height: parent.height
+                                    radius: height / 2
+                                    width: parent.width * ncWindow.clamp01(ncWindow.volumeLevel)
+                                    color: ncWindow.volumeMuted
+                                           ? Qt.alpha(Theme.white, 0.42)
+                                           : Theme.white
+
+                                    Behavior on width {
+                                        enabled: !ncWindow.volumeDragging
+                                        NumberAnimation {
+                                            duration: 150
+                                            easing.type: Easing.OutQuad
+                                        }
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: volumeControlMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+
+                                onPressed: function(mouse) {
+                                    ncWindow.volumeDragging = true
+                                    ncWindow.setVolumePreviewFromX(mouse.x, width)
+                                    ncWindow.volumeMuted = false
+                                    ncWindow.applyVolume()
+                                }
+
+                                onPositionChanged: function(mouse) {
+                                    if (pressed)
+                                        ncWindow.setVolumePreviewFromX(mouse.x, width)
+                                }
+
+                                onReleased: {
+                                    ncWindow.applyVolume()
+                                    ncWindow.volumeDragging = false
+                                }
+
+                                onCanceled: {
+                                    ncWindow.applyVolume()
+                                    ncWindow.volumeDragging = false
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: Math.round(ncWindow.volumeLevel * 100) + "%"
+                            color: ncWindow.volumeMuted
+                                   ? Qt.alpha(Theme.white, 0.60)
+                                   : Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                            font.bold: true
+                            Layout.minimumWidth: 29
+                            horizontalAlignment: Text.AlignRight
+                        }
+                    }
+                }
+
+                GlassSurface {
+                    id: brightnessControl
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: ncWindow.mediaSliderHeight
+                    glassRadius: height / 2
+                    glassOpacity: brightnessControlMouse.containsMouse ? 0.43 : 0.34
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 11
+                        anchors.rightMargin: 11
+                        spacing: 8
+
+                        Item {
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: parent.height
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰃠"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15
+                                color: Theme.white
+                            }
+                        }
+
+                        Item {
+                            id: brightnessTrackHitbox
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: parent.height
+
+                            Rectangle {
+                                id: brightnessTrack
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 5
+                                radius: height / 2
+                                color: Qt.alpha(Theme.white, 0.20)
+
+                                Rectangle {
+                                    height: parent.height
+                                    radius: height / 2
+                                    width: parent.width * ncWindow.clamp01(ncWindow.brightnessLevel)
+                                    color: Theme.white
+
+                                    Behavior on width {
+                                        enabled: !ncWindow.brightnessDragging
+                                        NumberAnimation {
+                                            duration: 150
+                                            easing.type: Easing.OutQuad
+                                        }
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: brightnessControlMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+
+                                onPressed: function(mouse) {
+                                    ncWindow.brightnessDragging = true
+                                    ncWindow.setBrightnessPreviewFromX(mouse.x, width)
+                                    ncWindow.applyBrightness()
+                                }
+
+                                onPositionChanged: function(mouse) {
+                                    if (pressed)
+                                        ncWindow.setBrightnessPreviewFromX(mouse.x, width)
+                                }
+
+                                onReleased: {
+                                    ncWindow.applyBrightness()
+                                    ncWindow.brightnessDragging = false
+                                }
+
+                                onCanceled: {
+                                    ncWindow.applyBrightness()
+                                    ncWindow.brightnessDragging = false
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: Math.round(ncWindow.brightnessLevel * 100) + "%"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                            font.bold: true
+                            Layout.minimumWidth: 29
+                            horizontalAlignment: Text.AlignRight
                         }
                     }
                 }
