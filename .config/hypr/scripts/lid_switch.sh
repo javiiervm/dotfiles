@@ -88,6 +88,10 @@ case "$ACTION" in
         # ----------------------------------------------------
 
         if ! monitor_connected "$EXTERNAL"; then
+            # No external monitor:
+            # lock the session and suspend immediately.
+            loginctl lock-session >/dev/null 2>&1 || true
+            systemctl suspend
             exit 0
         fi
 
