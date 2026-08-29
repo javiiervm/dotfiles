@@ -13,6 +13,34 @@ ShellRoot {
 
     readonly property var theme: Theme
 
+    // ============================================================
+    // PRIMARY QUICKSHELL UI SCREEN
+    // ============================================================
+    //
+    // Normal dual-monitor mode:
+    //   eDP-1 exists -> all singleton Quickshell UI stays on the laptop.
+    //
+    // Clamshell mode:
+    //   eDP-1 is disabled by lid_switch.sh -> HDMI-A-1 becomes the UI screen.
+    //
+    // Quickshell.screens is updated by Wayland output events, so this adds no
+    // polling, timer or background process.
+    readonly property var primaryUiScreen: {
+        var screens = Quickshell.screens
+
+        for (var i = 0; i < screens.length; ++i) {
+            if (screens[i].name === "eDP-1")
+                return screens[i]
+        }
+
+        for (var j = 0; j < screens.length; ++j) {
+            if (screens[j].name === "HDMI-A-1")
+                return screens[j]
+        }
+
+        return screens.length > 0 ? screens[0] : null
+    }
+
     property int batCap: 0
     property string batStat: ""
     property int vol: 0
@@ -346,7 +374,8 @@ ShellRoot {
     Timer { id: closeTimer; interval: 300; onTriggered: root.isMenuVisible = false }
 
     Launcher { 
-        id: mainLauncher 
+        id: mainLauncher
+        screen: root.primaryUiScreen
         onRequestIslandMsg: function(icon, color, text) {
             if (typeof islandWidget !== "undefined") {
                 islandWidget.triggerMsg(icon, color, text);
@@ -356,6 +385,20 @@ ShellRoot {
 
     NotificationCenter {
         id: notifCenterWindow
+        screen: root.primaryUiScreen
+
+        // Laptop keeps the original position. The HDMI value is used only
+        // when eDP-1 is disabled and HDMI-A-1 becomes primaryUiScreen.
+        panelTopMargin: root.primaryUiScreen
+            && root.primaryUiScreen.name === "HDMI-A-1"
+            ? 10
+            : 2
+
+        panelRightMargin: root.primaryUiScreen
+            && root.primaryUiScreen.name === "HDMI-A-1"
+            ? 10
+            : 12
+
         visible_state: root.isNotifOpen
         dndState: root.dnd
         modelData: sharedNotifModel
@@ -670,7 +713,7 @@ ShellRoot {
 
     PanelWindow {
         id: osdWindow
-        screen: Quickshell.screens[0]
+        screen: root.primaryUiScreen
         anchors { top: true; right: true }
         margins { top: 50; right: 15 }
         implicitWidth: 360 
@@ -784,9 +827,12 @@ ShellRoot {
 
     PanelWindow {
         id: topBar
+        screen: root.primaryUiScreen
         anchors { top: true; left: true; right: true }
         implicitHeight: 44
-        exclusiveZone: 44
+        // Keep the laptop exactly as before. The HDMI value is used only
+        // while eDP-1 is disabled (clamshell mode). Tune 38 if desired.
+        exclusiveZone: screen && screen.name === "HDMI-A-1" ? 38 : 44
         color: "transparent"
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? topBarBlurRegion : null
@@ -869,6 +915,7 @@ ShellRoot {
 
         PanelWindow {
             id: popupMenuWindow
+            screen: root.primaryUiScreen
             anchors { top: true; right: true }
             WlrLayershell.layer: WlrLayershell.Overlay
             implicitHeight: root.isMenuVisible ? 90 : 0
@@ -911,6 +958,7 @@ ShellRoot {
         // --- VENTANA DEL MENÚ DEL PORTAPAPELES ---
         PanelWindow {
             id: clipMenuWindow
+            screen: root.primaryUiScreen
             anchors { top: true; right: true }
             WlrLayershell.layer: WlrLayershell.Overlay
             implicitWidth: 260
@@ -1094,8 +1142,16 @@ ShellRoot {
             }
         }
 
-        DynamicIsland { 
-            id: islandWidget 
+        DynamicIsland {
+            id: islandWidget
+
+            // Laptop keeps its original -38 value. The HDMI value is used
+            // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
+            topMargin: root.primaryUiScreen
+                && root.primaryUiScreen.name === "HDMI-A-1"
+                ? -32
+                : -38
+
             isFullscreen: root.isFullscreen
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
@@ -1135,6 +1191,7 @@ ShellRoot {
     // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en una franja central del borde superior) ---
     PanelWindow {
         id: topTriggerZone
+        screen: root.primaryUiScreen
         // Sin left/right: se centra horizontalmente sola (igual que la isla fantasma),
         // formando una franja ancha en la zona superior-central, no un punto único
         // ni todo el borde de la pantalla.
@@ -1168,6 +1225,7 @@ ShellRoot {
     // --- ISLA FANTASMA: solo reloj + batería, no interactiva, visible en fullscreen ---
     PanelWindow {
         id: fullscreenGhostIsland
+        screen: root.primaryUiScreen
         anchors { top: true } // se centra horizontalmente sola, igual que la isla real
 
         WlrLayershell.layer: WlrLayershell.Overlay
@@ -1239,6 +1297,7 @@ ShellRoot {
 
     PanelWindow {
         id: cavaWindow
+        screen: root.primaryUiScreen
         anchors { bottom: true; left: true; right: true }
         implicitHeight: 300  
         exclusiveZone: 0     
@@ -1276,6 +1335,7 @@ ShellRoot {
 
     WallpaperCarousel {
         id: wallCarouselWidget
+        screen: root.primaryUiScreen
     }
 
     GlobalShortcut {
@@ -1285,7 +1345,7 @@ ShellRoot {
 
     PanelWindow {
         id: controlCenterWindow
-        screen: Quickshell.screens[0]
+        screen: root.primaryUiScreen
 
         anchors { top: true; bottom: true; left: true; right: true }
         exclusiveZone: 0
@@ -1552,6 +1612,7 @@ ShellRoot {
     // --- ZONA DE GATILLO DEL DOCK ---
     PanelWindow {
         id: dockTriggerZone
+        screen: root.primaryUiScreen
         anchors { bottom: true; left: true; right: true }
         implicitHeight: 2 
         color: "transparent"
@@ -1580,6 +1641,7 @@ ShellRoot {
     // --- COMPONENTE DEL DOCK ---
     PanelWindow {
         id: customDockWindow
+        screen: root.primaryUiScreen
         anchors { bottom: true }
         margins { bottom: root.bottomGap }
 
@@ -1694,5 +1756,6 @@ ShellRoot {
     // --- COMPONENTE OVERLAY DE ALT+TAB ---
     AltTabOverlay {
         rootRef: root
+        screen: root.primaryUiScreen
     }
 }

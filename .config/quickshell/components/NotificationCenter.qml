@@ -26,6 +26,11 @@ PanelWindow {
     property bool visible_state: false
     property bool isReallyVisible: false
 
+    // Configurable from shell.qml so the panel can use different
+    // top/right offsets on the external monitor in clamshell mode.
+    property int panelTopMargin: 2
+    property int panelRightMargin: 12
+
     property bool dndState: false
     property bool wifiState: false
     property bool btState: false
@@ -339,8 +344,8 @@ PanelWindow {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.rightMargin: ncWindow.panelMargin
-        anchors.topMargin: 2
+        anchors.rightMargin: ncWindow.panelRightMargin
+        anchors.topMargin: ncWindow.panelTopMargin
 
         transform: Translate {
             id: panelSlide

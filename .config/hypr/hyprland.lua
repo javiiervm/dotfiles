@@ -312,28 +312,32 @@ hl.device({
     sensitivity = -0.5,
 })
 
-
 -- ########################################
 --- RAISE FOCUSED WINDOW TO FRONT ---
 -- ########################################
 --
--- Every time Hyprland changes the active window, bring that
--- window to the top of the window stack.
+-- Every time Hyprland changes the active window, bring the
+-- CURRENTLY focused window to the top of the window stack.
 --
--- This is especially important in macOS/floating mode, where
--- focused windows may overlap. It applies regardless of HOW
--- focus changed: mouse, Alt+Tab, Overview, keyboard, scripts,
--- etc.
+-- We deliberately do not reuse the window object supplied by
+-- the event. During monitor/workspace transitions that object
+-- can expire before the dispatcher consumes it, producing:
+--
+--   window selector: window object is expired
+--
+-- bring_to_top() operates on the current focused window instead,
+-- so no stale window selector needs to be retained.
+--
+-- pcall is only a final safety guard for transient states where
+-- there temporarily is no valid focused window (for example
+-- while disabling a monitor).
 --
 -- Fully event-driven: no polling, timers or background process.
 
-hl.on("window.active", function(w, reason)
-    if w ~= nil then
-        hl.dispatch(hl.dsp.window.alter_zorder({
-            mode = "top",
-            window = w,
-        }))
-    end
+hl.on("window.active", function()
+    pcall(function()
+        hl.dispatch(hl.dsp.window.bring_to_top())
+    end)
 end)
 
 -- ###################
@@ -343,6 +347,36 @@ end)
 -- See https://wiki.hypr.land/Configuring/Keywords/
 
 local mainMod = "SUPER" -- Sets "Windows" key as main modifier
+
+-- ============================================================
+-- LAPTOP LID / CLAMSHELL MODE
+-- ============================================================
+--
+-- Fully event-driven. Hyprland receives the hardware lid switch
+-- event directly; there is no polling, timer or background daemon.
+--
+-- Lid closed:
+--   If HDMI-A-1 exists, eDP-1 is removed from the layout and the
+--   external monitor becomes the sole display.
+--
+-- Lid opened:
+--   Restore the normal dual-monitor configuration.
+--
+-- Without an external display, the close handler intentionally
+-- does nothing so systemd-logind can retain the normal suspend
+-- behaviour.
+
+hl.bind(
+    "switch:on:Lid Switch",
+    hl.dsp.exec_cmd("~/.config/hypr/scripts/lid_switch.sh close"),
+    { locked = true }
+)
+
+hl.bind(
+    "switch:off:Lid Switch",
+    hl.dsp.exec_cmd("~/.config/hypr/scripts/lid_switch.sh open"),
+    { locked = true }
+)
 
 -- Example binds, see https://wiki.hypr.land/Configuring/Binds/ for more
 

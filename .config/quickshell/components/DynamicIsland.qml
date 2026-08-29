@@ -10,12 +10,16 @@ import ".."
 PanelWindow {
     id: islandWindow
 
+    // Configurable from shell.qml so the island can use a different
+    // vertical position on the external monitor in clamshell mode.
+    property int topMargin: -38
+
     anchors {
         top: true
     }
-    margins { 
-        top: -38
-    } 
+    margins {
+        top: islandWindow.topMargin
+    }
 
     WlrLayershell.layer: WlrLayershell.Overlay
     exclusiveZone: 0
