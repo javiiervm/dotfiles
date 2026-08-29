@@ -312,6 +312,30 @@ hl.device({
     sensitivity = -0.5,
 })
 
+
+-- ########################################
+--- RAISE FOCUSED WINDOW TO FRONT ---
+-- ########################################
+--
+-- Every time Hyprland changes the active window, bring that
+-- window to the top of the window stack.
+--
+-- This is especially important in macOS/floating mode, where
+-- focused windows may overlap. It applies regardless of HOW
+-- focus changed: mouse, Alt+Tab, Overview, keyboard, scripts,
+-- etc.
+--
+-- Fully event-driven: no polling, timers or background process.
+
+hl.on("window.active", function(w, reason)
+    if w ~= nil then
+        hl.dispatch(hl.dsp.window.alter_zorder({
+            mode = "top",
+            window = w,
+        }))
+    end
+end)
+
 -- ###################
 --- KEYBINDINGS ---
 -- ###################
