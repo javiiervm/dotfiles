@@ -7,6 +7,17 @@ Item {
 
     property int percentage: 0
     property bool charging: false
+    // Supplied by shell.qml from the existing event-driven backend.
+    property bool onAcPower: true
+    property string batteryStatus: "Unknown"
+    property bool powerSaverMode: false
+
+    // For the battery visual, the battery's own kernel status is the most
+    // direct source of truth: "Discharging" means the machine is actually
+    // running from the battery. This value is pushed by the existing
+    // power_supply udev event path; no polling/timer is needed here.
+    readonly property bool powerSaverOnBattery:
+        batteryStatus === "Discharging" && powerSaverMode
 
     readonly property bool lowBattery: percentage < 21
     readonly property real clampedPercentage:
@@ -44,6 +55,17 @@ Item {
         GradientStop { position: 0.0; color: "#ff9d60" }
         GradientStop { position: 0.5; color: "#f13857" }
         GradientStop { position: 1.0; color: "#d12543" }
+    }
+
+    // Power Saver while actually running from the battery.
+    // Low-battery red deliberately keeps priority as a warning state.
+    Gradient {
+        id: powerSaverGradient
+        orientation: Gradient.Vertical
+
+        GradientStop { position: 0.0; color: '#fff5c3' }
+        GradientStop { position: 0.5; color: '#f9d362' }
+        GradientStop { position: 1.0; color: '#f1c039' }
     }
 
     Item {
@@ -91,7 +113,11 @@ Item {
                     : (
                         batteryRoot.lowBattery
                             ? lowBatteryGradient
-                            : normalGradient
+                            : (
+                                batteryRoot.powerSaverOnBattery
+                                    ? powerSaverGradient
+                                    : normalGradient
+                            )
                     )
 
                 Behavior on width {

@@ -12,7 +12,7 @@ exec 3<> "$FIFO"
 # --- VARIABLES INICIALES ---
 CAP=100; STAT="Unknown"; VOL=0; MUTE="false"; SINK_DESC="Speakers"
 SSID="Disconnected"; SIGNAL="0"; FREQ="0"; BT_STAT="off"; BT_DEV="None"
-PERF="balanced"; DND="false"; COUNT="0"
+PERF="balanced"; DND="false"; COUNT="0"; AC_ONLINE=0
 
 BAT_PATH=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -n 1)
 
@@ -25,6 +25,18 @@ update_bat() {
         read CAP < "$BAT_PATH/capacity" 2>/dev/null || CAP=0
         read STAT < "$BAT_PATH/status" 2>/dev/null || STAT="Unknown"
     fi
+}
+
+update_ac() {
+    AC_ONLINE=0
+    for f in /sys/class/power_supply/AC*/online /sys/class/power_supply/ADP*/online; do
+        [ -r "$f" ] || continue
+        read -r value < "$f" 2>/dev/null || value=0
+        if [ "$value" = "1" ]; then
+            AC_ONLINE=1
+            break
+        fi
+    done
 }
 
 update_vol() {
@@ -64,7 +76,8 @@ update_perf() {
 # ==========================================
 LAST_STATE=""
 emit_state() {
-    CURRENT="${CAP}|${STAT}|${VOL}|${SSID}|${SIGNAL}|${FREQ}|${BT_STAT}|${BT_DEV}|${PERF}|${DND}|${COUNT}|${MUTE}|${SINK_DESC}|0|0"
+    # AC_ONLINE is appended so all previous field indexes remain unchanged.
+    CURRENT="${CAP}|${STAT}|${VOL}|${SSID}|${SIGNAL}|${FREQ}|${BT_STAT}|${BT_DEV}|${PERF}|${DND}|${COUNT}|${MUTE}|${SINK_DESC}|0|0|${AC_ONLINE}"
     # Solo imprimimos si algo ha cambiado realmente
     if [ "$CURRENT" != "$LAST_STATE" ]; then
         echo "$CURRENT"
@@ -73,48 +86,50 @@ emit_state() {
 }
 
 # --- Carga inicial al arrancar ---
-update_bat; update_vol; update_net; update_bt; update_perf
+update_bat; update_ac; update_vol; update_net; update_bt; update_perf
 emit_state
 
 # ==========================================
 # MONITORES DE EVENTOS (NUEVO CORAZÓN)
 # ==========================================
-# Estos procesos se envían a segundo plano. Simplemente escuchan al 
+# Estos procesos se envían a segundo plano. Simplemente escuchan al
 # sistema nativamente y "empujan" una palabra clave al FIFO cuando algo pasa.
 
-# 1. Volumen (Pipewire/PulseAudio) - ¡Respuesta instántanea sin polling!
+# 1. Volumen (Pipewire/PulseAudio) - respuesta instantánea sin polling.
 ( pactl subscribe 2>/dev/null | grep --line-buffered "sink" | while read -r _; do echo "VOL" >&3; done ) &
 
-# 2. Wi-Fi y Red (NetworkManager) - Altera al instante si pierdes o ganas conexión
+# 2. Wi-Fi y Red (NetworkManager).
 ( nmcli monitor 2>/dev/null | while read -r _; do echo "NET" >&3; done ) &
 
-# 3. Bluetooth (DBus) - Detecta si enciendes el BT o conectas unos cascos
+# 3. Bluetooth (DBus).
 ( dbus-monitor --system "type='signal',interface='org.freedesktop.DBus.Properties',path_namespace='/org/bluez'" 2>/dev/null | grep --line-buffered "PropertiesChanged" | while read -r _; do echo "BT" >&3; done ) &
 
-# 4. Batería (Udev) - Detecta al milisegundo si enchufas/desenchufas el cargador
+# 4. Batería / alimentación (Udev). También actualiza AC_ONLINE.
 ( udevadm monitor --subsystem-match=power_supply 2>/dev/null | grep --line-buffered "change" | while read -r _; do echo "BAT" >&3; done ) &
 
-# 5. Latido de Respaldo (TICK)
-# Como la señal Wi-Fi o los saltos del 1% de batería a veces no emiten un evento agresivo,
-# hacemos un chequeo silencioso cada 30 segundos en lugar de cada 2.
+# 5. Perfil energético (power-profiles-daemon). This is what makes both the
+# automatic power_mode.sh changes and manual button changes appear immediately.
+( dbus-monitor --system "type='signal',interface='org.freedesktop.DBus.Properties',path='/net/hadess/PowerProfiles'" 2>/dev/null | grep --line-buffered "PropertiesChanged" | while read -r _; do echo "PERF" >&3; done ) &
+
+# 6. Latido de respaldo (existing behaviour).
+# Se conserva el chequeo silencioso cada 30 segundos del backend original.
 ( while true; do sleep 30; echo "TICK" >&3; done ) &
 
-# Limpiamos todos los subprocesos de fondo y el FIFO si se cierra Quickshell
+# Limpiamos todos los subprocesos de fondo y el FIFO si se cierra Quickshell.
 trap 'kill $(jobs -p) 2>/dev/null; exec 3>&-; rm -f "$FIFO"' EXIT
 
 # ==========================================
 # BUCLE PRINCIPAL (BLOQUEANTE = 0% CPU)
 # ==========================================
-# El comando 'read' paraliza la ejecución del script por completo. 
-# Solo despierta cuando llega un evento de uno de los 5 monitores de arriba.
 while read -r event <&3; do
     case "$event" in
-        "VOL") update_vol ;;
-        "NET") update_net ;;
-        "BT")  update_bt ;;
-        "BAT") update_bat ;;
-        "TICK") update_bat; update_net; update_bt; update_perf ;;
+        "VOL")  update_vol ;;
+        "NET")  update_net ;;
+        "BT")   update_bt ;;
+        "BAT")  update_bat; update_ac ;;
+        "PERF") update_perf ;;
+        "TICK") update_bat; update_ac; update_net; update_bt; update_perf ;;
     esac
-    
+
     emit_state
 done

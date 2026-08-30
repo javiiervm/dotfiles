@@ -36,9 +36,14 @@ PanelWindow {
     property bool btState: false
     property bool airplaneState: false
     property bool caffeineState: false
+    property bool powerSaverState: false
+    property bool powerSaverAvailable: false
     property bool nightLightState: false
     property int nightLightTemperature: 4000
     property bool nightLightTemperatureOpen: false
+    // Which value the shared Brightness/Night-Light slider is editing.
+    // Left click on the icon toggles Night Light; right click toggles this mode.
+    property bool brightnessTemperatureMode: false
 
     property ListModel modelData
 
@@ -50,6 +55,7 @@ PanelWindow {
     signal toggleBtRequested()
     signal toggleAirplaneRequested()
     signal toggleCaffeineRequested()
+    signal togglePowerSaverRequested()
     signal toggleNightLightRequested()
     signal setNightLightTemperatureRequested(int temperature)
 
@@ -495,6 +501,7 @@ PanelWindow {
             // The temperature slider is transient UI: always collapse it as
             // soon as the Notification Center begins closing.
             nightLightTemperatureOpen = false
+            brightnessTemperatureMode = false
             closeTimer.start()
         }
     }
@@ -1073,7 +1080,7 @@ PanelWindow {
                                     )
                                     color: Theme.white
                                     font.family: Theme.fontMain
-                                    font.pixelSize: 10
+                                    font.pixelSize: 9
                                     font.bold: true
 
                                     MouseArea {
@@ -1415,7 +1422,12 @@ PanelWindow {
                     width: (parent.width - ncWindow.tileGap) / 2
                     height: ncWindow.mediaSliderHeight
                     glassRadius: height / 2
-                    glassOpacity: brightnessControlMouse.containsMouse ? 0.43 : 0.34
+                    // The surface indicates whether Night Light itself is active.
+                    // Slider mode is independent and is toggled with right click.
+                    glassTint: ncWindow.nightLightState ? "#ffd38a" : Glass.tint
+                    glassOpacity:
+                        ncWindow.nightLightState ? 0.42
+                        : (brightnessModeMouse.containsMouse || brightnessControlMouse.containsMouse ? 0.43 : 0.34)
 
                     RowLayout {
                         anchors.fill: parent
@@ -1423,16 +1435,37 @@ PanelWindow {
                         anchors.rightMargin: 11
                         spacing: 8
 
+                        // Shared Brightness / Night Light button:
+                        //   left click  -> toggle Night Light itself
+                        //   right click -> switch the slider between brightness
+                        //                  and colour-temperature adjustment
                         Item {
+                            id: brightnessModeButton
                             Layout.preferredWidth: 20
                             Layout.preferredHeight: parent.height
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "󰃠"
+                                text: ncWindow.nightLightState ? "󰖔" : "󰃠"
                                 font.family: Theme.fontIcons
                                 font.pixelSize: 15
-                                color: Theme.white
+                                color: ncWindow.nightLightState ? "#ffd38a" : Theme.white
+                            }
+
+                            MouseArea {
+                                id: brightnessModeMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: Qt.PointingHandCursor
+
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        ncWindow.brightnessTemperatureMode = !ncWindow.brightnessTemperatureMode
+                                    } else if (mouse.button === Qt.LeftButton) {
+                                        ncWindow.toggleNightLightRequested()
+                                    }
+                                }
                             }
                         }
 
@@ -1440,6 +1473,12 @@ PanelWindow {
                             id: brightnessTrackHitbox
                             Layout.fillWidth: true
                             Layout.preferredHeight: parent.height
+
+                            readonly property real shownLevel:
+                                ncWindow.brightnessTemperatureMode
+                                ? Math.max(0.0, Math.min(1.0,
+                                      (ncWindow.nightLightTemperature - 2500) / 3500.0))
+                                : ncWindow.clamp01(ncWindow.brightnessLevel)
 
                             Rectangle {
                                 id: brightnessTrack
@@ -1453,8 +1492,8 @@ PanelWindow {
                                 Rectangle {
                                     height: parent.height
                                     radius: height / 2
-                                    width: parent.width * ncWindow.clamp01(ncWindow.brightnessLevel)
-                                    color: Theme.white
+                                    width: parent.width * brightnessTrackHitbox.shownLevel
+                                    color: ncWindow.brightnessTemperatureMode ? "#ffd38a" : Theme.white
 
                                     Behavior on width {
                                         enabled: !ncWindow.brightnessDragging
@@ -1473,35 +1512,50 @@ PanelWindow {
                                 cursorShape: Qt.PointingHandCursor
 
                                 onPressed: function(mouse) {
-                                    ncWindow.brightnessDragging = true
-                                    ncWindow.setBrightnessPreviewFromX(mouse.x, width)
-                                    ncWindow.applyBrightness()
+                                    if (ncWindow.brightnessTemperatureMode) {
+                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
+                                    } else {
+                                        ncWindow.brightnessDragging = true
+                                        ncWindow.setBrightnessPreviewFromX(mouse.x, width)
+                                        ncWindow.applyBrightness()
+                                    }
                                 }
 
                                 onPositionChanged: function(mouse) {
-                                    if (pressed)
+                                    if (!pressed)
+                                        return
+
+                                    if (ncWindow.brightnessTemperatureMode)
+                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
+                                    else
                                         ncWindow.setBrightnessPreviewFromX(mouse.x, width)
                                 }
 
                                 onReleased: {
-                                    ncWindow.applyBrightness()
-                                    ncWindow.brightnessDragging = false
+                                    if (!ncWindow.brightnessTemperatureMode) {
+                                        ncWindow.applyBrightness()
+                                        ncWindow.brightnessDragging = false
+                                    }
                                 }
 
                                 onCanceled: {
-                                    ncWindow.applyBrightness()
-                                    ncWindow.brightnessDragging = false
+                                    if (!ncWindow.brightnessTemperatureMode) {
+                                        ncWindow.applyBrightness()
+                                        ncWindow.brightnessDragging = false
+                                    }
                                 }
                             }
                         }
 
                         Text {
-                            text: Math.round(ncWindow.brightnessLevel * 100) + "%"
-                            color: Theme.white
+                            text: ncWindow.brightnessTemperatureMode
+                                  ? ncWindow.nightLightTemperature + "K"
+                                  : Math.round(ncWindow.brightnessLevel * 100) + "%"
+                            color: ncWindow.brightnessTemperatureMode ? "#ffd38a" : Theme.white
                             font.family: Theme.fontMain
                             font.pixelSize: 10
                             font.bold: true
-                            Layout.minimumWidth: 29
+                            Layout.minimumWidth: ncWindow.brightnessTemperatureMode ? 36 : 29
                             horizontalAlignment: Text.AlignRight
                         }
                     }
@@ -1606,163 +1660,50 @@ PanelWindow {
                         }
                     }
 
-                    // Night Light / blue-light filter. A secondary click or
-                    // long press expands this same pill in-place, keeping the
-                    // temperature control in the header instead of covering
-                    // the panel content.
+                    // Power Saver. Automatic policy remains owned by
+                    // ~/.config/hypr/scripts/power_mode.sh: unplugging enables
+                    // power-saver and plugging in restores balanced. This button
+                    // is only an on-battery manual override, so it is disabled on AC.
                     GlassSurface {
-                        id: nightLightButton
+                        id: powerSaverButton
 
                         anchors.left: focusButton.right
                         anchors.leftMargin: 8
                         anchors.verticalCenter: parent.verticalCenter
-                        width: ncWindow.nightLightTemperatureOpen ? 154 : 30
+                        width: 30
                         height: 30
                         glassRadius: 15
                         glassTint:
-                            ncWindow.nightLightState ? "#ffd38a" : Glass.tint
+                            ncWindow.powerSaverState && ncWindow.powerSaverAvailable
+                            ? "#2ecc71" : Glass.tint
                         glassOpacity:
-                            ncWindow.nightLightState ? 0.92
-                            : nightLightToggleMouse.containsMouse ? 0.46
+                            !ncWindow.powerSaverAvailable ? 0.16
+                            : ncWindow.powerSaverState ? 0.92
+                            : powerSaverMouse.containsMouse ? 0.46
                             : 0.34
                         showHighlight: false
-                        clip: true
+                        opacity: ncWindow.powerSaverAvailable ? 1.0 : 0.48
 
-                        Behavior on width {
-                            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                        Text {
+                            anchors.centerIn: parent
+                            // The leaf glyph has asymmetric side bearings, so a
+                            // tiny optical offset centers the visible shape.
+                            anchors.horizontalCenterOffset: 1.5
+                            text: "󰌪"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 15
+                            color:
+                                ncWindow.powerSaverState && ncWindow.powerSaverAvailable
+                                ? Theme.bg0 : Theme.white
                         }
 
-                        // The icon remains the normal left-click toggle.
-                        Item {
-                            id: nightLightToggleArea
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            width: 30
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: ncWindow.nightLightState ? "󰖔" : "󰖙"
-                                font.family: Theme.fontIcons
-                                font.pixelSize: 15
-                                color: ncWindow.nightLightState ? Theme.bg0 : Theme.white
-                            }
-
-                            MouseArea {
-                                id: nightLightToggleMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                cursorShape: Qt.PointingHandCursor
-                                property bool longPressHandled: false
-
-                                onPressed: longPressHandled = false
-
-                                onClicked: function(mouse) {
-                                    if (longPressHandled) {
-                                        longPressHandled = false
-                                        return
-                                    }
-
-                                    if (mouse.button === Qt.RightButton) {
-                                        ncWindow.nightLightTemperatureOpen =
-                                            !ncWindow.nightLightTemperatureOpen
-                                    } else {
-                                        ncWindow.toggleNightLightRequested()
-                                    }
-                                }
-
-                                onPressAndHold: {
-                                    longPressHandled = true
-                                    ncWindow.nightLightTemperatureOpen = true
-                                }
-                            }
-                        }
-
-                        // Inline temperature slider, only revealed as the pill
-                        // grows. Moving it still activates Night Light if needed.
-                        Item {
-                            anchors.left: nightLightToggleArea.right
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            visible: ncWindow.nightLightTemperatureOpen
-                            opacity: ncWindow.nightLightTemperatureOpen ? 1 : 0
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: 120 }
-                            }
-
-                            Item {
-                                id: inlineNightLightTrackHitbox
-                                anchors.left: parent.left
-                                anchors.leftMargin: 5
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 70
-                                height: 24
-
-                                Rectangle {
-                                    id: inlineNightLightTrack
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    height: 5
-                                    radius: height / 2
-                                    color: ncWindow.nightLightState
-                                        ? Qt.alpha(Theme.bg0, 0.25)
-                                        : Qt.alpha(Theme.white, 0.20)
-
-                                    Rectangle {
-                                        height: parent.height
-                                        radius: height / 2
-                                        width: parent.width *
-                                            ((ncWindow.nightLightTemperature - 2500) / 3500)
-                                        color: ncWindow.nightLightState
-                                            ? Qt.alpha(Theme.bg0, 0.72)
-                                            : "#ffd38a"
-                                    }
-
-                                    Rectangle {
-                                        width: 11
-                                        height: 11
-                                        radius: width / 2
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        color: ncWindow.nightLightState ? Theme.bg0 : Theme.white
-                                        x: Math.max(0, Math.min(parent.width - width,
-                                            parent.width *
-                                            ((ncWindow.nightLightTemperature - 2500) / 3500)
-                                            - width / 2))
-                                    }
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onPressed: function(mouse) {
-                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
-                                    }
-                                    onPositionChanged: function(mouse) {
-                                        if (pressed)
-                                            ncWindow.setNightLightTemperatureFromX(mouse.x, width)
-                                    }
-                                }
-                            }
-
-                            Text {
-                                anchors.left: inlineNightLightTrackHitbox.right
-                                anchors.leftMargin: 6
-                                anchors.right: parent.right
-                                anchors.rightMargin: 8
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: ncWindow.nightLightTemperature + "K"
-                                color: ncWindow.nightLightState ? Theme.bg0 : "#ffd38a"
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                                font.bold: true
-                                horizontalAlignment: Text.AlignRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
+                        MouseArea {
+                            id: powerSaverMouse
+                            anchors.fill: parent
+                            enabled: ncWindow.powerSaverAvailable
+                            hoverEnabled: enabled
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: ncWindow.togglePowerSaverRequested()
                         }
                     }
 

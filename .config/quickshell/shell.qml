@@ -63,6 +63,7 @@ ShellRoot {
     // Nuevos estados para el NotificationCenter
     property bool airplaneMode: false
     property bool caffeineMode: false
+    property bool onAcPower: false
     property bool nightLightMode: false
     property int nightLightTemperature: 4000
     property bool nightLightSetPending: false
@@ -206,6 +207,33 @@ ShellRoot {
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
+
+    // Manual Power Saver override. power_mode.sh still owns the automatic
+    // AC policy: battery -> power-saver, AC -> balanced. While on battery,
+    // this button may temporarily switch between those two profiles.
+    Process {
+        id: powerSaverProc
+        command: [
+            "bash", "-c",
+            "ac=0; " +
+            "for f in /sys/class/power_supply/AC*/online /sys/class/power_supply/ADP*/online; do " +
+            "  [ -r \"$f\" ] || continue; read -r v < \"$f\"; [ \"$v\" = 1 ] && ac=1 && break; " +
+            "done; " +
+            "if [ \"$ac\" = 1 ]; then echo ac; exit 0; fi; " +
+            "current=$(powerprofilesctl get 2>/dev/null || echo balanced); " +
+            "if [ \"$current\" = power-saver ]; then target=balanced; else target=power-saver; fi; " +
+            "if powerprofilesctl set \"$target\" >/dev/null 2>&1; then echo \"$target\"; else echo error; fi"
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                var value = data.trim()
+                if (value === "power-saver" || value === "balanced")
+                    root.perfMode = value
+                else if (value === "error")
+                    console.warn("Power Saver: could not change power profile")
+            }
+        }
+    }
 
     // Night Light: hyprsunset is Hyprland's native blue-light filter.
     // A tiny marker in /tmp keeps Quickshell's visual state across shell reloads.
@@ -522,6 +550,8 @@ ShellRoot {
         btState: root.btStat === "on"
         airplaneState: root.airplaneMode
         caffeineState: root.caffeineMode
+        powerSaverState: root.perfMode === "power-saver"
+        powerSaverAvailable: !root.onAcPower
         nightLightState: root.nightLightMode
         nightLightTemperature: root.nightLightTemperature
         
@@ -538,6 +568,10 @@ ShellRoot {
         onToggleCaffeineRequested: {
             caffeineProc.running = true
             root.caffeineMode = !root.caffeineMode
+        }
+        onTogglePowerSaverRequested: {
+            if (!root.onAcPower && !powerSaverProc.running)
+                powerSaverProc.running = true
         }
         onToggleNightLightRequested: {
             if (!nightLightProc.running)
@@ -561,7 +595,7 @@ ShellRoot {
         stdout: SplitParser {
             onRead: (data) => {
                 var fields = data.trim().split("|")
-                if (fields.length >= 15) {
+                if (fields.length >= 16) {
                     root.batCap = parseInt(fields[0]) || 0
                     root.batStat = fields[1].trim()
                     root.vol = parseInt(fields[2]) || 0
@@ -576,6 +610,7 @@ ShellRoot {
                     root.volDesc = fields[12].trim()
                     root.cpuUsage = parseInt(fields[13]) || 0
                     root.memUsage = parseInt(fields[14]) || 0
+                    root.onAcPower = (fields[15].trim() === "1")
                 }
             }
         }
@@ -1021,7 +1056,13 @@ ShellRoot {
                     }
 
                     AppTray { Layout.alignment: Qt.AlignVCenter }
-                    Battery { percentage: root.batCap; charging: (root.batStat === "Charging" || root.batStat === "Full") }
+                    Battery {
+                        percentage: root.batCap
+                        charging: (root.batStat === "Charging" || root.batStat === "Full")
+                        onAcPower: root.onAcPower
+                        batteryStatus: root.batStat
+                        powerSaverMode: root.perfMode === "power-saver"
+                    }
                     MouseArea {
                         width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
                         Notification { 
@@ -1427,6 +1468,9 @@ ShellRoot {
                 Battery {
                     percentage: root.batCap
                     charging: (root.batStat === "Charging" || root.batStat === "Full")
+                    onAcPower: root.onAcPower
+                    batteryStatus: root.batStat
+                    powerSaverMode: root.perfMode === "power-saver"
                 }
             }
         }
