@@ -41,10 +41,12 @@ if [ -n "$selected" ]; then
     # -q: Quiet mode
     wal -i "$WALL_DIR/$selected" -n -q
 
+    "$HOME/.config/hypr/scripts/apply_wal_border.sh"
+
     # --- SINCRONIZACIÓN CON HYPRLOCK ---
     mkdir -p "$HOME/.cache/hyprlock"
     rm -f "$HOME/.cache/hyprlock/current_wallpaper.png"
     cp "$WALL_DIR/$selected" "$HOME/.cache/hyprlock/current_wallpaper.png"
         
-    notify-send "System Updated" "Theme synced with: $selected" -i "$WALL_DIR/$selected"
+    # notify-send "System Updated" "Theme synced with: $selected" -i "$WALL_DIR/$selected"
 fi

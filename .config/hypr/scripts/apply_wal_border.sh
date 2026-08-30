@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 
-WAL_COLORS="$HOME/.cache/wal/colors.sh"
+WAL_JSON="$HOME/.cache/wal/colors.json"
 
-[ -f "$WAL_COLORS" ] || exit 0
+[ -f "$WAL_JSON" ] || exit 1
 
-# pywal may reference optional shell variables internally,
-# therefore we deliberately don't use `set -u` here.
-# shellcheck disable=SC1090
-source "$WAL_COLORS"
+readarray -t WAL_VALUES < <(
+    python3 - "$WAL_JSON" <<'PY'
+import json
+import sys
 
-color1_hex="${color1#\#}"
-color2_hex="${color2#\#}"
-background_hex="${background#\#}"
+with open(sys.argv[1], "r") as f:
+    data = json.load(f)
 
-hyprctl eval "
+colors = data["colors"]
+special = data["special"]
+
+print(colors["color1"].lstrip("#"))
+print(colors["color2"].lstrip("#"))
+print(special["background"].lstrip("#"))
+PY
+)
+
+color1_hex="${WAL_VALUES[0]}"
+color2_hex="${WAL_VALUES[1]}"
+background_hex="${WAL_VALUES[2]}"
+
+/usr/bin/hyprctl eval "
 hl.config({
     general = {
         col = {
@@ -28,4 +40,4 @@ hl.config({
         }
     }
 })
-" >/dev/null
+"

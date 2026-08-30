@@ -151,7 +151,7 @@ except:
         fi
         
         # 4. Inyectar los metadatos reales en el output para que el buscador de QML los lea
-        echo "${wall%.}|$cached_data|$img_path|echo '$img_path' > /tmp/current_wallpaper; awww img \"$img_path\" --transition-type center --transition-step 60 --transition-fps 120 --transition-duration 2 && wal -i \"$img_path\" -n -q && cp \"$img_path\" ~/.cache/hyprlock/current_wallpaper.png && notify-send 'Theme synced' -i \"$img_path\"|image"
+        echo "${wall%.}|$cached_data|$img_path|/home/javier/.config/hypr/scripts/set_wallpaper.sh \"$img_path\"|image"
     done
 
 # =================================================================
