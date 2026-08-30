@@ -68,13 +68,12 @@ Item {
             border.width: 1
             border.color: Qt.rgba(1, 1, 1, 0.55)
 
-            Item {
-                id: fillClip
+            Rectangle {
+                id: batteryFill
 
                 anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.margins: 2
+                anchors.leftMargin: 2
+                anchors.verticalCenter: parent.verticalCenter
 
                 width: Math.max(
                     0,
@@ -82,27 +81,24 @@ Item {
                         * batteryRoot.clampedPercentage / 100.0
                 )
 
-                clip: true
+                height: batteryBody.height - 4
+
+                // Mismo redondeo suave en ambos extremos
+                radius: 2.5
+
+                gradient: batteryRoot.charging
+                    ? chargingGradient
+                    : (
+                        batteryRoot.lowBattery
+                            ? lowBatteryGradient
+                            : normalGradient
+                    )
 
                 Behavior on width {
                     NumberAnimation {
                         duration: 300
                         easing.type: Easing.OutQuint
                     }
-                }
-
-                Rectangle {
-                    width: batteryBody.width - 4
-                    height: batteryBody.height - 4
-                    radius: 2.5
-
-                    gradient: batteryRoot.charging
-                        ? chargingGradient
-                        : (
-                            batteryRoot.lowBattery
-                                ? lowBatteryGradient
-                                : normalGradient
-                        )
                 }
             }
 
