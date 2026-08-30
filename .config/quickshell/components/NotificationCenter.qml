@@ -36,6 +36,9 @@ PanelWindow {
     property bool btState: false
     property bool airplaneState: false
     property bool caffeineState: false
+    property bool nightLightState: false
+    property int nightLightTemperature: 4000
+    property bool nightLightTemperatureOpen: false
 
     property ListModel modelData
 
@@ -47,6 +50,8 @@ PanelWindow {
     signal toggleBtRequested()
     signal toggleAirplaneRequested()
     signal toggleCaffeineRequested()
+    signal toggleNightLightRequested()
+    signal setNightLightTemperatureRequested(int temperature)
 
     // Se conserva por compatibilidad con shell.qml aunque esta primera
     // versión ya no muestra un botón de power.
@@ -107,6 +112,21 @@ PanelWindow {
     function execCmd(cmd) {
         ncCommand.command = ["bash", "-c", cmd]
         ncCommand.running = true
+    }
+
+    function setNightLightTemperatureFromX(x, width) {
+        if (width <= 0)
+            return
+
+        var ratio = Math.max(0, Math.min(1, x / width))
+        // 100 K steps keep dragging smooth without spawning excessive IPC calls.
+        var temperature = Math.round((2500 + ratio * 3500) / 100) * 100
+        temperature = Math.max(2500, Math.min(6000, temperature))
+
+        if (temperature !== ncWindow.nightLightTemperature) {
+            ncWindow.nightLightTemperature = temperature
+            ncWindow.setNightLightTemperatureRequested(temperature)
+        }
     }
 
     // -----------------------------------------------------------------
@@ -472,6 +492,9 @@ PanelWindow {
             closeTimer.stop()
             isReallyVisible = true
         } else {
+            // The temperature slider is transient UI: always collapse it as
+            // soon as the Notification Center begins closing.
+            nightLightTemperatureOpen = false
             closeTimer.start()
         }
     }
@@ -1583,6 +1606,166 @@ PanelWindow {
                         }
                     }
 
+                    // Night Light / blue-light filter. A secondary click or
+                    // long press expands this same pill in-place, keeping the
+                    // temperature control in the header instead of covering
+                    // the panel content.
+                    GlassSurface {
+                        id: nightLightButton
+
+                        anchors.left: focusButton.right
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: ncWindow.nightLightTemperatureOpen ? 154 : 30
+                        height: 30
+                        glassRadius: 15
+                        glassTint:
+                            ncWindow.nightLightState ? "#ffd38a" : Glass.tint
+                        glassOpacity:
+                            ncWindow.nightLightState ? 0.92
+                            : nightLightToggleMouse.containsMouse ? 0.46
+                            : 0.34
+                        showHighlight: false
+                        clip: true
+
+                        Behavior on width {
+                            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                        }
+
+                        // The icon remains the normal left-click toggle.
+                        Item {
+                            id: nightLightToggleArea
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: 30
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: ncWindow.nightLightState ? "󰖔" : "󰖙"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15
+                                color: ncWindow.nightLightState ? Theme.bg0 : Theme.white
+                            }
+
+                            MouseArea {
+                                id: nightLightToggleMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: Qt.PointingHandCursor
+                                property bool longPressHandled: false
+
+                                onPressed: longPressHandled = false
+
+                                onClicked: function(mouse) {
+                                    if (longPressHandled) {
+                                        longPressHandled = false
+                                        return
+                                    }
+
+                                    if (mouse.button === Qt.RightButton) {
+                                        ncWindow.nightLightTemperatureOpen =
+                                            !ncWindow.nightLightTemperatureOpen
+                                    } else {
+                                        ncWindow.toggleNightLightRequested()
+                                    }
+                                }
+
+                                onPressAndHold: {
+                                    longPressHandled = true
+                                    ncWindow.nightLightTemperatureOpen = true
+                                }
+                            }
+                        }
+
+                        // Inline temperature slider, only revealed as the pill
+                        // grows. Moving it still activates Night Light if needed.
+                        Item {
+                            anchors.left: nightLightToggleArea.right
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            visible: ncWindow.nightLightTemperatureOpen
+                            opacity: ncWindow.nightLightTemperatureOpen ? 1 : 0
+
+                            Behavior on opacity {
+                                NumberAnimation { duration: 120 }
+                            }
+
+                            Item {
+                                id: inlineNightLightTrackHitbox
+                                anchors.left: parent.left
+                                anchors.leftMargin: 5
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 70
+                                height: 24
+
+                                Rectangle {
+                                    id: inlineNightLightTrack
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: 5
+                                    radius: height / 2
+                                    color: ncWindow.nightLightState
+                                        ? Qt.alpha(Theme.bg0, 0.25)
+                                        : Qt.alpha(Theme.white, 0.20)
+
+                                    Rectangle {
+                                        height: parent.height
+                                        radius: height / 2
+                                        width: parent.width *
+                                            ((ncWindow.nightLightTemperature - 2500) / 3500)
+                                        color: ncWindow.nightLightState
+                                            ? Qt.alpha(Theme.bg0, 0.72)
+                                            : "#ffd38a"
+                                    }
+
+                                    Rectangle {
+                                        width: 11
+                                        height: 11
+                                        radius: width / 2
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: ncWindow.nightLightState ? Theme.bg0 : Theme.white
+                                        x: Math.max(0, Math.min(parent.width - width,
+                                            parent.width *
+                                            ((ncWindow.nightLightTemperature - 2500) / 3500)
+                                            - width / 2))
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onPressed: function(mouse) {
+                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
+                                    }
+                                    onPositionChanged: function(mouse) {
+                                        if (pressed)
+                                            ncWindow.setNightLightTemperatureFromX(mouse.x, width)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                anchors.left: inlineNightLightTrackHitbox.right
+                                anchors.leftMargin: 6
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: ncWindow.nightLightTemperature + "K"
+                                color: ncWindow.nightLightState ? Theme.bg0 : "#ffd38a"
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                font.bold: true
+                                horizontalAlignment: Text.AlignRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                    }
+
                     GlassSurface {
                         id: clearAllButton
 
@@ -1875,5 +2058,7 @@ PanelWindow {
                 }
             }
         }
+
+
     }
 }

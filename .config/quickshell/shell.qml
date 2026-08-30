@@ -63,6 +63,10 @@ ShellRoot {
     // Nuevos estados para el NotificationCenter
     property bool airplaneMode: false
     property bool caffeineMode: false
+    property bool nightLightMode: false
+    property int nightLightTemperature: 4000
+    property bool nightLightSetPending: false
+    property int nightLightPendingTemperature: 4000
 
     property bool isNotifOpen: false
     property string activeMenuTitle: ""
@@ -202,6 +206,117 @@ ShellRoot {
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
+
+    // Night Light: hyprsunset is Hyprland's native blue-light filter.
+    // A tiny marker in /tmp keeps Quickshell's visual state across shell reloads.
+    // No polling/timer is used: state only changes on startup or when clicked.
+    Process {
+        id: nightLightStateReader
+        running: true
+        command: [
+            "bash", "-c",
+            "temp=$(cat /tmp/qs_night_light_temperature 2>/dev/null || echo 4000); " +
+            "case $temp in ''|*[!0-9]*) temp=4000;; esac; " +
+            "if [ -f /tmp/qs_night_light ] && pgrep -x hyprsunset >/dev/null 2>&1; " +
+            "then state=1; else rm -f /tmp/qs_night_light; state=0; fi; " +
+            "echo \"$state;$temp\""
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                var fields = data.trim().split(";")
+                if (fields.length >= 1 && (fields[0] === "1" || fields[0] === "0"))
+                    root.nightLightMode = (fields[0] === "1")
+                if (fields.length >= 2) {
+                    var temperature = parseInt(fields[1])
+                    if (!isNaN(temperature))
+                        root.nightLightTemperature = Math.max(2500, Math.min(6000, temperature))
+                }
+            }
+        }
+    }
+
+    Process {
+        id: nightLightProc
+        command: [
+            "bash", "-c",
+            "if ! command -v hyprsunset >/dev/null 2>&1; then echo missing; exit 127; fi; " +
+            "if ! pgrep -x hyprsunset >/dev/null 2>&1; then " +
+            "  nohup hyprsunset >/dev/null 2>&1 & " +
+            "  for i in $(seq 1 20); do " +
+            "    hyprctl hyprsunset identity >/dev/null 2>&1 && break; " +
+            "    sleep 0.05; " +
+            "  done; " +
+            "fi; " +
+            "if [ -f /tmp/qs_night_light ]; then " +
+            "  if hyprctl hyprsunset identity >/dev/null 2>&1; then rm -f /tmp/qs_night_light; echo 0; else echo error; fi; " +
+            "else " +
+            "  if hyprctl hyprsunset temperature " + root.nightLightTemperature + " >/dev/null 2>&1; then " +
+            "    printf '%s' '" + root.nightLightTemperature + "' > /tmp/qs_night_light_temperature; touch /tmp/qs_night_light; echo 1; " +
+            "  else echo error; fi; " +
+            "fi"
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                var value = data.trim()
+                if (value === "1" || value === "0")
+                    root.nightLightMode = (value === "1")
+                else if (value === "missing")
+                    console.warn("Night Light: hyprsunset is not installed")
+                else if (value === "error")
+                    console.warn("Night Light: could not talk to hyprsunset")
+            }
+        }
+    }
+
+    function setNightLightTemperature(temperature) {
+        temperature = Math.max(2500, Math.min(6000, Math.round(temperature / 100) * 100))
+        root.nightLightTemperature = temperature
+        root.nightLightPendingTemperature = temperature
+
+        if (nightLightSetProc.running) {
+            root.nightLightSetPending = true
+            return
+        }
+
+        root.nightLightSetPending = false
+        nightLightSetProc.command = [
+            "bash", "-c",
+            "if ! command -v hyprsunset >/dev/null 2>&1; then echo missing; exit 127; fi; " +
+            "if ! pgrep -x hyprsunset >/dev/null 2>&1; then " +
+            "  nohup hyprsunset >/dev/null 2>&1 & " +
+            "  for i in $(seq 1 20); do hyprctl hyprsunset identity >/dev/null 2>&1 && break; sleep 0.05; done; " +
+            "fi; " +
+            "if hyprctl hyprsunset temperature " + temperature + " >/dev/null 2>&1; then " +
+            "  printf '%s' '" + temperature + "' > /tmp/qs_night_light_temperature; " +
+            "  touch /tmp/qs_night_light; echo ok; " +
+            "else echo error; fi"
+        ]
+        nightLightSetProc.running = true
+    }
+
+    Process {
+        id: nightLightSetProc
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var value = data.trim()
+                if (value === "ok")
+                    root.nightLightMode = true
+                else if (value === "missing")
+                    console.warn("Night Light: hyprsunset is not installed")
+                else if (value === "error")
+                    console.warn("Night Light: could not set temperature")
+            }
+        }
+
+        onRunningChanged: {
+            if (!running && root.nightLightSetPending) {
+                root.nightLightSetPending = false
+                root.setNightLightTemperature(root.nightLightPendingTemperature)
+            }
+        }
+    }
+
     Process { id: clipActionProc } // Para comandos del portapapeles
 
     // --- LECTOR DINÁMICO DE MÁRGENES DE HYPRLAND ---
@@ -407,6 +522,8 @@ ShellRoot {
         btState: root.btStat === "on"
         airplaneState: root.airplaneMode
         caffeineState: root.caffeineMode
+        nightLightState: root.nightLightMode
+        nightLightTemperature: root.nightLightTemperature
         
         onRequestClose: { root.isNotifOpen = false }
         onToggleDndRequested: { root.toggleDnd() }
@@ -421,6 +538,13 @@ ShellRoot {
         onToggleCaffeineRequested: {
             caffeineProc.running = true
             root.caffeineMode = !root.caffeineMode
+        }
+        onToggleNightLightRequested: {
+            if (!nightLightProc.running)
+                nightLightProc.running = true
+        }
+        onSetNightLightTemperatureRequested: function(temperature) {
+            root.setNightLightTemperature(temperature)
         }
         onPowerRequested: { console.log("Acción de power pulsada") }
     }
