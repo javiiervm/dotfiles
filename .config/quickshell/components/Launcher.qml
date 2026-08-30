@@ -1380,15 +1380,31 @@ PanelWindow {
                             anchors.centerIn: parent
                             spacing: 7
 
-                            Image {
+                            Item {
                                 width: 52
                                 height: 52
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                source: icon.startsWith("/")
-                                    ? "file://" + icon
-                                    : "image://icon/" + icon
-                                fillMode: Image.PreserveAspectFit
-                                asynchronous: true
+
+                                Image {
+                                    anchors.fill: parent
+                                    visible: icon !== "__qs_cleanup__"
+                                    source: visible
+                                        ? (icon.startsWith("/")
+                                            ? "file://" + icon
+                                            : "image://icon/" + icon)
+                                        : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    asynchronous: false
+                                }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: icon === "__qs_cleanup__"
+                                    text: ""
+                                    color: Theme.white
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 38
+                                }
                             }
 
                             Text {
@@ -1454,17 +1470,31 @@ PanelWindow {
                         anchors.centerIn: parent
                         spacing: 8
 
-                        Image {
+                        Item {
                             width: 56
                             height: 56
                             anchors.horizontalCenter: parent.horizontalCenter
 
-                            source: icon.startsWith("/")
-                                ? "file://" + icon
-                                : "image://icon/" + icon
+                            Image {
+                                anchors.fill: parent
+                                visible: icon !== "__qs_cleanup__"
+                                source: visible
+                                    ? (icon.startsWith("/")
+                                        ? "file://" + icon
+                                        : "image://icon/" + icon)
+                                    : ""
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: false
+                            }
 
-                            fillMode: Image.PreserveAspectFit
-                            asynchronous: true
+                            Text {
+                                anchors.centerIn: parent
+                                visible: icon === "__qs_cleanup__"
+                                text: ""
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 40
+                            }
                         }
 
                         Text {
@@ -1741,7 +1771,7 @@ PanelWindow {
 
     function recentItemByName(name) {
         if (name === "Cleanup")
-            return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "user-trash", exec: "qs_cleanup", type: "cmd" };
+            return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
 
         for (var i = 0; i < appsModel.count; i++) {
             var app = appsModel.get(i);
@@ -1872,7 +1902,7 @@ PanelWindow {
 
         // Acción interna del launcher; no depende de provider.sh y se mantiene junto
         // a las apps normales para que también pueda encontrarse buscando "cleanup".
-        var cleanupItem = { name: "Cleanup", comment: "Storage & cache cleanup", icon: "user-trash", exec: "qs_cleanup", type: "cmd" };
+        var cleanupItem = { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
         if (launcherWindow.currentMode === 0) {
             if (search === "" || cleanupItem.name.toLowerCase().includes(search) || cleanupItem.comment.toLowerCase().includes(search)) {
                 var cleanupScore = 0;
@@ -2037,11 +2067,11 @@ PanelWindow {
             return;
         }
 
-        // Normal applications/files: launch them without touching the pointer.
+        // Normal applications/files keep the existing launcher behaviour.
+        // Hyprland >= 0.55 requires Lua dispatcher syntax.
         // History was already updated/persisted by rememberRecent().
-        // The previous implementation explicitly dispatched cursor.move()
-        // after every launch, which warped the mouse to the top-left area.
-        var fullCmd = "(" + cleanCmd + " & disown)";
+        var fullCmd = "(" + cleanCmd + " & disown) && "
+                    + "hyprctl dispatch 'hl.dsp.cursor.move({ x = 50, y = 50 })'";
 
         execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
