@@ -176,14 +176,15 @@ WlSessionLock {
             // BATTERY
             // ========================================================
 
-            Row {
+            Item {
                 id: batteryIndicator
+
+                width: 46 * Theme.scale
+                height: 24 * Theme.scale
 
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: passField.bottom
                 anchors.topMargin: 16 * Theme.scale
-
-                spacing: 8 * Theme.scale
 
                 visible: UPower.displayDevice.ready
 
@@ -196,6 +197,9 @@ WlSessionLock {
                         )
                     )
 
+                readonly property int roundedPercentage:
+                    Math.round(percentage)
+
                 readonly property bool charging:
                     UPower.displayDevice.state
                         === UPowerDeviceState.Charging
@@ -203,122 +207,169 @@ WlSessionLock {
                         === UPowerDeviceState.PendingCharge
 
                 readonly property bool lowBattery:
-                    percentage <= 20
+                    percentage < 21
+
+                // ----------------------------------------------------
+                // FILL GRADIENTS
+                // ----------------------------------------------------
+
+                Gradient {
+                    id: normalBatteryGradient
+                    orientation: Gradient.Vertical
+
+                    GradientStop {
+                        position: 0.0
+                        color: "#ffffff"
+                    }
+
+                    GradientStop {
+                        position: 0.5
+                        color: "#c4c4c4"
+                    }
+
+                    GradientStop {
+                        position: 1.0
+                        color: "#bebebe"
+                    }
+                }
+
+                Gradient {
+                    id: chargingBatteryGradient
+                    orientation: Gradient.Vertical
+
+                    GradientStop {
+                        position: 0.0
+                        color: "#65efe8"
+                    }
+
+                    GradientStop {
+                        position: 0.5
+                        color: "#2ecc71"
+                    }
+
+                    GradientStop {
+                        position: 1.0
+                        color: "#22aa5e"
+                    }
+                }
+
+                Gradient {
+                    id: lowBatteryGradient
+                    orientation: Gradient.Vertical
+
+                    GradientStop {
+                        position: 0.0
+                        color: "#ff9d60"
+                    }
+
+                    GradientStop {
+                        position: 0.5
+                        color: "#f13857"
+                    }
+
+                    GradientStop {
+                        position: 1.0
+                        color: "#d12543"
+                    }
+                }
 
                 // ----------------------------------------------------
                 // BATTERY ICON
                 // ----------------------------------------------------
 
                 Item {
-                    width: 34 * Theme.scale
-                    height: 17 * Theme.scale
+                    id: batteryIcon
 
-                    anchors.verticalCenter: parent.verticalCenter
+                    width: 46 * Theme.scale
+                    height: 20 * Theme.scale
+                    anchors.centerIn: parent
 
                     Rectangle {
                         id: batteryBody
 
-                        width: 30 * Theme.scale
-                        height: 17 * Theme.scale
+                        width: 41 * Theme.scale
+                        height: 20 * Theme.scale
 
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
 
-                        radius: 5 * Theme.scale
+                        radius: 6 * Theme.scale
 
-                        color: Qt.alpha(
-                            Theme.white,
-                            0.18
-                        )
+                        // Same light, flat empty background as the bar icon.
+                        color: Qt.alpha(Theme.white, 0.42)
 
                         border.width: 1 * Theme.scale
-                        border.color: Qt.alpha(
-                            Theme.white,
-                            0.50
-                        )
+                        border.color: Qt.rgba(1, 1, 1, 0.55)
 
-                        // Battery fill clip
                         Item {
+                            id: fillClip
+
                             anchors.left: parent.left
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
-
                             anchors.margins: 2 * Theme.scale
 
                             width: Math.max(
                                 0,
-                                (parent.width - 4 * Theme.scale)
-                                    * batteryIndicator.percentage
-                                    / 100
+                                (batteryBody.width - 4 * Theme.scale)
+                                    * batteryIndicator.percentage / 100.0
                             )
 
                             clip: true
 
-                            Rectangle {
-                                width:
-                                    batteryBody.width
-                                    - 4 * Theme.scale
-
-                                height:
-                                    batteryBody.height
-                                    - 4 * Theme.scale
-
-                                radius: 3 * Theme.scale
-
-                                color:
-                                    batteryIndicator.charging
-                                        ? "#2ecc71"
-                                        : (
-                                            batteryIndicator.lowBattery
-                                                ? "#f13857"
-                                                : Theme.white
-                                        )
+                            Behavior on width {
+                                NumberAnimation {
+                                    duration: 300
+                                    easing.type: Easing.OutQuint
+                                }
                             }
+
+                            Rectangle {
+                                width: batteryBody.width - 4 * Theme.scale
+                                height: batteryBody.height - 4 * Theme.scale
+                                radius: 4 * Theme.scale
+
+                                gradient: batteryIndicator.charging
+                                    ? chargingBatteryGradient
+                                    : (
+                                        batteryIndicator.lowBattery
+                                            ? lowBatteryGradient
+                                            : normalBatteryGradient
+                                    )
+                            }
+                        }
+
+                        // Percentage inside the battery body.
+                        Text {
+                            width: parent.width
+                            height: parent.height
+                            x: 0
+                            y: 0.5 * Theme.scale
+
+                            text: batteryIndicator.roundedPercentage
+
+                            color: Theme.bg0
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12 * Theme.scale
+                            font.bold: true
+
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                     }
 
-                    // Battery terminal
+                    // Battery terminal.
                     Rectangle {
-                        width: 2 * Theme.scale
-                        height: 7 * Theme.scale
+                        width: 3 * Theme.scale
+                        height: 8 * Theme.scale
 
                         anchors.left: batteryBody.right
                         anchors.leftMargin: 1 * Theme.scale
                         anchors.verticalCenter: parent.verticalCenter
 
-                        radius: width / 2
-
-                        color: Qt.alpha(
-                            Theme.white,
-                            0.55
-                        )
+                        radius: 1.5 * Theme.scale
+                        color: Qt.alpha(Theme.white, 0.55)
                     }
-                }
-
-                // ----------------------------------------------------
-                // PERCENTAGE
-                // ----------------------------------------------------
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    text:
-                        Math.round(
-                            batteryIndicator.percentage
-                        ) + "%"
-
-                    color:
-                        batteryIndicator.charging
-                            ? "#65efe8"
-                            : (
-                                batteryIndicator.lowBattery
-                                    ? "#ff8b9c"
-                                    : Theme.white
-                            )
-
-                    font.family: Theme.fontMain
-                    font.pixelSize: 14 * Theme.scale
-                    font.weight: Font.Medium
                 }
             }
         }
