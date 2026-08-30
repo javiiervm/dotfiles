@@ -20,7 +20,8 @@ LOG="/tmp/set_wallpaper.log"
 
     # Cambiar visualmente el fondo
     awww img "$WALLPAPER" \
-        --transition-type center \
+        --transition-type random \
+        # --transition-type center \
         --transition-step 60 \
         --transition-fps 120 \
         --transition-duration 2
