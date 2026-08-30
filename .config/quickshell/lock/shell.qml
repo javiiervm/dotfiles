@@ -15,39 +15,45 @@ WlSessionLock {
         id: surface
 
         // ============================================================
-        // WALLPAPER
+        // WALLPAPER + BLUR
         // ============================================================
-
-        Image {
-            id: wall
+        //
+        // The blurred layer is deliberately rendered slightly larger
+        // than the screen. This gives the blur real image pixels to
+        // sample outside the visible area instead of sampling the edge
+        // of the texture, which was producing the bright/white halo
+        // around the lockscreen.
+        //
+        Item {
+            id: wallpaperLayer
 
             anchors.fill: parent
-            source: "file://"
-                    + Quickshell.env("HOME")
-                    + "/.cache/hyprlock/current_wallpaper.png"
+            clip: true
 
-            fillMode: Image.PreserveAspectCrop
+            Image {
+                id: wall
 
-            // MultiEffect renderiza la imagen final.
-            visible: false
-        }
+                anchors.fill: parent
+                anchors.margins: -80 * Theme.scale
 
-        // ============================================================
-        // WALLPAPER BLUR
-        // ============================================================
+                source: "file://"
+                        + Quickshell.env("HOME")
+                        + "/.cache/hyprlock/current_wallpaper.png"
 
-        MultiEffect {
-            anchors.fill: parent
-            source: wall
+                fillMode: Image.PreserveAspectCrop
 
-            blurEnabled: true
+                // MultiEffect renders the final image.
+                visible: false
+            }
 
-            // blur va de 0.0 a 1.0.
-            // 1.0 = intensidad máxima.
-            blur: 1.0
+            MultiEffect {
+                anchors.fill: wall
+                source: wall
 
-            // blurMax determina el radio/tamaño real del desenfoque.
-            blurMax: 64
+                blurEnabled: true
+                blur: 1.0
+                blurMax: 64
+            }
         }
 
         // ============================================================
