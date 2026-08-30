@@ -787,12 +787,20 @@ PanelWindow {
             onWheel: (wheel) => {
                 if (!islandWindow.isExpanded || wheelCooldown.running) return;
 
-                if (wheel.angleDelta.x < -40) {
-                    // Scroll circular hacia la derecha: 0 -> 1 -> 2 -> 0
+                // Touchpad: mantiene el gesto horizontal que ya existía.
+                // Ratón: añade la rueda vertical como segunda forma de navegar.
+                // Priorizamos el eje horizontal si ambos traen delta para no
+                // alterar el comportamiento actual del touchpad.
+                var delta = Math.abs(wheel.angleDelta.x) >= Math.abs(wheel.angleDelta.y)
+                            ? wheel.angleDelta.x
+                            : wheel.angleDelta.y;
+
+                if (delta < -40) {
+                    // Swipe izquierda / rueda arriba: 0 -> 1 -> 2 -> 0
                     currentTab = (currentTab + 1) % totalTabs;
                     wheelCooldown.restart();
-                } else if (wheel.angleDelta.x > 40) {
-                    // Scroll circular hacia la izquierda: 0 -> 2 -> 1 -> 0
+                } else if (delta > 40) {
+                    // Swipe derecha / rueda abajo: 0 -> 2 -> 1 -> 0
                     currentTab = (currentTab - 1 + totalTabs) % totalTabs;
                     wheelCooldown.restart();
                 }
