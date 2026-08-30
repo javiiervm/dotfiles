@@ -897,7 +897,6 @@ ShellRoot {
                     }
 
                     AppTray { Layout.alignment: Qt.AlignVCenter }
-
                     Battery { percentage: root.batCap; charging: (root.batStat === "Charging" || root.batStat === "Full") }
                     MouseArea {
                         width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
@@ -1184,6 +1183,12 @@ ShellRoot {
             onRead: (data) => {
                 var val = data.trim();
                 root.isFullscreen = (val === "1");
+
+                // Never carry a reveal state across fullscreen sessions.
+                if (!root.isFullscreen) {
+                    root.isTopHovered = false;
+                    topHideTimer.stop();
+                }
             }
         }
     }
@@ -1207,41 +1212,55 @@ ShellRoot {
             id: topTriggerArea
             anchors.fill: parent
             hoverEnabled: true
-            onEntered: { root.isTopHovered = true; topHideTimer.stop(); }
+            onEntered: {
+                root.isTopHovered = true
+                topHideTimer.stop()
+            }
             onExited: topHideTimer.start()
         }
     }
 
+    // One-shot debounce only used while the pointer travels between the
+    // invisible top trigger and the clock+battery pill. It does not poll.
     Timer {
         id: topHideTimer
-        interval: 350
+        interval: 180
+        repeat: false
         onTriggered: {
             if (!topTriggerArea.containsMouse && !fsGhostMouseArea.containsMouse) {
-                root.isTopHovered = false;
+                root.isTopHovered = false
             }
         }
     }
 
-    // --- ISLA FANTASMA: solo reloj + batería, no interactiva, visible en fullscreen ---
+    // --- WIDGET FULLSCREEN: solo reloj + batería ---
+    // It is a separate, non-expandable pill; the real Dynamic Island stays
+    // hidden in fullscreen through DynamicIsland.isFullscreen.
     PanelWindow {
         id: fullscreenGhostIsland
         screen: root.primaryUiScreen
-        anchors { top: true } // se centra horizontalmente sola, igual que la isla real
+        anchors { top: true }
 
         WlrLayershell.layer: WlrLayershell.Overlay
         exclusiveZone: 0
         color: "transparent"
-        visible: root.isFullscreen
+
+        // Important: do not keep the pill permanently mapped and merely move
+        // it above the screen. It exists visually only while the pointer is in
+        // the top-centre reveal area (or over the pill itself).
+        visible: root.isFullscreen && root.isTopHovered
 
         implicitWidth: fsGhostLayout.implicitWidth + 36
-        implicitHeight: 32 // misma altura que la isla real contraída
+        implicitHeight: 32
 
-        // Deslizamos TODA la ventana (no un transform interno) para que el
-        // input-region de la capa Wayland siempre coincida con lo visible.
-        // -38 es el mismo margen que usa DynamicIsland.qml en su estado de reposo,
-        // así que al bajar queda exactamente a la altura habitual de la isla real.
-        margins { top: root.isTopHovered ? -38 : -50 }
-        Behavior on margins.top { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
+        // Same resting position as the normal island. Keep the clamshell HDMI
+        // adjustment in sync with DynamicIsland.topMargin above.
+        margins {
+            top: root.primaryUiScreen
+                && root.primaryUiScreen.name === "HDMI-A-1"
+                ? -32
+                : -38
+        }
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? ghostBlurRegion : null
 
@@ -1256,13 +1275,15 @@ ShellRoot {
             anchors.fill: parent
             glassRadius: height / 2
 
-            // Solo mantiene la píldora visible mientras el ratón está sobre ella.
-            // Deliberadamente NO abre/expande nada al hacer hover.
+            // Hovering the pill keeps it visible, but never opens or expands it.
             MouseArea {
                 id: fsGhostMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
-                onEntered: { root.isTopHovered = true; topHideTimer.stop(); }
+                onEntered: {
+                    root.isTopHovered = true
+                    topHideTimer.stop()
+                }
                 onExited: topHideTimer.start()
             }
 
@@ -1287,7 +1308,10 @@ ShellRoot {
         }
 
         Timer {
-            interval: 2000; running: root.isFullscreen; repeat: true; triggeredOnStart: true
+            interval: 2000
+            running: root.isFullscreen && root.isTopHovered
+            repeat: true
+            triggeredOnStart: true
             onTriggered: {
                 var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
                 if (fsGhostClockText.text !== timeStr) fsGhostClockText.text = timeStr;
@@ -1497,7 +1521,6 @@ ShellRoot {
                         width: slideWindow.width * 4
                         height: slideWindow.height
                         x: -slideWindow.currentIndex * slideWindow.width
-
                         Behavior on x {
                             NumberAnimation { duration: 400; easing.type: Easing.OutQuart }
                         }
