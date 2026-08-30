@@ -3,6 +3,7 @@ import QtQuick.Effects
 import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Services.UPower
 import "modules" as Modules
 import "modules"
 
@@ -21,7 +22,6 @@ WlSessionLock {
             id: wall
 
             anchors.fill: parent
-
             source: "file://"
                     + Quickshell.env("HOME")
                     + "/.cache/hyprlock/current_wallpaper.png"
@@ -38,7 +38,6 @@ WlSessionLock {
 
         MultiEffect {
             anchors.fill: parent
-
             source: wall
 
             blurEnabled: true
@@ -48,16 +47,6 @@ WlSessionLock {
             blur: 1.0
 
             // blurMax determina el radio/tamaño real del desenfoque.
-            //
-            // Si quieres MÁS blur, cambia este valor.
-            // Por ejemplo:
-            //
-            // 32 -> suave
-            // 48 -> medio
-            // 64 -> fuerte
-            // 80 -> muy fuerte
-            //
-            // Empiezo con 48 para mantener el wallpaper reconocible.
             blurMax: 64
         }
 
@@ -69,9 +58,6 @@ WlSessionLock {
             anchors.fill: parent
 
             color: "black"
-
-            // Controla únicamente cuánto se oscurece el fondo,
-            // no cuánto se desenfoca.
             opacity: 0.32
         }
 
@@ -96,7 +82,7 @@ WlSessionLock {
             id: loginArea
 
             width: 360 * Theme.scale
-            height: 245 * Theme.scale
+            height: 290 * Theme.scale
 
             anchors.horizontalCenter: parent.horizontalCenter
 
@@ -119,7 +105,6 @@ WlSessionLock {
                 anchors.top: parent.top
 
                 color: Theme.bgGlass
-
                 border.width: 1
                 border.color: Qt.alpha(
                     Theme.white,
@@ -152,7 +137,6 @@ WlSessionLock {
                     id: avatarMask
 
                     anchors.fill: avatarImg
-
                     radius: width / 2
 
                     visible: false
@@ -187,22 +171,161 @@ WlSessionLock {
                     Qt.quit()
                 }
             }
+
+            // ========================================================
+            // BATTERY
+            // ========================================================
+
+            Row {
+                id: batteryIndicator
+
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: passField.bottom
+                anchors.topMargin: 16 * Theme.scale
+
+                spacing: 8 * Theme.scale
+
+                visible: UPower.displayDevice.ready
+
+                readonly property real percentage:
+                    Math.max(
+                        0,
+                        Math.min(
+                            100,
+                            UPower.displayDevice.percentage * 100
+                        )
+                    )
+
+                readonly property bool charging:
+                    UPower.displayDevice.state
+                        === UPowerDeviceState.Charging
+                    || UPower.displayDevice.state
+                        === UPowerDeviceState.PendingCharge
+
+                readonly property bool lowBattery:
+                    percentage <= 20
+
+                // ----------------------------------------------------
+                // BATTERY ICON
+                // ----------------------------------------------------
+
+                Item {
+                    width: 34 * Theme.scale
+                    height: 17 * Theme.scale
+
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Rectangle {
+                        id: batteryBody
+
+                        width: 30 * Theme.scale
+                        height: 17 * Theme.scale
+
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        radius: 5 * Theme.scale
+
+                        color: Qt.alpha(
+                            Theme.white,
+                            0.18
+                        )
+
+                        border.width: 1 * Theme.scale
+                        border.color: Qt.alpha(
+                            Theme.white,
+                            0.50
+                        )
+
+                        // Battery fill clip
+                        Item {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+
+                            anchors.margins: 2 * Theme.scale
+
+                            width: Math.max(
+                                0,
+                                (parent.width - 4 * Theme.scale)
+                                    * batteryIndicator.percentage
+                                    / 100
+                            )
+
+                            clip: true
+
+                            Rectangle {
+                                width:
+                                    batteryBody.width
+                                    - 4 * Theme.scale
+
+                                height:
+                                    batteryBody.height
+                                    - 4 * Theme.scale
+
+                                radius: 3 * Theme.scale
+
+                                color:
+                                    batteryIndicator.charging
+                                        ? "#2ecc71"
+                                        : (
+                                            batteryIndicator.lowBattery
+                                                ? "#f13857"
+                                                : Theme.white
+                                        )
+                            }
+                        }
+                    }
+
+                    // Battery terminal
+                    Rectangle {
+                        width: 2 * Theme.scale
+                        height: 7 * Theme.scale
+
+                        anchors.left: batteryBody.right
+                        anchors.leftMargin: 1 * Theme.scale
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        radius: width / 2
+
+                        color: Qt.alpha(
+                            Theme.white,
+                            0.55
+                        )
+                    }
+                }
+
+                // ----------------------------------------------------
+                // PERCENTAGE
+                // ----------------------------------------------------
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    text:
+                        Math.round(
+                            batteryIndicator.percentage
+                        ) + "%"
+
+                    color:
+                        batteryIndicator.charging
+                            ? "#65efe8"
+                            : (
+                                batteryIndicator.lowBattery
+                                    ? "#ff8b9c"
+                                    : Theme.white
+                            )
+
+                    font.family: Theme.fontMain
+                    font.pixelSize: 14 * Theme.scale
+                    font.weight: Font.Medium
+                }
+            }
         }
 
         // ============================================================
         // MEDIA PLAYER
         // ============================================================
-        //
-        // Centrado horizontalmente en la parte inferior de la pantalla.
-        //
-        // Antes:
-        //
-        // ┌──── media
-        //
-        // Ahora:
-        //
-        //                media
-        //
 
         Modules.MediaPlayerCard {
             id: mediaCard
