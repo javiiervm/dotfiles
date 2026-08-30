@@ -2070,8 +2070,7 @@ PanelWindow {
         // Normal applications/files keep the existing launcher behaviour.
         // Hyprland >= 0.55 requires Lua dispatcher syntax.
         // History was already updated/persisted by rememberRecent().
-        var fullCmd = "(" + cleanCmd + " & disown) && "
-                    + "hyprctl dispatch 'hl.dsp.cursor.move({ x = 50, y = 50 })'";
+        var fullCmd = "(" + cleanCmd + " & disown)";
 
         execProc.command = ["bash", "-c", fullCmd];
         execProc.running = true;
