@@ -8,7 +8,10 @@ The goal is simple: keep everything I use every day integrated into a fast, mini
 
 ## Preview
 
+### Screenshot
 <img width="2560" height="1600" alt="image" src="https://github.com/user-attachments/assets/6ad427f8-9e63-4fbc-bce2-eb3e819e0bbc" />
+
+### Demo
 
 ## Features
 
