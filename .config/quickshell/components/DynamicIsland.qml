@@ -57,6 +57,155 @@ PanelWindow {
         triggerTextNotification(icon, text, color);
     }
 
+    // =========================================================
+    // SCREEN RECORDING LIVE ACTIVITY
+    // =========================================================
+    // State changes arrive through a FIFO. There is no status polling loop:
+    // the only 1 s Timer below exists while a recording is actually running,
+    // solely to render the elapsed time.
+    property string recordingStatus: "idle"   // idle | starting | running | paused | finalizing
+    property int recordingElapsed: 0
+    property string recordingOutput: ""
+    property string recordingAudio: "none"
+    property string recordingCapture: "screen"
+    // If a backend event arrives while the status Process is still reading the
+    // previous one, remember it instead of dropping it. This is especially
+    // important when finalization is very fast: "finalizing" and "finished"
+    // can be emitted almost back-to-back.
+    property bool recordingRefreshPending: false
+    // While recording, hovering the clock area should open the island, but the
+    // control buttons themselves should stay clickable without expanding it.
+    // We therefore arm expansion only when the dedicated clock hotspot is
+    // hovered, and keep it open until the pointer leaves the island.
+    property bool recordingHoverExpandArmed: false
+    readonly property bool recordingActivityActive:
+        recordingStatus === "starting"
+        || recordingStatus === "running"
+        || recordingStatus === "paused"
+        || recordingStatus === "finalizing"
+
+    onRecordingStatusChanged: {
+        if (!recordingActivityActive)
+            recordingHoverExpandArmed = false
+    }
+
+    function formatRecordingTime(seconds) {
+        var value = Math.max(0, Math.floor(seconds || 0));
+        var hours = Math.floor(value / 3600);
+        var minutes = Math.floor((value % 3600) / 60);
+        var secs = value % 60;
+        var mm = (minutes < 10 ? "0" : "") + minutes;
+        var ss = (secs < 10 ? "0" : "") + secs;
+        return hours > 0 ? hours + ":" + mm + ":" + ss : mm + ":" + ss;
+    }
+
+    Process {
+        id: recordingEventProc
+        running: true
+        command: [
+            "bash", "-c",
+            "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs-screenrec-events\"; " +
+            "rm -f \"$F\"; mkfifo \"$F\"; " +
+            "printf 'refresh\\n'; " +
+            "trap 'rm -f \"$F\"' EXIT; " +
+            "while IFS= read -r line < \"$F\"; do printf '%s\\n' \"${line:-refresh}\"; done"
+        ]
+        stdout: SplitParser {
+            onRead: function(line) {
+                if (line.trim() !== "")
+                    islandWindow.refreshRecordingState();
+            }
+        }
+    }
+
+    Process {
+        id: recordingStatusProc
+        property string output: ""
+        stdout: SplitParser {
+            onRead: function(line) {
+                if (line && line.trim() !== "")
+                    recordingStatusProc.output += line;
+            }
+        }
+        onExited: function(exitCode) {
+            if (exitCode === 0 && recordingStatusProc.output !== "") {
+                try {
+                    var data = JSON.parse(recordingStatusProc.output);
+                    islandWindow.recordingStatus = data.status || "idle";
+                    islandWindow.recordingElapsed = data.elapsed || 0;
+                    islandWindow.recordingOutput = data.output || "";
+                    islandWindow.recordingAudio = data.audio || "none";
+                    islandWindow.recordingCapture = data.capture || "screen";
+
+                    if (islandWindow.recordingStatus === "finished") {
+                        islandWindow.recordingStatus = "idle";
+                        islandWindow.triggerTextNotification("󰻃", "Recording saved", "#ff453a");
+                        recordingClearProc.command = [
+                            "/home/javier/.config/quickshell/scripts/screen_record.sh", "clear"
+                        ];
+                        recordingClearProc.running = true;
+                    }
+                } catch (e) {
+                    console.warn("DynamicIsland: recording state parse error:", e);
+                }
+            }
+
+            // Coalesce events instead of losing them. A finished event can arrive
+            // while this Process is still handling the preceding finalizing event.
+            if (islandWindow.recordingRefreshPending) {
+                islandWindow.recordingRefreshPending = false;
+                Qt.callLater(islandWindow.refreshRecordingState);
+            }
+        }
+    }
+
+    Process { id: recordingActionProc }
+    Process { id: recordingClearProc }
+
+    function refreshRecordingState() {
+        if (recordingStatusProc.running) {
+            recordingRefreshPending = true;
+            return;
+        }
+        recordingRefreshPending = false;
+        recordingStatusProc.output = "";
+        recordingStatusProc.command = [
+            "/home/javier/.config/quickshell/scripts/screen_record.sh", "status"
+        ];
+        recordingStatusProc.running = true;
+    }
+
+    function toggleRecordingPause() {
+        if (recordingStatus !== "running" && recordingStatus !== "paused")
+            return;
+        recordingActionProc.running = false;
+        recordingActionProc.command = [
+            "/home/javier/.config/quickshell/scripts/screen_record.sh",
+            recordingStatus === "running" ? "pause" : "resume"
+        ];
+        recordingActionProc.running = true;
+    }
+
+    function stopRecording() {
+        if (recordingStatus !== "running" && recordingStatus !== "paused")
+            return;
+        // Stop/finalize can take a moment when several paused segments need
+        // concatenating, so detach it and let FIFO events drive the UI.
+        recordingActionProc.running = false;
+        recordingActionProc.command = [
+            "/home/javier/.config/quickshell/scripts/screen_record.sh", "stop"
+        ];
+        recordingActionProc.startDetached();
+    }
+
+    Timer {
+        id: recordingElapsedTimer
+        interval: 1000
+        repeat: true
+        running: islandWindow.recordingStatus === "running"
+        onTriggered: islandWindow.recordingElapsed += 1
+    }
+
     // --- MUSIC PROPERTIES ---
     property var playerList: (Mpris.players && Mpris.players.values) ? Mpris.players.values : []
     property var blacklist: ["firefox", "chromium", "brave", "mpv", "playerctl", "kdeconnect"]
@@ -174,6 +323,10 @@ PanelWindow {
         }
         if (isNotifying) {
             return notifyText !== "" ? 300 : 220; 
+        }
+        if (recordingActivityActive) {
+            if (recordingStatus === "running" || recordingStatus === "paused") return 238;
+            return 190;
         }
         // La reproducción musical ya no necesita ensanchar la isla:
         // la mini-onda vive dentro del ancho normal del reloj.
@@ -726,7 +879,12 @@ PanelWindow {
     property string altAlertColor: (isOverheating && isOverloaded) ? colorLoad : (baseAlertColor !== "transparent" ? Qt.alpha(baseAlertColor, 0.2) : "transparent")
 
     // --- STATES AND SIZES ---
-    property bool isExpanded: hoverArea.containsMouse || islandWindow.isUserSeeking
+    // Normal behaviour: hovering the island expands it. While a screen
+    // recording live activity is shown, the pause/stop controls must remain
+    // easy to click, so expansion is only armed by hovering the clock area.
+    property bool isExpanded: islandWindow.isUserSeeking
+                              || (!islandWindow.recordingActivityActive && hoverArea.containsMouse)
+                              || (islandWindow.recordingActivityActive && islandWindow.recordingHoverExpandArmed)
 
     // --- VISUAL PILL ---
     GlassSurface {
@@ -781,6 +939,11 @@ PanelWindow {
             id: hoverArea
             anchors.fill: parent
             hoverEnabled: true
+
+            onExited: {
+                if (islandWindow.recordingActivityActive && !islandWindow.isUserSeeking)
+                    islandWindow.recordingHoverExpandArmed = false
+            }
             
             Timer { id: wheelCooldown; interval: 400 }
             
@@ -807,6 +970,31 @@ PanelWindow {
             }
         }
 
+        // Persistent clock hover hotspot used only while recording. It stays
+        // alive even when the compact recording row becomes invisible during
+        // expansion, so every leave/re-enter cycle reliably arms expansion.
+        // Its scene position is kept fixed relative to the island center even
+        // while visualBg changes width.
+        Item {
+            id: recordingExpansionHotspot
+            visible: islandWindow.recordingActivityActive
+                     && (islandWindow.recordingStatus === "running"
+                         || islandWindow.recordingStatus === "paused")
+            x: (parent.width / 2) + 46
+            y: 0
+            width: 72
+            height: 32
+            z: 1200
+
+            HoverHandler {
+                id: recordingClockHoverHandler
+                onHoveredChanged: {
+                    if (hovered)
+                        islandWindow.recordingHoverExpandArmed = true
+                }
+            }
+        }
+
         // ── COLLAPSED STATE: CLOCK & PASSIVE OSD ──
         Item {
             anchors.top: parent.top
@@ -814,7 +1002,7 @@ PanelWindow {
             width: parent.width
             height: 32
 
-            visible: !islandWindow.isExpanded && !islandWindow.isNotifying
+            visible: !islandWindow.isExpanded && !islandWindow.isNotifying && !islandWindow.recordingActivityActive
             opacity: (!visualBg.isAnimating && visible) ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150 } }
 
@@ -1227,6 +1415,151 @@ PanelWindow {
                 onTriggered: {
                     var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
                     if (customClock.text !== timeStr) customClock.text = timeStr;
+                }
+            }
+        }
+
+        // ── COLLAPSED STATE: SCREEN RECORDING LIVE ACTIVITY ──
+        Item {
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
+            height: 32
+
+            visible: !islandWindow.isExpanded
+                     && !islandWindow.isNotifying
+                     && islandWindow.recordingActivityActive
+            opacity: (!visualBg.isAnimating && visible) ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                spacing: 0
+
+                Row {
+                    id: recordingActivityRow
+                    spacing: 8
+                    Layout.alignment: Qt.AlignVCenter
+
+                    Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: islandWindow.recordingStatus === "paused"
+                               ? Qt.alpha("#ff453a", 0.45)
+                               : "#ff453a"
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        SequentialAnimation on opacity {
+                            running: islandWindow.recordingStatus === "running"
+                            loops: Animation.Infinite
+                            NumberAnimation { to: 0.35; duration: 700 }
+                            NumberAnimation { to: 1.0; duration: 700 }
+                        }
+                    }
+
+                    Text {
+                        id: recordingStatusText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: {
+                            if (islandWindow.recordingStatus === "starting") return "Select capture";
+                            if (islandWindow.recordingStatus === "finalizing") return "Saving…";
+                            return islandWindow.formatRecordingTime(islandWindow.recordingElapsed);
+                        }
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+
+                    Row {
+                        id: recordingButtonsRow
+                        visible: islandWindow.recordingStatus === "running" || islandWindow.recordingStatus === "paused"
+                        spacing: 5
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Rectangle {
+                            visible: parent.visible
+                            width: 22
+                            height: 22
+                            radius: 11
+                            color: recordingPauseMouse.containsMouse
+                                   ? Qt.alpha(Theme.white, 0.18)
+                                   : Qt.alpha(Theme.white, 0.09)
+                            border.color: Qt.alpha(Theme.white, 0.12)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: islandWindow.recordingStatus === "paused" ? "" : ""
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 10
+                            }
+
+                            MouseArea {
+                                id: recordingPauseMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: islandWindow.toggleRecordingPause()
+                            }
+                        }
+
+                        Rectangle {
+                            visible: parent.visible
+                            width: 22
+                            height: 22
+                            radius: 11
+                            color: recordingStopMouse.containsMouse
+                                   ? Qt.alpha("#ff453a", 0.28)
+                                   : Qt.alpha("#ff453a", 0.14)
+                            border.color: Qt.alpha("#ff453a", 0.50)
+                            border.width: 1
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 7
+                                height: 7
+                                radius: 2
+                                color: "#ff453a"
+                            }
+
+                            MouseArea {
+                                id: recordingStopMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: islandWindow.stopRecording()
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: (islandWindow.recordingStatus === "running" || islandWindow.recordingStatus === "paused") ? 18 : 0
+                }
+
+                Item {
+                    id: recordingClockHotspot
+                    visible: islandWindow.recordingStatus === "running" || islandWindow.recordingStatus === "paused"
+                    Layout.alignment: Qt.AlignVCenter
+                    implicitWidth: recordingClockText.implicitWidth + 10
+                    implicitHeight: parent.height
+
+                    Text {
+                        id: recordingClockText
+                        anchors.centerIn: parent
+                        text: customClock.text
+                        color: Qt.alpha(Theme.white, 0.62)
+                        font.family: Theme.fontMain
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+
                 }
             }
         }

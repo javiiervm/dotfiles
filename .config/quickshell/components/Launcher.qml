@@ -14,7 +14,7 @@ PanelWindow {
     property bool isReallyVisible: false
     property string calcResult: "" 
     
-    // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup
+    // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording
     property int currentMode: 0 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
@@ -38,6 +38,17 @@ PanelWindow {
     // 0 = Cancel, 1 = Clear cache
     property int cleanupConfirmSelection: 0
     property bool recentKeyboardActive: false
+
+    // Screen recorder configuration. Recording itself is owned by
+    // scripts/screen_record.sh so it survives the Launcher closing.
+    property string recordingCapture: "screen"   // screen | area
+    property string recordingAudio: "none"       // none | system | mic | both
+    // Keyboard focus inside the recording panel:
+    // 0 Screen, 1 Area, 2 No audio, 3 System, 4 Microphone, 5 Both, 6 Start.
+    // The Back button uses activeHeaderButton === 1, like the other Launcher submenus.
+    property int recordingSelection: 0
+    property string pendingRecordingCapture: ""
+    property string pendingRecordingAudio: ""
 
     // System actions are queued until the Launcher has fully released
     // its layer-shell surface / keyboard focus.
@@ -110,6 +121,7 @@ PanelWindow {
             launcherWindow.cleanupConfirmVisible = false;
             launcherWindow.cleanupSelection = 1;
             launcherWindow.cleanupConfirmSelection = 0;
+            launcherWindow.recordingSelection = 0;
             searchInput.text = "";
             searchInput.echoMode = TextInput.Normal;
         }
@@ -141,6 +153,26 @@ PanelWindow {
                 return;
             }
 
+            execProc.startDetached();
+        }
+    }
+
+    Timer {
+        id: recordingStartTimer
+        interval: 420
+        repeat: false
+        onTriggered: {
+            var capture = launcherWindow.pendingRecordingCapture;
+            var audio = launcherWindow.pendingRecordingAudio;
+            launcherWindow.pendingRecordingCapture = "";
+            launcherWindow.pendingRecordingAudio = "";
+            if (capture === "" || audio === "") return;
+
+            execProc.running = false;
+            execProc.command = [
+                "/home/javier/.config/quickshell/scripts/screen_record.sh",
+                "start", capture, audio
+            ];
             execProc.startDetached();
         }
     }
@@ -302,7 +334,7 @@ PanelWindow {
         id: mainCard
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
-            if (launcherWindow.currentMode === 10) return 620;
+            if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11) return 620;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -557,6 +589,110 @@ PanelWindow {
 
                             Keys.onPressed: (event) => {
 
+                                // Screen Recording has full keyboard navigation.
+                                // Arrow keys follow the visual 2-column layout, Enter/Space
+                                // selects the focused option, and Esc/Backspace returns.
+                                if (launcherWindow.currentMode === 11) {
+                                    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+                                        launcherWindow.currentMode = 0
+                                        launcherWindow.activeHeaderButton = 0
+                                        launcherWindow.recordingSelection = 0
+                                        searchInput.text = ""
+                                        showApps()
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Up) {
+                                        if (launcherWindow.activeHeaderButton === 1) {
+                                            // Already on Back.
+                                        } else if (launcherWindow.recordingSelection <= 1) {
+                                            launcherWindow.activeHeaderButton = 1
+                                        } else if (launcherWindow.recordingSelection <= 5) {
+                                            launcherWindow.recordingSelection -= 2
+                                        } else {
+                                            // From Start, return to the currently selected audio option.
+                                            if (launcherWindow.recordingAudio === "system")
+                                                launcherWindow.recordingSelection = 3
+                                            else if (launcherWindow.recordingAudio === "mic")
+                                                launcherWindow.recordingSelection = 4
+                                            else if (launcherWindow.recordingAudio === "both")
+                                                launcherWindow.recordingSelection = 5
+                                            else
+                                                launcherWindow.recordingSelection = 2
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Down) {
+                                        if (launcherWindow.activeHeaderButton === 1) {
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.recordingSelection =
+                                                launcherWindow.recordingCapture === "area" ? 1 : 0
+                                        } else if (launcherWindow.recordingSelection <= 1) {
+                                            launcherWindow.recordingSelection += 2
+                                        } else if (launcherWindow.recordingSelection <= 3) {
+                                            launcherWindow.recordingSelection += 2
+                                        } else if (launcherWindow.recordingSelection <= 5) {
+                                            launcherWindow.recordingSelection = 6
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                                        if (launcherWindow.activeHeaderButton !== 1) {
+                                            var sel = launcherWindow.recordingSelection
+                                            if (sel === 0 || sel === 1)
+                                                launcherWindow.recordingSelection = sel === 0 ? 1 : 0
+                                            else if (sel === 2 || sel === 3)
+                                                launcherWindow.recordingSelection = sel === 2 ? 3 : 2
+                                            else if (sel === 4 || sel === 5)
+                                                launcherWindow.recordingSelection = sel === 4 ? 5 : 4
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                            || event.key === Qt.Key_Space) {
+                                        if (launcherWindow.activeHeaderButton === 1) {
+                                            launcherWindow.currentMode = 0
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.recordingSelection = 0
+                                            searchInput.text = ""
+                                            showApps()
+                                        } else {
+                                            switch (launcherWindow.recordingSelection) {
+                                            case 0:
+                                                launcherWindow.recordingCapture = "screen"
+                                                break
+                                            case 1:
+                                                launcherWindow.recordingCapture = "area"
+                                                break
+                                            case 2:
+                                                launcherWindow.recordingAudio = "none"
+                                                break
+                                            case 3:
+                                                launcherWindow.recordingAudio = "system"
+                                                break
+                                            case 4:
+                                                launcherWindow.recordingAudio = "mic"
+                                                break
+                                            case 5:
+                                                launcherWindow.recordingAudio = "both"
+                                                break
+                                            case 6:
+                                                startScreenRecording()
+                                                break
+                                            }
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+                                }
+
                                 // Cleanup has its own keyboard navigation.
                                 if (launcherWindow.currentMode === 10) {
                                     // Confirmation dialog: Left/Right chooses, Enter confirms, Esc cancels.
@@ -657,7 +793,7 @@ PanelWindow {
                                 if (event.key === Qt.Key_Backspace && searchInput.text === "") {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
-                                    } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6 || launcherWindow.currentMode === 10) {
+                                    } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11) {
                                         launcherWindow.currentMode = 0; launcherWindow.activeHeaderButton = 0; showApps();
                                     }
                                     event.accepted = true;
@@ -896,7 +1032,7 @@ PanelWindow {
                 // C) CONTROLES DE SISTEMA Y ARCHIVOS (Modos 1 y 4)
                 Item {
                     width: parent.width; height: parent.height
-                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10
+                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11
 
                     Rectangle {
                         id: backBtnSys
@@ -906,18 +1042,31 @@ PanelWindow {
                         border.width: 1
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.white; font.pixelSize: 16 }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onEntered: { if (launcherWindow.currentMode === 10) launcherWindow.cleanupSelection = 0 }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onEntered: {
+                                if (launcherWindow.currentMode === 10)
+                                    launcherWindow.cleanupSelection = 0
+                                if (launcherWindow.currentMode === 11)
+                                    launcherWindow.activeHeaderButton = 1
+                            }
                             onClicked: {
                                 launcherWindow.currentMode = 0;
                                 launcherWindow.activeHeaderButton = 0;
                                 launcherWindow.cleanupSelection = 1;
+                                launcherWindow.recordingSelection = 0;
                                 searchInput.text = "";
                                 showApps();
-                            } }
+                            }
+                        }
                     }
 
                     Text {
-                        text: launcherWindow.currentMode === 1 ? "File Search Results" : (launcherWindow.currentMode === 10 ? "Cleanup" : "System Options")
+                        text: launcherWindow.currentMode === 1 ? "File Search Results"
+                            : (launcherWindow.currentMode === 10 ? "Cleanup"
+                            : (launcherWindow.currentMode === 11 ? "Screen Recording" : "System Options"))
                         color: Theme.white; font.pixelSize: 16; font.bold: true
                         anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1318,7 +1467,230 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 3. APLICACIONES (Modo 0)
+            // 3. SCREEN RECORDING (Modo 11)
+            // ------------------------------------------
+            Column {
+                id: recordingPanel
+                width: parent.width
+                spacing: 14
+                visible: launcherWindow.currentMode === 11
+
+                Text {
+                    width: parent.width
+                    text: "Choose what to capture and which audio sources to include. After Start, the Launcher closes and slurp lets you select the monitor or area."
+                    color: Qt.alpha(Theme.white, 0.60)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 116
+                    radius: 18
+                    color: Qt.alpha(Theme.white, 0.06)
+                    border.color: Qt.alpha(Theme.white, 0.12)
+                    border.width: 1
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+
+                        Text {
+                            text: "Capture"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 12
+
+                            Repeater {
+                                model: [
+                                    { key: "screen", icon: "󰍹", title: "Screen", subtitle: "Choose a monitor" },
+                                    { key: "area", icon: "󰒉", title: "Area", subtitle: "Draw a region" }
+                                ]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    required property int index
+                                    readonly property bool keyboardFocused:
+                                        launcherWindow.activeHeaderButton === 0
+                                        && launcherWindow.recordingSelection === index
+                                    width: (recordingPanel.width - 32 - 12) / 2
+                                    height: 58
+                                    radius: 14
+                                    color: launcherWindow.recordingCapture === modelData.key
+                                           ? Qt.alpha(Theme.white, 0.16)
+                                           : (keyboardFocused ? Qt.alpha(Theme.white, 0.10) : Qt.alpha(Theme.white, 0.06))
+                                    border.color: keyboardFocused
+                                                  ? Theme.blue
+                                                  : (launcherWindow.recordingCapture === modelData.key
+                                                     ? Theme.white
+                                                     : Qt.alpha(Theme.white, 0.10))
+                                    border.width: keyboardFocused ? 2 : (launcherWindow.recordingCapture === modelData.key ? 1.5 : 1)
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.margins: 12
+                                        spacing: 10
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.icon
+                                            font.family: Theme.fontIcons
+                                            font.pixelSize: 20
+                                            color: Theme.white
+                                        }
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 2
+                                            Text { text: modelData.title; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                                            Text { text: modelData.subtitle; color: Qt.alpha(Theme.white, 0.48); font.family: Theme.fontMain; font.pixelSize: 10 }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onEntered: {
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.recordingSelection = index
+                                        }
+                                        onClicked: launcherWindow.recordingCapture = modelData.key
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 184
+                    radius: 18
+                    color: Qt.alpha(Theme.white, 0.06)
+                    border.color: Qt.alpha(Theme.white, 0.12)
+                    border.width: 1
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+
+                        Text {
+                            text: "Audio"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Grid {
+                            width: parent.width
+                            columns: 2
+                            rowSpacing: 10
+                            columnSpacing: 12
+
+                            Repeater {
+                                model: [
+                                    { key: "none", icon: "󰖁", title: "No audio", subtitle: "Video only" },
+                                    { key: "system", icon: "󰕾", title: "System", subtitle: "Desktop audio" },
+                                    { key: "mic", icon: "󰍬", title: "Microphone", subtitle: "Default input" },
+                                    { key: "both", icon: "󰕾", title: "System + mic", subtitle: "Mixed automatically" }
+                                ]
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    required property int index
+                                    readonly property bool keyboardFocused:
+                                        launcherWindow.activeHeaderButton === 0
+                                        && launcherWindow.recordingSelection === index + 2
+                                    width: (recordingPanel.width - 32 - 12) / 2
+                                    height: 58
+                                    radius: 14
+                                    color: launcherWindow.recordingAudio === modelData.key
+                                           ? Qt.alpha(Theme.white, 0.16)
+                                           : (keyboardFocused ? Qt.alpha(Theme.white, 0.10) : Qt.alpha(Theme.white, 0.06))
+                                    border.color: keyboardFocused
+                                                  ? Theme.blue
+                                                  : (launcherWindow.recordingAudio === modelData.key
+                                                     ? Theme.white
+                                                     : Qt.alpha(Theme.white, 0.10))
+                                    border.width: keyboardFocused ? 2 : (launcherWindow.recordingAudio === modelData.key ? 1.5 : 1)
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.margins: 12
+                                        spacing: 10
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.icon
+                                            font.family: Theme.fontIcons
+                                            font.pixelSize: 19
+                                            color: Theme.white
+                                        }
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 2
+                                            Text { text: modelData.title; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                                            Text { text: modelData.subtitle; color: Qt.alpha(Theme.white, 0.48); font.family: Theme.fontMain; font.pixelSize: 10 }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onEntered: {
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.recordingSelection = index + 2
+                                        }
+                                        onClicked: launcherWindow.recordingAudio = modelData.key
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 46
+                    radius: 15
+                    color: startRecordingMouse.containsMouse ? Qt.alpha(Theme.white, 0.88) : Theme.white
+                    border.color: launcherWindow.activeHeaderButton === 0
+                                      && launcherWindow.recordingSelection === 6
+                                  ? Theme.blue : "transparent"
+                    border.width: launcherWindow.activeHeaderButton === 0
+                                      && launcherWindow.recordingSelection === 6 ? 2 : 0
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 9
+                        Text { text: "󰻃"; color: Theme.bg0; font.family: Theme.fontIcons; font.pixelSize: 17 }
+                        Text { text: "Start recording"; color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                    }
+
+                    MouseArea {
+                        id: startRecordingMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            launcherWindow.activeHeaderButton = 0
+                            launcherWindow.recordingSelection = 6
+                        }
+                        onClicked: startScreenRecording()
+                    }
+                }
+            }
+
+            // ------------------------------------------
+            // 4. APLICACIONES (Modo 0)
             // ------------------------------------------
 
             // Fila independiente de aplicaciones usadas recientemente.
@@ -1387,7 +1759,7 @@ PanelWindow {
 
                                 Image {
                                     anchors.fill: parent
-                                    visible: icon !== "__qs_cleanup__"
+                                    visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__"
                                     source: visible
                                         ? (icon.startsWith("/")
                                             ? "file://" + icon
@@ -1399,8 +1771,8 @@ PanelWindow {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    visible: icon === "__qs_cleanup__"
-                                    text: ""
+                                    visible: icon === "__qs_cleanup__" || icon === "__qs_recording__"
+                                    text: icon === "__qs_recording__" ? "󰻃" : ""
                                     color: Theme.white
                                     font.family: Theme.fontIcons
                                     font.pixelSize: 38
@@ -1477,7 +1849,7 @@ PanelWindow {
 
                             Image {
                                 anchors.fill: parent
-                                visible: icon !== "__qs_cleanup__"
+                                visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__"
                                 source: visible
                                     ? (icon.startsWith("/")
                                         ? "file://" + icon
@@ -1489,8 +1861,8 @@ PanelWindow {
 
                             Text {
                                 anchors.centerIn: parent
-                                visible: icon === "__qs_cleanup__"
-                                text: ""
+                                visible: icon === "__qs_cleanup__" || icon === "__qs_recording__"
+                                text: icon === "__qs_recording__" ? "󰻃" : ""
                                 color: Theme.white
                                 font.family: Theme.fontIcons
                                 font.pixelSize: 40
@@ -1772,6 +2144,8 @@ PanelWindow {
     function recentItemByName(name) {
         if (name === "Cleanup")
             return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
+        if (name === "Screen Recording")
+            return { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
 
         for (var i = 0; i < appsModel.count; i++) {
             var app = appsModel.get(i);
@@ -1902,24 +2276,30 @@ PanelWindow {
 
         // Acción interna del launcher; no depende de provider.sh y se mantiene junto
         // a las apps normales para que también pueda encontrarse buscando "cleanup".
-        var cleanupItem = { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
+        var specialItems = [
+            { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" },
+            { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" }
+        ];
         if (launcherWindow.currentMode === 0) {
-            if (search === "" || cleanupItem.name.toLowerCase().includes(search) || cleanupItem.comment.toLowerCase().includes(search)) {
-                var cleanupScore = 0;
-                if (search !== "") {
-                    cleanupScore = cleanupItem.name.toLowerCase().startsWith(search) ? 1
-                                 : cleanupItem.name.toLowerCase().includes(search) ? 2
-                                 : 3;
+            for (var si = 0; si < specialItems.length; si++) {
+                var special = specialItems[si];
+                if (search === "" || special.name.toLowerCase().includes(search) || special.comment.toLowerCase().includes(search)) {
+                    var specialScore = 0;
+                    if (search !== "") {
+                        specialScore = special.name.toLowerCase().startsWith(search) ? 1
+                                     : special.name.toLowerCase().includes(search) ? 2
+                                     : 3;
+                    }
+                    results.push({ item: special, score: specialScore });
+                    seenResults[special.name.toLowerCase()] = true;
                 }
-                results.push({ item: cleanupItem, score: cleanupScore });
-                seenResults[cleanupItem.name.toLowerCase()] = true;
             }
         }
 
         for (var j = 0; j < sourceModel.count; j++) {
             var item = sourceModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup") continue; 
+                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup" && item.exec !== "qs_recording") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -1960,6 +2340,15 @@ PanelWindow {
         if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
+        if (cmd === "qs_recording") {
+            launcherWindow.currentMode = 11;
+            launcherWindow.activeHeaderButton = 0;
+            launcherWindow.recordingCapture = "screen";
+            launcherWindow.recordingAudio = "none";
+            launcherWindow.recordingSelection = 0;
+            searchInput.text = "";
+            return;
+        }
         if (cmd === "qs_cleanup") {
             launcherWindow.currentMode = 10;
             launcherWindow.activeHeaderButton = 0;
@@ -2078,6 +2467,14 @@ PanelWindow {
         toggle();
     }
 
+
+    function startScreenRecording() {
+        launcherWindow.pendingRecordingCapture = launcherWindow.recordingCapture;
+        launcherWindow.pendingRecordingAudio = launcherWindow.recordingAudio;
+        // Close first so the Launcher never appears inside slurp or the recording.
+        toggle();
+        recordingStartTimer.restart();
+    }
 
     function loadCleanupStatus() {
         launcherWindow.isCleanupLoading = true;
