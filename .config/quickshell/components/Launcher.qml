@@ -43,12 +43,15 @@ PanelWindow {
     // scripts/screen_record.sh so it survives the Launcher closing.
     property string recordingCapture: "screen"   // screen | area
     property string recordingAudio: "none"       // none | system | mic | both
+    property bool recordingCamera: false
     // Keyboard focus inside the recording panel:
-    // 0 Screen, 1 Area, 2 No audio, 3 System, 4 Microphone, 5 Both, 6 Start.
+    // 0 Screen, 1 Area, 2 No audio, 3 System, 4 Microphone, 5 Both,
+    // 6 Camera off, 7 Camera on, 8 Start.
     // The Back button uses activeHeaderButton === 1, like the other Launcher submenus.
     property int recordingSelection: 0
     property string pendingRecordingCapture: ""
     property string pendingRecordingAudio: ""
+    property bool pendingRecordingCamera: false
 
     // Focus Timer launcher panel.
     // 0=5m, 1=15m, 2=25m, 3=60m, 4=90m, 5=Custom.
@@ -175,14 +178,16 @@ PanelWindow {
         onTriggered: {
             var capture = launcherWindow.pendingRecordingCapture;
             var audio = launcherWindow.pendingRecordingAudio;
+            var camera = launcherWindow.pendingRecordingCamera;
             launcherWindow.pendingRecordingCapture = "";
             launcherWindow.pendingRecordingAudio = "";
+            launcherWindow.pendingRecordingCamera = false;
             if (capture === "" || audio === "") return;
 
             execProc.running = false;
             execProc.command = [
                 "/home/javier/.config/quickshell/scripts/screen_record.sh",
-                "start", capture, audio
+                "start", capture, audio, camera ? "1" : "0"
             ];
             execProc.startDetached();
         }
@@ -714,8 +719,7 @@ PanelWindow {
                                             launcherWindow.activeHeaderButton = 1
                                         } else if (launcherWindow.recordingSelection <= 5) {
                                             launcherWindow.recordingSelection -= 2
-                                        } else {
-                                            // From Start, return to the currently selected audio option.
+                                        } else if (launcherWindow.recordingSelection <= 7) {
                                             if (launcherWindow.recordingAudio === "system")
                                                 launcherWindow.recordingSelection = 3
                                             else if (launcherWindow.recordingAudio === "mic")
@@ -724,6 +728,8 @@ PanelWindow {
                                                 launcherWindow.recordingSelection = 5
                                             else
                                                 launcherWindow.recordingSelection = 2
+                                        } else {
+                                            launcherWindow.recordingSelection = launcherWindow.recordingCamera ? 7 : 6
                                         }
                                         event.accepted = true
                                         return
@@ -739,7 +745,9 @@ PanelWindow {
                                         } else if (launcherWindow.recordingSelection <= 3) {
                                             launcherWindow.recordingSelection += 2
                                         } else if (launcherWindow.recordingSelection <= 5) {
-                                            launcherWindow.recordingSelection = 6
+                                            launcherWindow.recordingSelection = launcherWindow.recordingCamera ? 7 : 6
+                                        } else if (launcherWindow.recordingSelection <= 7) {
+                                            launcherWindow.recordingSelection = 8
                                         }
                                         event.accepted = true
                                         return
@@ -754,6 +762,8 @@ PanelWindow {
                                                 launcherWindow.recordingSelection = sel === 2 ? 3 : 2
                                             else if (sel === 4 || sel === 5)
                                                 launcherWindow.recordingSelection = sel === 4 ? 5 : 4
+                                            else if (sel === 6 || sel === 7)
+                                                launcherWindow.recordingSelection = sel === 6 ? 7 : 6
                                         }
                                         event.accepted = true
                                         return
@@ -788,6 +798,12 @@ PanelWindow {
                                                 launcherWindow.recordingAudio = "both"
                                                 break
                                             case 6:
+                                                launcherWindow.recordingCamera = false
+                                                break
+                                            case 7:
+                                                launcherWindow.recordingCamera = true
+                                                break
+                                            case 8:
                                                 startScreenRecording()
                                                 break
                                             }
@@ -1583,7 +1599,7 @@ PanelWindow {
 
                 Text {
                     width: parent.width
-                    text: "Choose what to capture and which audio sources to include. After Start, the Launcher closes and slurp lets you select the monitor or area."
+                    text: "Choose what to capture, which audio sources to include, and whether to show your camera as a draggable circular overlay."
                     color: Qt.alpha(Theme.white, 0.60)
                     font.family: Theme.fontMain
                     font.pixelSize: 12
@@ -1765,14 +1781,101 @@ PanelWindow {
 
                 Rectangle {
                     width: parent.width
+                    height: 116
+                    radius: 18
+                    color: Qt.alpha(Theme.white, 0.06)
+                    border.color: Qt.alpha(Theme.white, 0.12)
+                    border.width: 1
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+
+                        Text {
+                            text: "Camera"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Row {
+                            width: parent.width
+                            spacing: 12
+
+                            Repeater {
+                                model: [
+                                    { enabled: false, icon: "󰄱", title: "Off", subtitle: "Screen only" },
+                                    { enabled: true, icon: "󰄀", title: "On", subtitle: "Draggable camera bubble" }
+                                ]
+
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    required property int index
+                                    readonly property bool keyboardFocused:
+                                        launcherWindow.activeHeaderButton === 0
+                                        && launcherWindow.recordingSelection === index + 6
+                                    width: (recordingPanel.width - 32 - 12) / 2
+                                    height: 58
+                                    radius: 14
+                                    color: launcherWindow.recordingCamera === modelData.enabled
+                                           ? Qt.alpha(Theme.white, 0.16)
+                                           : (keyboardFocused ? Qt.alpha(Theme.white, 0.10) : Qt.alpha(Theme.white, 0.06))
+                                    border.color: keyboardFocused
+                                                  ? Theme.blue
+                                                  : (launcherWindow.recordingCamera === modelData.enabled
+                                                     ? Theme.white
+                                                     : Qt.alpha(Theme.white, 0.10))
+                                    border.width: keyboardFocused ? 2 : (launcherWindow.recordingCamera === modelData.enabled ? 1.5 : 1)
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.margins: 12
+                                        spacing: 10
+
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.icon
+                                            font.family: Theme.fontIcons
+                                            font.pixelSize: 19
+                                            color: Theme.white
+                                        }
+
+                                        Column {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 2
+                                            Text { text: modelData.title; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 13; font.bold: true }
+                                            Text { text: modelData.subtitle; color: Qt.alpha(Theme.white, 0.48); font.family: Theme.fontMain; font.pixelSize: 10 }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onEntered: {
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.recordingSelection = index + 6
+                                        }
+                                        onClicked: launcherWindow.recordingCamera = modelData.enabled
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
                     height: 46
                     radius: 15
                     color: startRecordingMouse.containsMouse ? Qt.alpha(Theme.white, 0.88) : Theme.white
                     border.color: launcherWindow.activeHeaderButton === 0
-                                      && launcherWindow.recordingSelection === 6
+                                      && launcherWindow.recordingSelection === 8
                                   ? Theme.blue : "transparent"
                     border.width: launcherWindow.activeHeaderButton === 0
-                                      && launcherWindow.recordingSelection === 6 ? 2 : 0
+                                      && launcherWindow.recordingSelection === 8 ? 2 : 0
 
                     Row {
                         anchors.centerIn: parent
@@ -1788,7 +1891,7 @@ PanelWindow {
                         cursorShape: Qt.PointingHandCursor
                         onEntered: {
                             launcherWindow.activeHeaderButton = 0
-                            launcherWindow.recordingSelection = 6
+                            launcherWindow.recordingSelection = 8
                         }
                         onClicked: startScreenRecording()
                     }
@@ -2499,7 +2602,7 @@ PanelWindow {
         if (name === "Cleanup")
             return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
         if (name === "Screen Recording")
-            return { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
+            return { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
         if (name === "Focus Timer")
             return { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" };
 
@@ -2634,7 +2737,7 @@ PanelWindow {
         // a las apps normales para que también pueda encontrarse buscando "cleanup".
         var specialItems = [
             { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" },
-            { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" },
+            { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" },
             { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" }
         ];
         if (launcherWindow.currentMode === 0) {
@@ -2702,6 +2805,7 @@ PanelWindow {
             launcherWindow.activeHeaderButton = 0;
             launcherWindow.recordingCapture = "screen";
             launcherWindow.recordingAudio = "none";
+            launcherWindow.recordingCamera = false;
             launcherWindow.recordingSelection = 0;
             searchInput.text = "";
             return;
@@ -2863,6 +2967,7 @@ PanelWindow {
     function startScreenRecording() {
         launcherWindow.pendingRecordingCapture = launcherWindow.recordingCapture;
         launcherWindow.pendingRecordingAudio = launcherWindow.recordingAudio;
+        launcherWindow.pendingRecordingCamera = launcherWindow.recordingCamera;
         // Close first so the Launcher never appears inside slurp or the recording.
         toggle();
         recordingStartTimer.restart();

@@ -4,6 +4,7 @@ set -euo pipefail
 STATE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/qs-screenrec"
 STATE_FILE="$STATE_DIR/state.env"
 SEG_DIR="$STATE_DIR/segments"
+CAMERA_QML="$HOME/.config/quickshell/components/CameraOverlay.qml"
 EVENT_FIFO="${XDG_RUNTIME_DIR:-/tmp}/qs-screenrec-events"
 mkdir -p "$STATE_DIR"
 
@@ -32,6 +33,8 @@ save_state() {
         printf 'LOOPBACK1=%q\n' "${LOOPBACK1:-}"
         printf 'LOOPBACK2=%q\n' "${LOOPBACK2:-}"
         printf 'COMBINED_SINK=%q\n' "${COMBINED_SINK:-}"
+        printf 'CAMERA=%q\n' "${CAMERA:-0}"
+        printf 'CAMERA_PID=%q\n' "${CAMERA_PID:-}"
     } > "$tmp"
     mv "$tmp" "$STATE_FILE"
 }
@@ -40,6 +43,7 @@ load_state() {
     STATUS="idle"; PID=""; STARTED_AT=0; ELAPSED=0; CAPTURE="screen"; GEOMETRY=""; OUTPUT_NAME=""
     AUDIO="none"; AUDIO_SOURCE=""; OUTPUT_FILE=""; SEGMENT=0
     NULL_MODULE=""; LOOPBACK1=""; LOOPBACK2=""; COMBINED_SINK=""
+    CAMERA=0; CAMERA_PID=""
     if [[ -f "$STATE_FILE" ]]; then
         # shellcheck disable=SC1090
         source "$STATE_FILE"
@@ -56,6 +60,45 @@ cleanup_audio() {
         [[ -n "$id" ]] && pactl unload-module "$id" >/dev/null 2>&1 || true
     done
     NULL_MODULE=""; LOOPBACK1=""; LOOPBACK2=""; COMBINED_SINK=""; AUDIO_SOURCE=""
+}
+
+cleanup_camera() {
+    if [[ -n "${CAMERA_PID:-}" ]] && kill -0 "$CAMERA_PID" 2>/dev/null; then
+        kill -TERM "$CAMERA_PID" 2>/dev/null || true
+        # One-shot shutdown wait only; no background polling is introduced.
+        for _ in {1..20}; do
+            kill -0 "$CAMERA_PID" 2>/dev/null || break
+            sleep 0.05
+        done
+        kill -KILL "$CAMERA_PID" 2>/dev/null || true
+    fi
+    CAMERA_PID=""
+}
+
+start_camera() {
+    [[ "${CAMERA:-0}" == "1" ]] || return 0
+    command -v qs >/dev/null || command -v quickshell >/dev/null || {
+        echo "Quickshell is not installed; cannot open camera overlay" >&2
+        return 1
+    }
+    [[ -f "$CAMERA_QML" ]] || {
+        echo "Camera overlay not found: $CAMERA_QML" >&2
+        return 1
+    }
+
+    local qs_bin
+    qs_bin="$(command -v qs 2>/dev/null || command -v quickshell)"
+    "$qs_bin" -p "$CAMERA_QML" >/dev/null 2>&1 &
+    CAMERA_PID=$!
+
+    # Give the layer-shell surface and camera stream a brief one-time moment to
+    # appear before wf-recorder starts. This is not a recurring timer.
+    sleep 0.30
+    if ! kill -0 "$CAMERA_PID" 2>/dev/null; then
+        CAMERA_PID=""
+        echo "Camera overlay failed to start. Make sure qt6-multimedia is installed." >&2
+        return 1
+    fi
 }
 
 setup_audio() {
@@ -132,7 +175,7 @@ write_json() {
         (( current < 0 )) && current=0
         elapsed=$((elapsed + current))
     fi
-    python3 - "$STATUS" "$elapsed" "${OUTPUT_FILE:-}" "${AUDIO:-none}" "${CAPTURE:-screen}" <<'PY'
+    python3 - "$STATUS" "$elapsed" "${OUTPUT_FILE:-}" "${AUDIO:-none}" "${CAPTURE:-screen}" "${CAMERA:-0}" <<'PY'
 import json,sys
 print(json.dumps({
     "status": sys.argv[1],
@@ -140,6 +183,7 @@ print(json.dumps({
     "output": sys.argv[3],
     "audio": sys.argv[4],
     "capture": sys.argv[5],
+    "camera": sys.argv[6] == "1",
 }))
 PY
 }
@@ -149,6 +193,8 @@ case "$cmd" in
     start)
         capture="${2:-screen}"
         audio="${3:-none}"
+        camera="${4:-0}"
+        [[ "$camera" == "1" ]] || camera="0"
         load_state
         if [[ "$STATUS" == "running" || "$STATUS" == "paused" ]]; then
             echo "A recording is already active" >&2
@@ -165,7 +211,7 @@ case "$cmd" in
         rm -rf "$SEG_DIR"
         mkdir -p "$SEG_DIR" "$HOME/Videos/Recordings"
         STATUS="starting"; PID=""; STARTED_AT=0; ELAPSED=0; SEGMENT=0
-        CAPTURE="$capture"; AUDIO="$audio"; GEOMETRY=""; OUTPUT_NAME=""
+        CAPTURE="$capture"; AUDIO="$audio"; CAMERA="$camera"; CAMERA_PID=""; GEOMETRY=""; OUTPUT_NAME=""
         OUTPUT_FILE="$HOME/Videos/Recordings/recording-$(date +%Y-%m-%d_%H-%M-%S).mp4"
         NULL_MODULE=""; LOOPBACK1=""; LOOPBACK2=""; COMBINED_SINK=""; AUDIO_SOURCE=""
         save_state; emit_event refresh
@@ -196,6 +242,13 @@ except Exception:
 
         if ! setup_audio; then
             cleanup_audio
+            cleanup_camera
+            STATUS="idle"; save_state; emit_event refresh
+            exit 5
+        fi
+        if ! start_camera; then
+            cleanup_audio
+            cleanup_camera
             STATUS="idle"; save_state; emit_event refresh
             exit 5
         fi
@@ -231,6 +284,7 @@ except Exception:
             if [[ "${STARTED_AT:-0}" -gt 0 ]]; then ELAPSED=$((ELAPSED + now - STARTED_AT)); fi
             stop_segment
         fi
+        cleanup_camera
         STATUS="finalizing"; STARTED_AT=0
         save_state; emit_event refresh
 
@@ -240,6 +294,7 @@ except Exception:
         segments=("$SEG_DIR"/segment-*.mp4)
         if (( ${#segments[@]} == 0 )); then
             cleanup_audio
+            cleanup_camera
             STATUS="idle"; save_state; emit_event refresh
             exit 6
         elif (( ${#segments[@]} == 1 )); then
@@ -252,6 +307,7 @@ except Exception:
             fi
         fi
         cleanup_audio
+        cleanup_camera
         rm -rf "$SEG_DIR" "$list"
         STATUS="finished"
         save_state; emit_event refresh
@@ -260,7 +316,8 @@ except Exception:
     clear)
         load_state
         [[ "$STATUS" == "running" || "$STATUS" == "paused" || "$STATUS" == "finalizing" ]] && exit 0
-        STATUS="idle"; ELAPSED=0; OUTPUT_FILE=""; STARTED_AT=0; PID=""; SEGMENT=0
+        cleanup_camera
+        STATUS="idle"; ELAPSED=0; OUTPUT_FILE=""; STARTED_AT=0; PID=""; SEGMENT=0; CAMERA=0
         save_state; emit_event refresh
         ;;
 
