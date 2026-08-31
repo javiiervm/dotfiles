@@ -12,16 +12,22 @@ from PIL import Image
 
 DBusGMainLoop(set_as_default=True)
 
+DND_STATE_FILE = "/tmp/qs_dnd_state"
+
 class NotificationServer(dbus.service.Object):
     def __init__(self):
         bus_name = dbus.service.BusName(
-            'org.freedesktop.Notifications', 
-            bus=dbus.SessionBus(), 
+            'org.freedesktop.Notifications',
+            bus=dbus.SessionBus(),
             replace_existing=True
         )
         super().__init__(bus_name, '/org/freedesktop/Notifications')
         self.notifications = []
-        self.dnd = False
+        try:
+            with open(DND_STATE_FILE, "r", encoding="utf-8") as f:
+                self.dnd = f.read().strip() == "1"
+        except Exception:
+            self.dnd = False
         self.next_id = 1
         self.emit_state()
 
@@ -31,7 +37,6 @@ class NotificationServer(dbus.service.Object):
         except BrokenPipeError:
             os._exit(0)
 
-    # --- NUEVA SEÑAL PARA ABRIR LAS APPS ---
     @dbus.service.signal('org.freedesktop.Notifications', signature='us')
     def ActionInvoked(self, id, action_key):
         pass
@@ -43,15 +48,12 @@ class NotificationServer(dbus.service.Object):
             self.next_id += 1
 
         urgency = int(hints.get("urgency", 1))
-
-        # --- LÓGICA DE ICONOS CORREGIDA ---
         icon = str(app_icon) if app_icon else ""
 
         if not icon:
             if "image-path" in hints:
                 icon = str(hints["image-path"])
             elif "image-data" in hints or "icon_data" in hints:
-                # Extraer la imagen cruda (raw bitmap)
                 img_key = "image-data" if "image-data" in hints else "icon_data"
                 try:
                     img_data = hints[img_key]
@@ -60,26 +62,21 @@ class NotificationServer(dbus.service.Object):
                     rowstride = int(img_data[2])
                     has_alpha = bool(img_data[3])
                     pixels = bytes(img_data[6])
-
                     mode = 'RGBA' if has_alpha else 'RGB'
                     image = Image.frombytes(mode, (width, height), pixels, 'raw', mode, rowstride, 1)
-                    
                     tmp_path = f"/tmp/qs_notif_icon_{notif_id}.png"
                     image.save(tmp_path)
                     icon = tmp_path
-                except Exception as e:
+                except Exception:
                     pass
 
-        # Fallback 1: Nombre de la aplicación normalizado
         if not icon:
             app_str = str(app_name).lower().replace(" ", "-")
             if app_str:
                 icon = app_str
 
-        # Fallback 2: Icono genérico del sistema si todo lo demás falla
         if not icon:
             icon = "dialog-information"
-        # ----------------------------------
 
         notif = {
             "id": notif_id,
@@ -103,7 +100,7 @@ class NotificationServer(dbus.service.Object):
             try:
                 subprocess.Popen(
                     ["paplay", "/usr/share/sounds/freedesktop/stereo/message.oga"],
-                    stdout=subprocess.DEVNULL, 
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
             except Exception:
@@ -122,12 +119,22 @@ class NotificationServer(dbus.service.Object):
     @dbus.service.method('org.freedesktop.Notifications', in_signature='u', out_signature='')
     def CloseNotification(self, id):
         pass
-        
+
     def remove_notif(self, nid):
         self.notifications = [n for n in self.notifications if n["id"] != nid]
         self.emit_state()
 
+    def write_dnd_state(self):
+        try:
+            tmp = DND_STATE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write("1\n" if self.dnd else "0\n")
+            os.replace(tmp, DND_STATE_FILE)
+        except Exception:
+            pass
+
     def emit_state(self):
+        self.write_dnd_state()
         state = {
             "dnd": self.dnd,
             "count": len(self.notifications),
@@ -139,9 +146,14 @@ class NotificationServer(dbus.service.Object):
         self.notifications = []
         self.emit_state()
 
-    def toggle_dnd(self):
-        self.dnd = not self.dnd
+    def set_dnd(self, enabled):
+        enabled = bool(enabled)
+        if self.dnd != enabled:
+            self.dnd = enabled
         self.emit_state()
+
+    def toggle_dnd(self):
+        self.set_dnd(not self.dnd)
 
 FIFO_PATH = "/tmp/qs_notif_cmd"
 if not os.path.exists(FIFO_PATH):
@@ -159,13 +171,16 @@ def listen_fifo():
                         GLib.idle_add(server.clear_all)
                     elif cmd == "TOGGLE_DND":
                         GLib.idle_add(server.toggle_dnd)
+                    elif cmd == "DND_ON":
+                        GLib.idle_add(server.set_dnd, True)
+                    elif cmd == "DND_OFF":
+                        GLib.idle_add(server.set_dnd, False)
                     elif cmd.startswith("REMOVE|"):
                         try:
                             nid = int(cmd.split("|")[1])
                             GLib.idle_add(server.remove_notif, nid)
                         except Exception:
                             pass
-                    # --- NUEVA LÓGICA DE EVENTOS ACTION ---
                     elif cmd.startswith("ACTION|"):
                         try:
                             parts = cmd.split("|")

@@ -50,6 +50,14 @@ PanelWindow {
     property string pendingRecordingCapture: ""
     property string pendingRecordingAudio: ""
 
+    // Focus Timer launcher panel.
+    // 0=5m, 1=15m, 2=25m, 3=60m, 4=90m, 5=Custom.
+    property int focusTimerSelection: 2
+    property int pendingFocusTimerSeconds: 0
+    property bool pendingFocusTimerDnd: false
+    property bool focusTimerDnd: false
+    property bool focusCustomOpen: false
+
     // System actions are queued until the Launcher has fully released
     // its layer-shell surface / keyboard focus.
     property string pendingSystemAction: ""
@@ -122,6 +130,9 @@ PanelWindow {
             launcherWindow.cleanupSelection = 1;
             launcherWindow.cleanupConfirmSelection = 0;
             launcherWindow.recordingSelection = 0;
+            launcherWindow.focusTimerSelection = 2;
+            launcherWindow.focusTimerDnd = false;
+            launcherWindow.focusCustomOpen = false;
             searchInput.text = "";
             searchInput.echoMode = TextInput.Normal;
         }
@@ -172,6 +183,26 @@ PanelWindow {
             execProc.command = [
                 "/home/javier/.config/quickshell/scripts/screen_record.sh",
                 "start", capture, audio
+            ];
+            execProc.startDetached();
+        }
+    }
+
+    Timer {
+        id: focusTimerStartTimer
+        interval: 420
+        repeat: false
+        onTriggered: {
+            var seconds = launcherWindow.pendingFocusTimerSeconds;
+            var useDnd = launcherWindow.pendingFocusTimerDnd;
+            launcherWindow.pendingFocusTimerSeconds = 0;
+            launcherWindow.pendingFocusTimerDnd = false;
+            if (seconds <= 0) return;
+
+            execProc.running = false;
+            execProc.command = [
+                "/home/javier/.config/quickshell/scripts/live_timer.sh",
+                "start", String(seconds), "Focus", useDnd ? "1" : "0"
             ];
             execProc.startDetached();
         }
@@ -334,7 +365,7 @@ PanelWindow {
         id: mainCard
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
-            if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11) return 620;
+            if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12) return 620;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -588,6 +619,79 @@ PanelWindow {
                             }
 
                             Keys.onPressed: (event) => {
+
+                                // Focus Timer: six useful presets in a 2-column grid.
+                                if (launcherWindow.currentMode === 12) {
+                                    // D toggles the optional Do Not Disturb integration.
+                                    if (event.key === Qt.Key_D) {
+                                        launcherWindow.focusTimerDnd = !launcherWindow.focusTimerDnd
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+                                        launcherWindow.currentMode = 0
+                                        launcherWindow.activeHeaderButton = 0
+                                        launcherWindow.focusTimerSelection = 2
+                                        launcherWindow.focusCustomOpen = false
+                                        searchInput.text = ""
+                                        showApps()
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Up) {
+                                        if (launcherWindow.activeHeaderButton !== 1) {
+                                            if (launcherWindow.focusTimerSelection <= 1)
+                                                launcherWindow.activeHeaderButton = 1
+                                            else
+                                                launcherWindow.focusTimerSelection -= 2
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Down) {
+                                        if (launcherWindow.activeHeaderButton === 1) {
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.focusTimerSelection = 2
+                                        } else if (launcherWindow.focusTimerSelection <= 3) {
+                                            launcherWindow.focusTimerSelection += 2
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+                                        if (launcherWindow.activeHeaderButton !== 1) {
+                                            var focusSel = launcherWindow.focusTimerSelection
+                                            launcherWindow.focusTimerSelection = (focusSel % 2 === 0)
+                                                ? focusSel + 1 : focusSel - 1
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+
+                                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                            || event.key === Qt.Key_Space) {
+                                        if (launcherWindow.activeHeaderButton === 1) {
+                                            launcherWindow.currentMode = 0
+                                            launcherWindow.activeHeaderButton = 0
+                                            launcherWindow.focusTimerSelection = 2
+                                            searchInput.text = ""
+                                            showApps()
+                                        } else {
+                                            if (launcherWindow.focusTimerSelection === 5) {
+                                                launcherWindow.focusCustomOpen = true
+                                                Qt.callLater(function() { focusCustomMinutes.forceActiveFocus() })
+                                            } else {
+                                                startFocusTimerSeconds(focusTimerSecondsForIndex(launcherWindow.focusTimerSelection))
+                                            }
+                                        }
+                                        event.accepted = true
+                                        return
+                                    }
+                                }
 
                                 // Screen Recording has full keyboard navigation.
                                 // Arrow keys follow the visual 2-column layout, Enter/Space
@@ -1032,7 +1136,7 @@ PanelWindow {
                 // C) CONTROLES DE SISTEMA Y ARCHIVOS (Modos 1 y 4)
                 Item {
                     width: parent.width; height: parent.height
-                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11
+                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12
 
                     Rectangle {
                         id: backBtnSys
@@ -1049,7 +1153,7 @@ PanelWindow {
                             onEntered: {
                                 if (launcherWindow.currentMode === 10)
                                     launcherWindow.cleanupSelection = 0
-                                if (launcherWindow.currentMode === 11)
+                                if (launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12)
                                     launcherWindow.activeHeaderButton = 1
                             }
                             onClicked: {
@@ -1057,6 +1161,7 @@ PanelWindow {
                                 launcherWindow.activeHeaderButton = 0;
                                 launcherWindow.cleanupSelection = 1;
                                 launcherWindow.recordingSelection = 0;
+                                launcherWindow.focusTimerSelection = 2;
                                 searchInput.text = "";
                                 showApps();
                             }
@@ -1066,7 +1171,8 @@ PanelWindow {
                     Text {
                         text: launcherWindow.currentMode === 1 ? "File Search Results"
                             : (launcherWindow.currentMode === 10 ? "Cleanup"
-                            : (launcherWindow.currentMode === 11 ? "Screen Recording" : "System Options"))
+                            : (launcherWindow.currentMode === 11 ? "Screen Recording"
+                            : (launcherWindow.currentMode === 12 ? "Focus Timer" : "System Options")))
                         color: Theme.white; font.pixelSize: 16; font.bold: true
                         anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1690,7 +1796,255 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // 4. APLICACIONES (Modo 0)
+            // 4. FOCUS TIMER (Modo 12)
+            // ------------------------------------------
+            Column {
+                id: focusTimerPanel
+                width: parent.width
+                spacing: 14
+                visible: launcherWindow.currentMode === 12
+
+                Text {
+                    width: parent.width
+                    text: "Choose a duration for the Focus Live Activity. Do Not Disturb is optional and is restored automatically when the timer ends or is cancelled."
+                    color: Qt.alpha(Theme.white, 0.62)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 46
+                    radius: 13
+                    color: Qt.alpha(Theme.white, 0.065)
+                    border.color: Qt.alpha(Theme.white, 0.11)
+                    border.width: 1
+
+                    Row {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 15
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 11
+
+                        Rectangle {
+                            width: 20
+                            height: 20
+                            radius: 6
+                            color: launcherWindow.focusTimerDnd ? Theme.blue : Qt.alpha(Theme.white, 0.08)
+                            border.color: launcherWindow.focusTimerDnd ? Theme.blue : Qt.alpha(Theme.white, 0.25)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                visible: launcherWindow.focusTimerDnd
+                                text: "✓"
+                                color: Theme.white
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                        }
+
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 1
+                            Text {
+                                text: "Enable Do Not Disturb"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Restores the previous DND state when finished  ·  D"
+                                color: Qt.alpha(Theme.white, 0.48)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: launcherWindow.focusTimerDnd = !launcherWindow.focusTimerDnd
+                    }
+                }
+
+                Grid {
+                    width: parent.width
+                    columns: 2
+                    columnSpacing: 12
+                    rowSpacing: 12
+
+                    Repeater {
+                        model: [
+                            { seconds: 300,  title: "5 minutes",  subtitle: "Quick timer", custom: false },
+                            { seconds: 900,  title: "15 minutes", subtitle: "Short sprint", custom: false },
+                            { seconds: 1500, title: "25 minutes", subtitle: "Pomodoro", custom: false },
+                            { seconds: 3600, title: "1 hour",     subtitle: "Long session", custom: false },
+                            { seconds: 5400, title: "90 minutes", subtitle: "Extended focus", custom: false },
+                            { seconds: 0,    title: "Custom",     subtitle: "Minutes + seconds", custom: true }
+                        ]
+
+                        delegate: Rectangle {
+                            required property int index
+                            required property var modelData
+                            readonly property bool keyboardFocused:
+                                launcherWindow.activeHeaderButton === 0
+                                && launcherWindow.focusTimerSelection === index
+
+                            width: (focusTimerPanel.width - 12) / 2
+                            height: 62
+                            radius: 14
+                            color: focusPresetMouse.containsMouse
+                                   ? Qt.alpha(Theme.white, 0.13)
+                                   : Qt.alpha(Theme.white, 0.075)
+                            border.color: keyboardFocused ? Theme.blue : Qt.alpha(Theme.white, 0.12)
+                            border.width: keyboardFocused ? 2 : 1
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.leftMargin: 16
+                                anchors.rightMargin: 16
+                                spacing: 12
+
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.custom ? "󰅐" : "󰔛"
+                                    color: Theme.white
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 17
+                                }
+
+                                Column {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2
+                                    Text {
+                                        text: modelData.title
+                                        color: Theme.white
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                    }
+                                    Text {
+                                        text: modelData.subtitle
+                                        color: Qt.alpha(Theme.white, 0.50)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: focusPresetMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: {
+                                    launcherWindow.activeHeaderButton = 0
+                                    launcherWindow.focusTimerSelection = index
+                                }
+                                onClicked: {
+                                    if (modelData.custom) {
+                                        launcherWindow.focusCustomOpen = true
+                                        Qt.callLater(function() { focusCustomMinutes.forceActiveFocus() })
+                                    } else {
+                                        startFocusTimerSeconds(modelData.seconds)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: launcherWindow.focusCustomOpen ? 62 : 0
+                    visible: launcherWindow.focusCustomOpen
+                    radius: 14
+                    color: Qt.alpha(Theme.white, 0.065)
+                    border.color: Qt.alpha(Theme.white, 0.12)
+                    border.width: 1
+                    clip: true
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 14
+                        spacing: 10
+
+                        TextInput {
+                            id: focusCustomMinutes
+                            width: 70
+                            height: 36
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "25"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            horizontalAlignment: TextInput.AlignHCenter
+                            verticalAlignment: TextInput.AlignVCenter
+                            validator: IntValidator { bottom: 0; top: 999 }
+                            selectByMouse: true
+                            Keys.onPressed: (event) => {
+                                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    focusCustomSeconds.forceActiveFocus(); event.accepted = true
+                                } else if (event.key === Qt.Key_Escape) {
+                                    launcherWindow.focusCustomOpen = false; searchInput.forceActiveFocus(); event.accepted = true
+                                }
+                            }
+
+                            Rectangle { anchors.fill: parent; z: -1; radius: 9; color: Qt.alpha(Theme.white, 0.08); border.color: focusCustomMinutes.activeFocus ? Theme.blue : Qt.alpha(Theme.white, 0.15); border.width: focusCustomMinutes.activeFocus ? 2 : 1 }
+                        }
+
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "min"; color: Qt.alpha(Theme.white, 0.55); font.pixelSize: 11; font.family: Theme.fontMain }
+
+                        TextInput {
+                            id: focusCustomSeconds
+                            width: 64
+                            height: 36
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "0"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            horizontalAlignment: TextInput.AlignHCenter
+                            verticalAlignment: TextInput.AlignVCenter
+                            validator: IntValidator { bottom: 0; top: 59 }
+                            selectByMouse: true
+                            Keys.onPressed: (event) => {
+                                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                    startCustomFocusTimer(); event.accepted = true
+                                } else if (event.key === Qt.Key_Escape) {
+                                    launcherWindow.focusCustomOpen = false; searchInput.forceActiveFocus(); event.accepted = true
+                                }
+                            }
+
+                            Rectangle { anchors.fill: parent; z: -1; radius: 9; color: Qt.alpha(Theme.white, 0.08); border.color: focusCustomSeconds.activeFocus ? Theme.blue : Qt.alpha(Theme.white, 0.15); border.width: focusCustomSeconds.activeFocus ? 2 : 1 }
+                        }
+
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: "sec"; color: Qt.alpha(Theme.white, 0.55); font.pixelSize: 11; font.family: Theme.fontMain }
+
+                        Item { width: 1; height: 1 }
+
+                        Rectangle {
+                            width: 116
+                            height: 36
+                            anchors.verticalCenter: parent.verticalCenter
+                            radius: 10
+                            color: Theme.white
+
+                            Text { anchors.centerIn: parent; text: "Start custom"; color: Theme.bg0; font.family: Theme.fontMain; font.pixelSize: 11; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: startCustomFocusTimer() }
+                        }
+                    }
+                }
+            }
+
+            // ------------------------------------------
+            // 5. APLICACIONES (Modo 0)
             // ------------------------------------------
 
             // Fila independiente de aplicaciones usadas recientemente.
@@ -1759,7 +2113,7 @@ PanelWindow {
 
                                 Image {
                                     anchors.fill: parent
-                                    visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__"
+                                    visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__" && icon !== "__qs_timer__"
                                     source: visible
                                         ? (icon.startsWith("/")
                                             ? "file://" + icon
@@ -1771,8 +2125,8 @@ PanelWindow {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    visible: icon === "__qs_cleanup__" || icon === "__qs_recording__"
-                                    text: icon === "__qs_recording__" ? "󰻃" : ""
+                                    visible: icon === "__qs_cleanup__" || icon === "__qs_recording__" || icon === "__qs_timer__"
+                                    text: icon === "__qs_recording__" ? "󰻃" : (icon === "__qs_timer__" ? "󰔛" : "")
                                     color: Theme.white
                                     font.family: Theme.fontIcons
                                     font.pixelSize: 38
@@ -1849,7 +2203,7 @@ PanelWindow {
 
                             Image {
                                 anchors.fill: parent
-                                visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__"
+                                visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__" && icon !== "__qs_timer__"
                                 source: visible
                                     ? (icon.startsWith("/")
                                         ? "file://" + icon
@@ -1861,8 +2215,8 @@ PanelWindow {
 
                             Text {
                                 anchors.centerIn: parent
-                                visible: icon === "__qs_cleanup__" || icon === "__qs_recording__"
-                                text: icon === "__qs_recording__" ? "󰻃" : ""
+                                visible: icon === "__qs_cleanup__" || icon === "__qs_recording__" || icon === "__qs_timer__"
+                                text: icon === "__qs_recording__" ? "󰻃" : (icon === "__qs_timer__" ? "󰔛" : "")
                                 color: Theme.white
                                 font.family: Theme.fontIcons
                                 font.pixelSize: 40
@@ -2146,6 +2500,8 @@ PanelWindow {
             return { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" };
         if (name === "Screen Recording")
             return { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
+        if (name === "Focus Timer")
+            return { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" };
 
         for (var i = 0; i < appsModel.count; i++) {
             var app = appsModel.get(i);
@@ -2278,7 +2634,8 @@ PanelWindow {
         // a las apps normales para que también pueda encontrarse buscando "cleanup".
         var specialItems = [
             { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" },
-            { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" }
+            { name: "Screen Recording", comment: "Record screen, area and audio", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" },
+            { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" }
         ];
         if (launcherWindow.currentMode === 0) {
             for (var si = 0; si < specialItems.length; si++) {
@@ -2299,7 +2656,7 @@ PanelWindow {
         for (var j = 0; j < sourceModel.count; j++) {
             var item = sourceModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup" && item.exec !== "qs_recording") continue; 
+                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup" && item.exec !== "qs_recording" && item.exec !== "qs_timer") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -2346,6 +2703,13 @@ PanelWindow {
             launcherWindow.recordingCapture = "screen";
             launcherWindow.recordingAudio = "none";
             launcherWindow.recordingSelection = 0;
+            searchInput.text = "";
+            return;
+        }
+        if (cmd === "qs_timer") {
+            launcherWindow.currentMode = 12;
+            launcherWindow.activeHeaderButton = 0;
+            launcherWindow.focusTimerSelection = 2;
             searchInput.text = "";
             return;
         }
@@ -2467,6 +2831,34 @@ PanelWindow {
         toggle();
     }
 
+
+    function focusTimerSecondsForIndex(index) {
+        var presets = [300, 900, 1500, 3600, 5400, 0];
+        return (index >= 0 && index < presets.length) ? presets[index] : 1500;
+    }
+
+    function startFocusTimerSeconds(seconds) {
+        var secs = Math.max(1, Math.floor(seconds || 0));
+        launcherWindow.pendingFocusTimerSeconds = secs;
+        launcherWindow.pendingFocusTimerDnd = launcherWindow.focusTimerDnd;
+        launcherWindow.focusCustomOpen = false;
+        toggle();
+        focusTimerStartTimer.restart();
+    }
+
+    function startCustomFocusTimer() {
+        var mins = parseInt(focusCustomMinutes.text || "0");
+        var secs = parseInt(focusCustomSeconds.text || "0");
+        if (isNaN(mins)) mins = 0;
+        if (isNaN(secs)) secs = 0;
+        secs = Math.max(0, Math.min(59, secs));
+        var total = Math.max(0, mins) * 60 + secs;
+        if (total <= 0) {
+            launcherWindow.requestIslandMsg("󰔛", "#ff9f0a", "Timer must be longer than 0 seconds");
+            return;
+        }
+        startFocusTimerSeconds(total);
+    }
 
     function startScreenRecording() {
         launcherWindow.pendingRecordingCapture = launcherWindow.recordingCapture;

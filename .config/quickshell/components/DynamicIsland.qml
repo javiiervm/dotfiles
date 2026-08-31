@@ -73,11 +73,82 @@ PanelWindow {
     // important when finalization is very fast: "finalizing" and "finished"
     // can be emitted almost back-to-back.
     property bool recordingRefreshPending: false
-    // While recording, hovering the clock area should open the island, but the
-    // control buttons themselves should stay clickable without expanding it.
-    // We therefore arm expansion only when the dedicated clock hotspot is
-    // hovered, and keep it open until the pointer leaves the island.
-    property bool recordingHoverExpandArmed: false
+
+    // =========================================================
+    // LIVE ACTIVITY CAROUSEL
+    // =========================================================
+    // All persistent activities share one compact slot. If several are alive
+    // simultaneously, vertical wheel/touchpad scrolling rotates this slot.
+    // The clock remains fixed on the right and owns expansion of the normal
+    // Music / Stats / App Usage island.
+    property string currentLiveActivityType: "recording"
+    property string previousLiveActivityType: ""
+    property int liveActivitySlideDirection: 1
+    property bool liveActivityTransitionRunning: false
+    property bool liveActivityHoverExpandArmed: false
+    // When the last Live Activity disappears while the pointer is still over
+    // the island (for example after clicking Stop/Cancel), do not let that
+    // same physical hover immediately open the normal island. The pointer must
+    // leave once; the next hover works normally. No timer is involved.
+    property bool suppressNormalHoverUntilExit: false
+
+    Timer {
+        id: liveActivityTransitionTimer
+        interval: 210
+        repeat: false
+        onTriggered: {
+            islandWindow.liveActivityTransitionRunning = false
+            islandWindow.previousLiveActivityType = ""
+        }
+    }
+
+    readonly property var liveActivityTypes: {
+        var result = [];
+        if (recordingActivityActive) result.push("recording");
+        if (focusTimerActivityActive) result.push("focus");
+        return result;
+    }
+    readonly property int liveActivityCount: liveActivityTypes.length
+    readonly property bool hasLiveActivities: liveActivityCount > 0
+
+    function liveActivityIsActive(type) {
+        return liveActivityTypes.indexOf(type) !== -1;
+    }
+
+    function normalizeLiveActivitySelection() {
+        if (liveActivityCount === 0) {
+            liveActivityHoverExpandArmed = false;
+            return;
+        }
+        if (!liveActivityIsActive(currentLiveActivityType))
+            currentLiveActivityType = liveActivityTypes[0];
+    }
+
+    function cycleLiveActivity(step) {
+        if (liveActivityCount < 2) return;
+        var index = liveActivityTypes.indexOf(currentLiveActivityType);
+        if (index < 0) index = 0;
+        previousLiveActivityType = currentLiveActivityType;
+        liveActivitySlideDirection = step >= 0 ? 1 : -1;
+        index = (index + step + liveActivityCount) % liveActivityCount;
+        currentLiveActivityType = liveActivityTypes[index];
+        liveActivityTransitionRunning = true;
+        liveActivityTransitionTimer.restart();
+    }
+
+    function liveActivityY(type) {
+        if (type === currentLiveActivityType)
+            return 0;
+        if (liveActivityTransitionRunning && type === previousLiveActivityType)
+            return liveActivitySlideDirection > 0 ? -32 : 32;
+        return liveActivitySlideDirection > 0 ? 32 : -32;
+    }
+
+    onLiveActivityTypesChanged: Qt.callLater(islandWindow.normalizeLiveActivitySelection)
+    onLiveActivityCountChanged: {
+        if (liveActivityCount === 0 && hoverArea.containsMouse)
+            suppressNormalHoverUntilExit = true;
+    }
     readonly property bool recordingActivityActive:
         recordingStatus === "starting"
         || recordingStatus === "running"
@@ -85,8 +156,7 @@ PanelWindow {
         || recordingStatus === "finalizing"
 
     onRecordingStatusChanged: {
-        if (!recordingActivityActive)
-            recordingHoverExpandArmed = false
+        Qt.callLater(islandWindow.normalizeLiveActivitySelection)
     }
 
     function formatRecordingTime(seconds) {
@@ -189,6 +259,7 @@ PanelWindow {
     function stopRecording() {
         if (recordingStatus !== "running" && recordingStatus !== "paused")
             return;
+        islandWindow.suppressNormalHoverUntilExit = true;
         // Stop/finalize can take a moment when several paused segments need
         // concatenating, so detach it and let FIFO events drive the UI.
         recordingActionProc.running = false;
@@ -204,6 +275,138 @@ PanelWindow {
         repeat: true
         running: islandWindow.recordingStatus === "running"
         onTriggered: islandWindow.recordingElapsed += 1
+    }
+
+    // =========================================================
+    // FOCUS TIMER LIVE ACTIVITY
+    // =========================================================
+    property string focusTimerStatus: "idle"   // idle | running | paused | finished
+    property int focusTimerTotal: 0
+    property int focusTimerRemaining: 0
+    property string focusTimerLabel: "Focus"
+    property bool focusTimerRefreshPending: false
+    readonly property bool focusTimerActivityActive:
+        focusTimerStatus === "running" || focusTimerStatus === "paused"
+
+    onFocusTimerStatusChanged: {
+        Qt.callLater(islandWindow.normalizeLiveActivitySelection)
+    }
+
+    function formatFocusTimer(seconds) {
+        var value = Math.max(0, Math.floor(seconds || 0));
+        var hours = Math.floor(value / 3600);
+        var minutes = Math.floor((value % 3600) / 60);
+        var secs = value % 60;
+        var mm = (minutes < 10 ? "0" : "") + minutes;
+        var ss = (secs < 10 ? "0" : "") + secs;
+        return hours > 0 ? hours + ":" + mm + ":" + ss : mm + ":" + ss;
+    }
+
+    Process {
+        id: focusTimerEventProc
+        running: true
+        command: [
+            "bash", "-c",
+            "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs-live-timer-events\"; " +
+            "rm -f \"$F\"; mkfifo \"$F\"; " +
+            "printf 'refresh\\n'; " +
+            "trap 'rm -f \"$F\"' EXIT; " +
+            "while IFS= read -r line < \"$F\"; do printf '%s\\n' \"${line:-refresh}\"; done"
+        ]
+        stdout: SplitParser {
+            onRead: function(line) {
+                if (line.trim() !== "")
+                    islandWindow.refreshFocusTimerState();
+            }
+        }
+    }
+
+    Process {
+        id: focusTimerStatusProc
+        property string output: ""
+        stdout: SplitParser {
+            onRead: function(line) {
+                if (line && line.trim() !== "")
+                    focusTimerStatusProc.output += line;
+            }
+        }
+        onExited: function(exitCode) {
+            if (exitCode === 0 && focusTimerStatusProc.output !== "") {
+                try {
+                    var data = JSON.parse(focusTimerStatusProc.output);
+                    islandWindow.focusTimerStatus = data.status || "idle";
+                    islandWindow.focusTimerTotal = data.total || 0;
+                    islandWindow.focusTimerRemaining = data.remaining || 0;
+                    islandWindow.focusTimerLabel = data.label || "Focus";
+
+                    if (islandWindow.focusTimerStatus === "finished") {
+                        islandWindow.focusTimerStatus = "idle";
+                        islandWindow.focusTimerRemaining = 0;
+                        islandWindow.triggerTextNotificationSilent("󰔛", "Timer ended", "#30d158");
+                        focusTimerClearProc.command = [
+                            "/home/javier/.config/quickshell/scripts/live_timer.sh", "clear"
+                        ];
+                        focusTimerClearProc.running = true;
+                    }
+                } catch (e) {
+                    console.warn("DynamicIsland: focus timer state parse error:", e);
+                }
+            }
+
+            if (islandWindow.focusTimerRefreshPending) {
+                islandWindow.focusTimerRefreshPending = false;
+                Qt.callLater(islandWindow.refreshFocusTimerState);
+            }
+        }
+    }
+
+    Process { id: focusTimerActionProc }
+    Process { id: focusTimerClearProc }
+
+    function refreshFocusTimerState() {
+        if (focusTimerStatusProc.running) {
+            focusTimerRefreshPending = true;
+            return;
+        }
+        focusTimerRefreshPending = false;
+        focusTimerStatusProc.output = "";
+        focusTimerStatusProc.command = [
+            "/home/javier/.config/quickshell/scripts/live_timer.sh", "status"
+        ];
+        focusTimerStatusProc.running = true;
+    }
+
+    function toggleFocusTimerPause() {
+        if (focusTimerStatus !== "running" && focusTimerStatus !== "paused")
+            return;
+        focusTimerActionProc.running = false;
+        focusTimerActionProc.command = [
+            "/home/javier/.config/quickshell/scripts/live_timer.sh",
+            focusTimerStatus === "running" ? "pause" : "resume"
+        ];
+        focusTimerActionProc.running = true;
+    }
+
+    function cancelFocusTimer() {
+        if (!focusTimerActivityActive)
+            return;
+        islandWindow.suppressNormalHoverUntilExit = true;
+        focusTimerActionProc.running = false;
+        focusTimerActionProc.command = [
+            "/home/javier/.config/quickshell/scripts/live_timer.sh", "cancel"
+        ];
+        focusTimerActionProc.running = true;
+    }
+
+    Timer {
+        id: focusTimerDisplayTimer
+        interval: 1000
+        repeat: true
+        running: islandWindow.focusTimerStatus === "running"
+        onTriggered: {
+            if (islandWindow.focusTimerRemaining > 0)
+                islandWindow.focusTimerRemaining -= 1;
+        }
     }
 
     // --- MUSIC PROPERTIES ---
@@ -324,9 +527,10 @@ PanelWindow {
         if (isNotifying) {
             return notifyText !== "" ? 300 : 220; 
         }
-        if (recordingActivityActive) {
-            if (recordingStatus === "running" || recordingStatus === "paused") return 238;
-            return 190;
+        if (hasLiveActivities) {
+            // Keep one stable compact width while rotating activities so the
+            // clock does not jump horizontally during vertical carousel moves.
+            return 238;
         }
         // La reproducción musical ya no necesita ensanchar la isla:
         // la mini-onda vive dentro del ancho normal del reloj.
@@ -493,6 +697,15 @@ PanelWindow {
         notifQueue.push({ "icon": icon, "text": text, "progress": 0, "muted": false, "color": customColor ? customColor : Theme.white });
         processQueue();
         execCmd("paplay /usr/share/sounds/freedesktop/stereo/message.oga 2>/dev/null &");
+    }
+
+    // Used by activities that provide their own sound (for example the Focus
+    // Timer alarm). Keeps the same island notification without stacking the
+    // generic freedesktop message sound on top of it.
+    function triggerTextNotificationSilent(icon, text, customColor) {
+        if (islandWindow.isExpanded) return;
+        notifQueue.push({ "icon": icon, "text": text, "progress": 0, "muted": false, "color": customColor ? customColor : Theme.white });
+        processQueue();
     }
 
     // =========================================================
@@ -883,8 +1096,11 @@ PanelWindow {
     // recording live activity is shown, the pause/stop controls must remain
     // easy to click, so expansion is only armed by hovering the clock area.
     property bool isExpanded: islandWindow.isUserSeeking
-                              || (!islandWindow.recordingActivityActive && hoverArea.containsMouse)
-                              || (islandWindow.recordingActivityActive && islandWindow.recordingHoverExpandArmed)
+                              || (!islandWindow.hasLiveActivities
+                                  && hoverArea.containsMouse
+                                  && !islandWindow.suppressNormalHoverUntilExit)
+                              || (islandWindow.hasLiveActivities
+                                  && islandWindow.liveActivityHoverExpandArmed)
 
     // --- VISUAL PILL ---
     GlassSurface {
@@ -941,56 +1157,73 @@ PanelWindow {
             hoverEnabled: true
 
             onExited: {
-                if (islandWindow.recordingActivityActive && !islandWindow.isUserSeeking)
-                    islandWindow.recordingHoverExpandArmed = false
+                if (!islandWindow.isUserSeeking && islandWindow.hasLiveActivities)
+                    islandWindow.liveActivityHoverExpandArmed = false
+
+                // Leaving the island completes the hover cycle that was active
+                // when the final Live Activity disappeared. A subsequent hover
+                // is therefore allowed to expand the normal island again.
+                islandWindow.suppressNormalHoverUntilExit = false
             }
             
-            Timer { id: wheelCooldown; interval: 400 }
+            Timer { id: wheelCooldown; interval: 260 }
             
             onWheel: (wheel) => {
-                if (!islandWindow.isExpanded || wheelCooldown.running) return;
+                if (wheelCooldown.running) return;
 
-                // Touchpad: mantiene el gesto horizontal que ya existía.
-                // Ratón: añade la rueda vertical como segunda forma de navegar.
-                // Priorizamos el eje horizontal si ambos traen delta para no
-                // alterar el comportamiento actual del touchpad.
+                if (!islandWindow.isExpanded && islandWindow.liveActivityCount > 1) {
+                    // Compact Live Activities: vertical touchpad gesture or
+                    // mouse wheel rotates the activity carousel. Ignore mostly
+                    // horizontal deltas here so normal touchpad movement cannot
+                    // switch activities accidentally.
+                    var vertical = wheel.angleDelta.y;
+                    if (vertical < -35) {
+                        islandWindow.cycleLiveActivity(1);
+                        wheelCooldown.restart();
+                        wheel.accepted = true;
+                    } else if (vertical > 35) {
+                        islandWindow.cycleLiveActivity(-1);
+                        wheelCooldown.restart();
+                        wheel.accepted = true;
+                    }
+                    return;
+                }
+
+                if (!islandWindow.isExpanded) return;
+
+                // Expanded island: preserve the existing tab carousel.
                 var delta = Math.abs(wheel.angleDelta.x) >= Math.abs(wheel.angleDelta.y)
                             ? wheel.angleDelta.x
                             : wheel.angleDelta.y;
 
                 if (delta < -40) {
-                    // Swipe izquierda / rueda arriba: 0 -> 1 -> 2 -> 0
                     currentTab = (currentTab + 1) % totalTabs;
                     wheelCooldown.restart();
                 } else if (delta > 40) {
-                    // Swipe derecha / rueda abajo: 0 -> 2 -> 1 -> 0
                     currentTab = (currentTab - 1 + totalTabs) % totalTabs;
                     wheelCooldown.restart();
                 }
             }
         }
 
-        // Persistent clock hover hotspot used only while recording. It stays
-        // alive even when the compact recording row becomes invisible during
-        // expansion, so every leave/re-enter cycle reliably arms expansion.
-        // Its scene position is kept fixed relative to the island center even
-        // while visualBg changes width.
+        // Persistent clock hotspot shared by all Live Activities. It remains
+        // alive while the island is expanded so leaving and hovering the clock
+        // again works indefinitely. The activity carousel itself never owns
+        // expansion; only this stable clock region does.
         Item {
-            id: recordingExpansionHotspot
-            visible: islandWindow.recordingActivityActive
-                     && (islandWindow.recordingStatus === "running"
-                         || islandWindow.recordingStatus === "paused")
-            x: (parent.width / 2) + 46
+            id: liveActivityExpansionHotspot
+            visible: islandWindow.hasLiveActivities
+            anchors.right: parent.right
+            anchors.rightMargin: 9
             y: 0
             width: 72
             height: 32
             z: 1200
 
             HoverHandler {
-                id: recordingClockHoverHandler
                 onHoveredChanged: {
                     if (hovered)
-                        islandWindow.recordingHoverExpandArmed = true
+                        islandWindow.liveActivityHoverExpandArmed = true
                 }
             }
         }
@@ -1002,7 +1235,7 @@ PanelWindow {
             width: parent.width
             height: 32
 
-            visible: !islandWindow.isExpanded && !islandWindow.isNotifying && !islandWindow.recordingActivityActive
+            visible: !islandWindow.isExpanded && !islandWindow.isNotifying && !islandWindow.hasLiveActivities
             opacity: (!visualBg.isAnimating && visible) ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150 } }
 
@@ -1421,7 +1654,7 @@ PanelWindow {
 
         // ── COLLAPSED STATE: SCREEN RECORDING LIVE ACTIVITY ──
         Item {
-            anchors.top: parent.top
+            id: recordingLiveActivityItem
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
             height: 32
@@ -1429,49 +1662,61 @@ PanelWindow {
             visible: !islandWindow.isExpanded
                      && !islandWindow.isNotifying
                      && islandWindow.recordingActivityActive
-            opacity: (!visualBg.isAnimating && visible) ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 150 } }
+            y: islandWindow.liveActivityY("recording")
+            opacity: (!visualBg.isAnimating && visible
+                      && islandWindow.currentLiveActivityType === "recording") ? 1 : 0
+            Behavior on y { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
-            RowLayout {
-                anchors.fill: parent
+            Row {
+                id: recordingActivityRow
+                anchors.left: parent.left
                 anchors.leftMargin: 14
-                anchors.rightMargin: 14
-                spacing: 0
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 7
 
-                Row {
-                    id: recordingActivityRow
-                    spacing: 8
-                    Layout.alignment: Qt.AlignVCenter
-
-                    Rectangle {
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: islandWindow.recordingStatus === "paused"
-                               ? Qt.alpha("#ff453a", 0.45)
-                               : "#ff453a"
+                    Item {
+                        width: 12
+                        height: 22
                         anchors.verticalCenter: parent.verticalCenter
 
-                        SequentialAnimation on opacity {
-                            running: islandWindow.recordingStatus === "running"
-                            loops: Animation.Infinite
-                            NumberAnimation { to: 0.35; duration: 700 }
-                            NumberAnimation { to: 1.0; duration: 700 }
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: 8
+                            height: 8
+                            radius: 4
+                            color: islandWindow.recordingStatus === "paused"
+                                   ? Qt.alpha("#ff453a", 0.45)
+                                   : "#ff453a"
+
+                            SequentialAnimation on opacity {
+                                running: islandWindow.recordingStatus === "running"
+                                loops: Animation.Infinite
+                                NumberAnimation { to: 0.35; duration: 700 }
+                                NumberAnimation { to: 1.0; duration: 700 }
+                            }
                         }
                     }
 
-                    Text {
-                        id: recordingStatusText
+                    Item {
+                        width: 41
+                        height: 22
                         anchors.verticalCenter: parent.verticalCenter
-                        text: {
-                            if (islandWindow.recordingStatus === "starting") return "Select capture";
-                            if (islandWindow.recordingStatus === "finalizing") return "Saving…";
-                            return islandWindow.formatRecordingTime(islandWindow.recordingElapsed);
+
+                        Text {
+                            id: recordingStatusText
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: {
+                                if (islandWindow.recordingStatus === "starting") return "Select capture";
+                                if (islandWindow.recordingStatus === "finalizing") return "Saving…";
+                                return islandWindow.formatRecordingTime(islandWindow.recordingElapsed);
+                            }
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 13
+                            font.bold: true
                         }
-                        color: Theme.white
-                        font.family: Theme.fontMain
-                        font.pixelSize: 13
-                        font.bold: true
                     }
 
                     Row {
@@ -1537,29 +1782,172 @@ PanelWindow {
                         }
                     }
                 }
+        }
 
-                Item {
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: (islandWindow.recordingStatus === "running" || islandWindow.recordingStatus === "paused") ? 18 : 0
-                }
+        // ── COLLAPSED STATE: FOCUS TIMER LIVE ACTIVITY ──
+        Item {
+            id: focusLiveActivityItem
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width
+            height: 32
 
-                Item {
-                    id: recordingClockHotspot
-                    visible: islandWindow.recordingStatus === "running" || islandWindow.recordingStatus === "paused"
-                    Layout.alignment: Qt.AlignVCenter
-                    implicitWidth: recordingClockText.implicitWidth + 10
-                    implicitHeight: parent.height
+            visible: !islandWindow.isExpanded
+                     && !islandWindow.isNotifying
+                     && islandWindow.focusTimerActivityActive
+            y: islandWindow.liveActivityY("focus")
+            opacity: (!visualBg.isAnimating && visible
+                      && islandWindow.currentLiveActivityType === "focus") ? 1 : 0
+            Behavior on y { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
-                    Text {
-                        id: recordingClockText
-                        anchors.centerIn: parent
-                        text: customClock.text
-                        color: Qt.alpha(Theme.white, 0.62)
-                        font.family: Theme.fontMain
-                        font.pixelSize: 11
-                        font.bold: true
+            Row {
+                anchors.left: parent.left
+                anchors.leftMargin: 14
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 7
+
+                    Item {
+                        width: 12
+                        height: 22
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "󰔛"
+                            color: islandWindow.focusTimerStatus === "paused"
+                                   ? Qt.alpha("#30d158", 0.55)
+                                   : "#30d158"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 12
+                        }
                     }
 
+                    Item {
+                        width: 41
+                        height: 22
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: islandWindow.formatFocusTimer(islandWindow.focusTimerRemaining)
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+                    }
+
+                    Row {
+                        spacing: 5
+                        anchors.verticalCenter: parent.verticalCenter
+
+                        Rectangle {
+                            width: 22
+                            height: 22
+                            radius: 11
+                            color: focusPauseMouse.containsMouse
+                                   ? Qt.alpha(Theme.white, 0.18)
+                                   : Qt.alpha(Theme.white, 0.09)
+                            border.color: Qt.alpha(Theme.white, 0.12)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: islandWindow.focusTimerStatus === "paused" ? "" : ""
+                                color: Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 10
+                            }
+
+                            MouseArea {
+                                id: focusPauseMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: islandWindow.toggleFocusTimerPause()
+                            }
+                        }
+
+                        Rectangle {
+                            width: 22
+                            height: 22
+                            radius: 11
+                            color: focusCancelMouse.containsMouse
+                                   ? Qt.alpha("#ff453a", 0.24)
+                                   : Qt.alpha(Theme.white, 0.09)
+                            border.color: focusCancelMouse.containsMouse
+                                          ? Qt.alpha("#ff453a", 0.48)
+                                          : Qt.alpha(Theme.white, 0.12)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: ""
+                                color: focusCancelMouse.containsMouse ? "#ff453a" : Theme.white
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 10
+                            }
+
+                            MouseArea {
+                                id: focusCancelMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: islandWindow.cancelFocusTimer()
+                            }
+                        }
+                    }
+                }
+        }
+
+        // The clock is deliberately NOT part of the vertical Live Activity
+        // carousel. Recording and Focus only animate their left-hand content;
+        // this single shared clock stays pixel-perfectly fixed at the same
+        // position the Recording activity used before.
+        Item {
+            id: fixedLiveActivityClock
+            visible: !islandWindow.isExpanded
+                     && !islandWindow.isNotifying
+                     && islandWindow.hasLiveActivities
+            anchors.right: parent.right
+            anchors.rightMargin: 14
+            anchors.verticalCenter: parent.verticalCenter
+            width: fixedLiveActivityClockText.implicitWidth + 10
+            height: 32
+            z: 1140
+
+            Text {
+                id: fixedLiveActivityClockText
+                anchors.centerIn: parent
+                text: customClock.text
+                color: Qt.alpha(Theme.white, 0.62)
+                font.family: Theme.fontMain
+                font.pixelSize: 11
+                font.bold: true
+            }
+        }
+
+        // Tiny carousel position indicator. It is intentionally subtle: it
+        // only appears when another Live Activity exists off-screen.
+        Column {
+            visible: !islandWindow.isExpanded
+                     && !islandWindow.isNotifying
+                     && islandWindow.liveActivityCount > 1
+            x: parent.width - 91
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+            z: 1150
+
+            Repeater {
+                model: islandWindow.liveActivityTypes
+                Rectangle {
+                    width: 2
+                    height: 4
+                    radius: 1
+                    color: Theme.white
+                    opacity: modelData === islandWindow.currentLiveActivityType ? 0.72 : 0.22
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
                 }
             }
         }
