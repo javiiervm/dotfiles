@@ -11,90 +11,24 @@ fi
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 
-# Set name of the theme to load --- if set to "random", it will
-# load a random theme each time Oh My Zsh is loaded, in which case,
-# to know which specific one was loaded, run: echo $RANDOM_THEME
-# See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
-#ZSH_THEME="robbyrussell"
-#ZSH_THEME="powerlevel10k/powerlevel10k"
+# Theme handled by Starship.
 ZSH_THEME=""
 
-# Set list of themes to pick from when loading at random
-# Setting this variable when ZSH_THEME=random will cause zsh to load
-# a theme from this variable instead of looking in $ZSH/themes/
-# If set to an empty array, this variable will have no effect.
-# ZSH_THEME_RANDOM_CANDIDATES=( "robbyrussell" "agnoster" )
-
-# Uncomment the following line to use case-sensitive completion.
-# CASE_SENSITIVE="true"
-
-# Uncomment the following line to use hyphen-insensitive completion.
-# Case-sensitive completion must be off. _ and - will be interchangeable.
-# HYPHEN_INSENSITIVE="true"
-
-# Uncomment one of the following lines to change the auto-update behavior
-# zstyle ':omz:update' mode disabled  # disable automatic updates
-# zstyle ':omz:update' mode auto      # update automatically without asking
-# zstyle ':omz:update' mode reminder  # just remind me to update when it's time
-
-# Uncomment the following line to change how often to auto-update (in days).
-# zstyle ':omz:update' frequency 13
-
-# Uncomment the following line if pasting URLs and other text is messed up.
-# DISABLE_MAGIC_FUNCTIONS="true"
-
-# Uncomment the following line to disable colors in ls.
-# DISABLE_LS_COLORS="true"
-
-# Uncomment the following line to disable auto-setting terminal title.
-# DISABLE_AUTO_TITLE="true"
-
-# Uncomment the following line to enable command auto-correction.
-# ENABLE_CORRECTION="true"
-
-# Uncomment the following line to display red dots whilst waiting for completion.
-# You can also set it to another string to have that shown instead of the default red dots.
-# e.g. COMPLETION_WAITING_DOTS="%F{yellow}waiting...%f"
-# Caution: this setting can cause issues with multiline prompts in zsh < 5.7.1 (see #5765)
-# COMPLETION_WAITING_DOTS="true"
-
-# Uncomment the following line if you want to disable marking untracked files
-# under VCS as dirty. This makes repository status check for large repositories
-# much, much faster.
-# DISABLE_UNTRACKED_FILES_DIRTY="true"
-
-# Uncomment the following line if you want to change the command execution time
-# stamp shown in the history command output.
-# You can set one of the optional three formats:
-# "mm/dd/yyyy"|"dd.mm.yyyy"|"yyyy-mm-dd"
-# or set a custom format using the strftime function format specifications,
-# see 'man strftime' for details.
-# HIST_STAMPS="mm/dd/yyyy"
-
-# Would you like to use another custom folder than $ZSH/custom?
-# ZSH_CUSTOM=/path/to/new-custom-folder
-
 # Which plugins would you like to load?
-# Standard plugins can be found in $ZSH/plugins/
-# Custom plugins may be added to $ZSH_CUSTOM/plugins/
-# Example format: plugins=(rails git textmate ruby lighthouse)
-# Add wisely, as too many plugins slow down shell startup.
 plugins=(
-	git 
-	zsh-autosuggestions 
-	zsh-syntax-highlighting
+    git
+    zsh-autosuggestions
+    zsh-syntax-highlighting
 )
 
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 
-source $ZSH/oh-my-zsh.sh
+source "$ZSH/oh-my-zsh.sh"
 
+
+# ------------------------------------------------------------------------------
 # User configuration
-
-# export MANPATH="/usr/local/man:$MANPATH"
-
-# You may need to manually set your language environment
-# export LANG=en_US.UTF-8
+# ------------------------------------------------------------------------------
 
 # Preferred editor for local and remote sessions
 # if [[ -n $SSH_CONNECTION ]]; then
@@ -103,39 +37,157 @@ source $ZSH/oh-my-zsh.sh
 #   export EDITOR='nvim'
 # fi
 
-# Compilation flags
-# export ARCHFLAGS="-arch $(uname -m)"
 
-# Set personal aliases, overriding those provided by Oh My Zsh libs,
-# plugins, and themes. Aliases can be placed here, though Oh My Zsh
-# users are encouraged to define aliases within a top-level file in
-# the $ZSH_CUSTOM folder, with .zsh extension. Examples:
-# - $ZSH_CUSTOM/aliases.zsh
-# - $ZSH_CUSTOM/macos.zsh
-# For a full list of active aliases, run `alias`.
-#
-# Example aliases
-# alias zshconfig="mate ~/.zshrc"
-# alias ohmyzsh="mate ~/.oh-my-zsh"
+# ------------------------------------------------------------------------------
+# Aliases
+# ------------------------------------------------------------------------------
+
 alias ls="lsd -lag"
 alias cex="python3 ~/.scripts/cex.py"
-alias dotfiles='/usr/bin/git --git-dir=$HOME/.mis-dotfiles/ --work-tree=$HOME'
 alias cleanup="$HOME/.local/bin/cleanup.py"
 alias plmedit="QT_QPA_PLATFORMTHEME=kde kcmshell6 kcm_plasmalogin"
 
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
-# Alias para cambiar el tema al estilo Hyde
+# ------------------------------------------------------------------------------
+# Dotfiles Git repository
+# ------------------------------------------------------------------------------
+
+# Bare Git repository:
+#
+#   Git dir:   ~/.mis-dotfiles
+#   Work tree: ~/
+#
+# Usage:
+#
+#   dotfiles status
+#   dotfiles diff
+#   dotfiles add ~/.zshrc
+#   dotfiles add .config/quickshell
+#   dotfiles add .
+#   dotfiles commit -m "Update Quickshell"
+#   dotfiles push
+#
+# `dotfiles add .` is treated specially:
+# instead of scanning the entire $HOME directory, it detects the configuration
+# roots that are already managed by the repository and runs `git add -A`
+# only on those paths.
+#
+# This stages new, modified and deleted files inside already-managed configs
+# without recursively scanning the complete home directory.
+#
+# To start tracking a completely new config, add it explicitly once:
+#
+#   dotfiles add .config/alacritty
+#
+# Once committed, future `dotfiles add .` calls will detect it automatically.
+
+function dotfiles() {
+    local git_dir="$HOME/.mis-dotfiles"
+    local work_tree="$HOME"
+
+    # Special case: "dotfiles add ."
+    #
+    # Instead of scanning the whole $HOME directory, determine which
+    # configuration roots already belong to the repository and update
+    # only those.
+    if [[ "$1" == "add" && "$2" == "." && $# -eq 2 ]]; then
+        local -a managed_roots
+
+        managed_roots=("${(@f)$(
+            command /usr/bin/git \
+                --git-dir="$git_dir" \
+                --work-tree="$work_tree" \
+                ls-files |
+            awk -F/ '
+                # ~/.config/foo/... -> .config/foo
+                $1 == ".config" && NF >= 2 {
+                    print $1 "/" $2
+                    next
+                }
+
+                # ~/.local/foo/... -> .local/foo
+                #
+                # This avoids scanning the whole ~/.local directory if,
+                # for example, ~/.local/bin is tracked in the future.
+                $1 == ".local" && NF >= 2 {
+                    print $1 "/" $2
+                    next
+                }
+
+                # Other HOME directories:
+                # .scripts/foo -> .scripts
+                # .github/foo  -> .github
+                NF >= 2 {
+                    print $1
+                    next
+                }
+
+                # Files directly inside HOME:
+                # .zshrc
+                # .gitignore
+                {
+                    print $1
+                }
+            ' |
+            sort -u
+        )}")
+
+        if (( ${#managed_roots[@]} == 0 )); then
+            echo "No hay rutas gestionadas por el repositorio."
+            return 0
+        fi
+
+        command /usr/bin/git \
+            --git-dir="$git_dir" \
+            --work-tree="$work_tree" \
+            add -A -- "${managed_roots[@]}"
+
+        return $?
+    fi
+
+    # Every other command behaves like normal Git.
+    command /usr/bin/git \
+        --git-dir="$git_dir" \
+        --work-tree="$work_tree" \
+        "$@"
+}
+
+# Give the dotfiles wrapper Git's normal Zsh completion.
+compdef dotfiles=git
+
+
+# ------------------------------------------------------------------------------
+# Theme / wallpaper helper
+# ------------------------------------------------------------------------------
+
 function theme() {
     awww img "$1" --transition-type wipe
     wal -i "$1" -n
-    # Refresca Kitty al instante para aplicar el nuevo fondo
-    kill -SIGUSR1 $(pgrep kitty)
+
+    # Refresh Kitty instantly to apply the new background.
+    pkill -SIGUSR1 kitty 2>/dev/null
 }
+
+
+# ------------------------------------------------------------------------------
+# Prompt
+# ------------------------------------------------------------------------------
 
 eval "$(starship init zsh)"
 
-clear && echo ' ' && fastfetch -l arch && echo ' '
+
+# ------------------------------------------------------------------------------
+# Startup
+# ------------------------------------------------------------------------------
+
+clear
+echo ' '
+fastfetch -l arch
+echo ' '
+
+
+# ------------------------------------------------------------------------------
+# PATH
+# ------------------------------------------------------------------------------
 
 export PATH="$HOME/.local/bin:$PATH"
