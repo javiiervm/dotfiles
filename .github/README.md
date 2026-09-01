@@ -1,4 +1,18 @@
-# Quickshell Dotfiles
+<div align="center">
+  <h1>Quickshell Dotfiles</h1>
+  <p>
+    <img src="https://img.shields.io/github/last-commit/javiiervm/dotfiles" alt="Last Commit" />
+    <img src="https://img.shields.io/badge/platform-CachyOS-blue" alt="Platform" />
+    <img src="https://img.shields.io/github/issues/javiiervm/dotfiles" alt="Issues" />
+    <img src="https://img.shields.io/github/stars/javiiervm/dotfiles" alt="Stars" />
+    <br />
+    <img src="https://img.shields.io/badge/CachyOS-1793D1?logo=archlinux&logoColor=white" />
+    <img src="https://img.shields.io/badge/Hyprland-58E1FF?logo=wayland&logoColor=black" />
+    <img src="https://img.shields.io/badge/Quickshell-QML-41CD52?logo=qt&logoColor=white" />
+    <img src="https://img.shields.io/badge/Wayland-native-FFBC00?logo=wayland&logoColor=black" />
+    <img src="https://img.shields.io/badge/Liquid%20Glass-inspired-8A7CFF" />
+  </p>
+</div>
 
 My personal **Quickshell + Hyprland** desktop setup, built around a clean **Liquid Glass / macOS-inspired** aesthetic.
 
