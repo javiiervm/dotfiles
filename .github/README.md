@@ -15,9 +15,7 @@
   </p>
 </div>
 
-My personal **Quickshell + Hyprland** desktop setup, built around a clean **Liquid Glass / macOS-inspired** aesthetic.
-
-The goal is simple: keep everything I use every day integrated into a fast, minimal and consistent desktop shell without turning it into an unnecessarily heavy environment.
+My personal **Quickshell + Hyprland** desktop setup, built around a clean **Liquid Glass / macOS-inspired** aesthetic, in which I keep everything I use every day integrated into a fast, minimal and consistent desktop shell without turning it into an unnecessarily heavy environment.
 
 > Built and mainly tested on **CachyOS + Hyprland**.
 
@@ -206,4 +204,3 @@ Built with:
 * [Hyprland](https://hypr.land/)
 * QML / Qt
 
-Inspired by macOS and the Liquid Glass design language.
