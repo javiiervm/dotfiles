@@ -7,43 +7,40 @@ import Quickshell.Wayland
 PanelWindow {
     id: overlay
 
-    implicitWidth: 184
-    implicitHeight: 184
-    color: "transparent"
-    exclusiveZone: 0
-
     anchors {
         top: true
+        bottom: true
         left: true
+        right: true
     }
+
+    color: "transparent"
+    exclusiveZone: -1
 
     WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.keyboardFocus: WlrLayershell.None
 
-    property real leftMargin: screen ? Math.max(24, screen.width - implicitWidth - 36) : 40
-    property real topMargin: screen ? Math.max(70, screen.height - implicitHeight - 52) : 100
-    property real dragStartLeft: 0
-    property real dragStartTop: 0
+    readonly property real bubbleSize: 184
+    readonly property real edgeMargin: 24
+    readonly property real topSafeMargin: 52
 
-    margins {
-        left: Math.round(overlay.leftMargin)
-        top: Math.round(overlay.topMargin)
-    }
-
-    function clampPosition() {
-        if (!screen)
-            return
-
-        leftMargin = Math.max(8, Math.min(leftMargin, screen.width - implicitWidth - 8))
-        topMargin = Math.max(8, Math.min(topMargin, screen.height - implicitHeight - 8))
-    }
-
-    onScreenChanged: clampPosition()
-
+    /*
+     * IMPORTANT
+     *
+     * La PanelWindow no se mueve nunca.
+     * Ocupa toda la pantalla y únicamente cameraFrame cambia de posición.
+     *
+     * La región de input se limita al círculo de la cámara para que todo
+     * lo demás siga siendo completamente click-through.
+     */
     mask: Region {
         item: cameraFrame
-        radius: cameraFrame.radius
+        radius: cameraFrame.width / 2
     }
+
+    // ============================================================
+    // CAMERA
+    // ============================================================
 
     MediaDevices {
         id: mediaDevices
@@ -51,6 +48,7 @@ PanelWindow {
 
     Camera {
         id: camera
+
         cameraDevice: mediaDevices.defaultVideoInput
         active: mediaDevices.videoInputs.length > 0
     }
@@ -60,33 +58,127 @@ PanelWindow {
         videoOutput: rawVideo
     }
 
+    // ============================================================
+    // CAMERA BUBBLE
+    // ============================================================
+
     Item {
         id: cameraFrame
-        anchors.fill: parent
+
+        width: overlay.bubbleSize
+        height: overlay.bubbleSize
+
+        /*
+         * Posición inicial.
+         *
+         * No usamos anchors porque queremos modificar x/y libremente.
+         */
+        x: Math.max(
+               overlay.edgeMargin,
+               overlay.width - width - 36
+           )
+
+        y: Math.max(
+               overlay.topSafeMargin,
+               overlay.height - height - 52
+           )
 
         readonly property real borderSize: 3
-        readonly property real innerMargin: borderSize
-        property real radius: width / 2
+
+        /*
+         * Clamp manual.
+         *
+         * Esto evita que la cámara pueda acabar parcialmente fuera
+         * de la pantalla.
+         */
+        function clampPosition() {
+            var maxX = Math.max(
+                overlay.edgeMargin,
+                overlay.width - width - overlay.edgeMargin
+            )
+
+            var maxY = Math.max(
+                overlay.topSafeMargin,
+                overlay.height - height - overlay.edgeMargin
+            )
+
+            x = Math.max(
+                overlay.edgeMargin,
+                Math.min(x, maxX)
+            )
+
+            y = Math.max(
+                overlay.topSafeMargin,
+                Math.min(y, maxY)
+            )
+        }
+
+        /*
+         * Si cambia la geometría del monitor, por ejemplo al conectar
+         * o desconectar una pantalla, recolocamos la burbuja.
+         */
+        Connections {
+            target: overlay
+
+            function onWidthChanged() {
+                if (!dragArea.pressed)
+                    cameraFrame.clampPosition()
+            }
+
+            function onHeightChanged() {
+                if (!dragArea.pressed)
+                    cameraFrame.clampPosition()
+            }
+        }
+
+        // ========================================================
+        // OUTER FRAME
+        // ========================================================
 
         Rectangle {
             anchors.fill: parent
+
             radius: width / 2
-            color: Qt.rgba(0.04, 0.04, 0.05, 0.96)
+
+            color: Qt.rgba(
+                       0.04,
+                       0.04,
+                       0.05,
+                       0.96
+                   )
+
             border.width: cameraFrame.borderSize
-            border.color: Qt.rgba(1, 1, 1, 0.82)
+            border.color: Qt.rgba(
+                              1,
+                              1,
+                              1,
+                              0.82
+                          )
         }
+
+        // ========================================================
+        // VIDEO
+        // ========================================================
 
         Item {
             id: videoArea
+
             anchors.fill: parent
-            anchors.margins: cameraFrame.innerMargin
+            anchors.margins: cameraFrame.borderSize
+
+            /*
+             * Recorte circular real del VideoOutput.
+             */
             layer.enabled: true
             layer.smooth: true
+
             layer.effect: OpacityMask {
                 cached: false
+
                 maskSource: Rectangle {
                     width: videoArea.width
                     height: videoArea.height
+
                     radius: width / 2
                     color: "white"
                 }
@@ -94,79 +186,210 @@ PanelWindow {
 
             VideoOutput {
                 id: rawVideo
+
                 anchors.fill: parent
+
                 fillMode: VideoOutput.PreserveAspectCrop
 
+                /*
+                 * Mirror horizontal para que se comporte como una
+                 * preview de webcam normal.
+                 */
                 transform: Scale {
                     origin.x: rawVideo.width / 2
                     origin.y: rawVideo.height / 2
+
                     xScale: -1
                     yScale: 1
                 }
             }
 
+            /*
+             * Fallback si no existe ninguna cámara.
+             */
             Rectangle {
                 anchors.fill: parent
+
                 radius: width / 2
-                color: Qt.rgba(0.04, 0.04, 0.05, 0.94)
+
+                color: Qt.rgba(
+                           0.04,
+                           0.04,
+                           0.05,
+                           0.94
+                       )
+
                 visible: mediaDevices.videoInputs.length === 0
 
-                Column {
+                Text {
                     anchors.centerIn: parent
-                    spacing: 5
 
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "Camera unavailable"
-                        color: Qt.rgba(1, 1, 1, 0.72)
-                        font.pixelSize: 11
-                    }
+                    width: parent.width - 24
+
+                    text: "Camera unavailable"
+
+                    color: Qt.rgba(
+                               1,
+                               1,
+                               1,
+                               0.72
+                           )
+
+                    font.pixelSize: 11
+
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
                 }
             }
         }
 
-        // Tiny inner highlight so the circular edge remains readable over both
-        // bright and dark content without putting controls into the recording.
+        /*
+         * Aro interior muy suave.
+         */
         Rectangle {
             anchors.fill: parent
             anchors.margins: cameraFrame.borderSize
+
             radius: width / 2
+
             color: "transparent"
+
             border.width: 1
-            border.color: Qt.rgba(1, 1, 1, 0.20)
+            border.color: Qt.rgba(
+                              1,
+                              1,
+                              1,
+                              0.20
+                          )
         }
 
-        DragHandler {
-            id: dragHandler
-            target: null
+        // ========================================================
+        // MANUAL DRAGGING
+        // ========================================================
 
-            onActiveChanged: {
-                if (active) {
-                    overlay.dragStartLeft = overlay.leftMargin
-                    overlay.dragStartTop = overlay.topMargin
-                } else {
-                    overlay.clampPosition()
-                }
+        MouseArea {
+            id: dragArea
+
+            anchors.fill: parent
+
+            acceptedButtons: Qt.LeftButton
+
+            hoverEnabled: true
+
+            cursorShape:
+                pressed
+                    ? Qt.ClosedHandCursor
+                    : Qt.OpenHandCursor
+
+            /*
+             * NO usamos:
+             *
+             *     drag.target: cameraFrame
+             *
+             * porque con una Region dinámica en layer-shell puede
+             * perder el pointer grab.
+             *
+             * En su lugar almacenamos:
+             *
+             * - dónde estaba el cursor al pulsar
+             * - dónde estaba la cámara al pulsar
+             *
+             * y calculamos el desplazamiento manualmente.
+             */
+
+            property real pressGlobalX: 0
+            property real pressGlobalY: 0
+
+            property real startFrameX: 0
+            property real startFrameY: 0
+
+            onPressed: function(mouse) {
+                /*
+                 * mapToItem(null, ...) nos proporciona la posición
+                 * respecto al root de la ventana, cuyo sistema de
+                 * coordenadas permanece fijo durante todo el drag.
+                 */
+                var globalPoint = dragArea.mapToItem(
+                    overlay.contentItem,
+                    mouse.x,
+                    mouse.y
+                )
+
+                pressGlobalX = globalPoint.x
+                pressGlobalY = globalPoint.y
+
+                startFrameX = cameraFrame.x
+                startFrameY = cameraFrame.y
+
+                mouse.accepted = true
             }
 
-            onActiveTranslationChanged: {
-                if (!active || !overlay.screen)
+            onPositionChanged: function(mouse) {
+                if (!pressed)
                     return
 
-                overlay.leftMargin = Math.max(
-                    8,
+                /*
+                 * Como cameraFrame se mueve, mouse.x/mouse.y cambian
+                 * respecto al propio MouseArea.
+                 *
+                 * Por eso convertimos SIEMPRE la posición actual al
+                 * sistema fijo de overlay.contentItem.
+                 */
+                var globalPoint = dragArea.mapToItem(
+                    overlay.contentItem,
+                    mouse.x,
+                    mouse.y
+                )
+
+                var deltaX =
+                    globalPoint.x - pressGlobalX
+
+                var deltaY =
+                    globalPoint.y - pressGlobalY
+
+                var targetX =
+                    startFrameX + deltaX
+
+                var targetY =
+                    startFrameY + deltaY
+
+                var maxX = Math.max(
+                    overlay.edgeMargin,
+                    overlay.width
+                        - cameraFrame.width
+                        - overlay.edgeMargin
+                )
+
+                var maxY = Math.max(
+                    overlay.topSafeMargin,
+                    overlay.height
+                        - cameraFrame.height
+                        - overlay.edgeMargin
+                )
+
+                cameraFrame.x = Math.max(
+                    overlay.edgeMargin,
                     Math.min(
-                        overlay.dragStartLeft + activeTranslation.x,
-                        overlay.screen.width - overlay.implicitWidth - 8
+                        targetX,
+                        maxX
                     )
                 )
-                overlay.topMargin = Math.max(
-                    8,
+
+                cameraFrame.y = Math.max(
+                    overlay.topSafeMargin,
                     Math.min(
-                        overlay.dragStartTop + activeTranslation.y,
-                        overlay.screen.height - overlay.implicitHeight - 8
+                        targetY,
+                        maxY
                     )
                 )
+            }
+
+            onReleased: {
+                cameraFrame.clampPosition()
+            }
+
+            onCanceled: {
+                cameraFrame.clampPosition()
             }
         }
     }
