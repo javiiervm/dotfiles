@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="1000" height="350" alt="image" src="https://github.com/user-attachments/assets/0efa7b2c-cf6b-4069-8b5a-6b0af2b8530c" />
+  <img width="850" height="300" alt="image" src="https://github.com/user-attachments/assets/0efa7b2c-cf6b-4069-8b5a-6b0af2b8530c" />
   <br />
   <p>
     <img src="https://img.shields.io/github/last-commit/javiiervm/dotfiles" alt="Last Commit" />
