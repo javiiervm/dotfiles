@@ -20,13 +20,13 @@ https://github.com/user-attachments/assets/38efdcf1-5b04-43eb-ac96-614ef85c7471
 
 The centerpiece of the setup.
 
-* 🎵 Media controls and currently playing music
-* 📊 System stats
-* ⏱️ Timers
-* 🎥 Screen recording status and controls
-* 📱 Application usage
-* 🔔 Contextual system indicators and alerts
-* 🖱️ Touchpad gestures and mouse wheel navigation
+* Media controls and currently playing music
+* System stats
+* Timers
+* Screen recording status and controls
+* Application usage
+* Contextual system indicators and alerts
+* Touchpad gestures and mouse wheel navigation
 
 The island stays compact when idle and expands only when needed.
 
@@ -59,14 +59,14 @@ A custom application launcher with:
 
 The setup also includes:
 
-* 🖥️ Workspace indicator
-* 🔋 Custom battery indicator
-* 🔊 Volume and system status
-* 📦 System tray
-* 🪟 Custom Alt+Tab switcher
-* 🚀 macOS-style dock
-* 🔍 Workspace overview
-* 🔒 Custom lock screen
+* Workspace indicator
+* Custom battery indicator
+* Volume and system status
+* System tray
+* Custom Alt+Tab switcher
+* macOS-style dock
+* Workspace overview
+* Custom lock screen
 
 ## Liquid Glass
 
@@ -164,7 +164,7 @@ quickshell
 
 The included Hyprland configuration already launches the main shell and overview automatically on login.
 
-## 🛠️ Customization
+## Customization
 
 Most visual settings live in:
 
