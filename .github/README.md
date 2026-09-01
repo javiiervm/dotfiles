@@ -1,5 +1,6 @@
 <div align="center">
-  <h1>Quickshell Dotfiles</h1>
+  <img width="1000" height="350" alt="image" src="https://github.com/user-attachments/assets/0efa7b2c-cf6b-4069-8b5a-6b0af2b8530c" />
+  <br />
   <p>
     <img src="https://img.shields.io/github/last-commit/javiiervm/dotfiles" alt="Last Commit" />
     <img src="https://img.shields.io/badge/platform-CachyOS-blue" alt="Platform" />
@@ -11,6 +12,7 @@
     <img src="https://img.shields.io/badge/Quickshell-QML-41CD52?logo=qt&logoColor=white" />
     <img src="https://img.shields.io/badge/Wayland-native-FFBC00?logo=wayland&logoColor=black" />
     <img src="https://img.shields.io/badge/Liquid%20Glass-inspired-8A7CFF" />
+    <br />
   </p>
 </div>
 
