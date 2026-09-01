@@ -11,7 +11,6 @@
     <img src="https://img.shields.io/badge/Hyprland-58E1FF?logo=wayland&logoColor=black" />
     <img src="https://img.shields.io/badge/Quickshell-QML-41CD52?logo=qt&logoColor=white" />
     <img src="https://img.shields.io/badge/Wayland-native-FFBC00?logo=wayland&logoColor=black" />
-    <img src="https://img.shields.io/badge/Liquid%20Glass-inspired-8A7CFF" />
     <br />
   </p>
 </div>
