@@ -21,11 +21,13 @@ My personal **Quickshell + Hyprland** desktop setup, built around a clean **Liqu
 
 ## Preview
 
-### Screenshot
-<img width="2560" height="1600" alt="image" src="https://github.com/user-attachments/assets/6ad427f8-9e63-4fbc-bce2-eb3e819e0bbc" />
+<!-- ### Screenshot
+<img width="2560" height="1600" alt="image" src="https://github.com/user-attachments/assets/6ad427f8-9e63-4fbc-bce2-eb3e819e0bbc" /> -->
+<img width="2560" height="1600" alt="2026-09-02-093823_hyprshot" src="https://github.com/user-attachments/assets/df4e39ca-52d6-478b-971a-6162642bf5a3" />
 
-### Demo
+<!-- ### Demo
 https://github.com/user-attachments/assets/38efdcf1-5b04-43eb-ac96-614ef85c7471
+-->
 
 ## Features
 
