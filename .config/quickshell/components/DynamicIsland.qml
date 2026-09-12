@@ -25,20 +25,7 @@ PanelWindow {
     exclusiveZone: 0
     color: "transparent"
 
-    /*
-     * CLASSIC:
-     * Keep the original Dynamic Island compositor path exactly as before.
-     *
-     * LIQUID:
-     * The real optical material is rendered by liquidIslandGlassWindow
-     * below. The main island remains responsible only for content, input,
-     * animations and overlays.
-     */
-    BackgroundEffect.blurRegion:
-        GlassMode.classic
-        && Glass.blurEnabled
-        ? islandBlurRegion
-        : null
+    BackgroundEffect.blurRegion: Glass.blurEnabled ? islandBlurRegion : null
 
     Region {
         id: islandBlurRegion
@@ -52,96 +39,6 @@ PanelWindow {
 
     implicitWidth: 480
     implicitHeight: 240
-
-    // =========================================================
-    // LIQUID GLASS BACKGROUND SURFACE
-    // =========================================================
-    //
-    // This second layer surface renders ONLY the optical glass body.
-    //
-    // The real Dynamic Island above remains a single instance and keeps
-    // all MPRIS, artwork, waveform, OSD, recorder, Focus Timer, camera,
-    // microphone and interaction logic.
-    //
-    // Top layer keeps this material below the main Overlay island while
-    // still above normal application windows.
-    PanelWindow {
-        id: liquidIslandGlassWindow
-
-        screen:
-            islandWindow.screen
-
-        anchors {
-            top: true
-        }
-
-        margins {
-            top: islandWindow.topMargin
-        }
-
-        WlrLayershell.layer:
-            WlrLayershell.Top
-
-        WlrLayershell.namespace:
-            "quickshell:dynamic-island"
-
-        exclusiveZone:
-            0
-
-        color:
-            "transparent"
-
-        visible:
-            GlassMode.liquid
-            && !islandWindow.isFullscreen
-
-        /*
-         * No BackgroundEffect region here either.
-         *
-         * The dedicated Liquid window is transparent except for
-         * liquidIslandGlass, so HyprGlass can use that item's alpha directly.
-         */
-        implicitWidth:
-            islandWindow.implicitWidth
-
-        implicitHeight:
-            islandWindow.implicitHeight
-
-        /*
-         * Never capture pointer input. The real islandWindow above owns
-         * the exact original input mask and interactions.
-         */
-        mask: Region {}
-
-        GlassSurface {
-            id: liquidIslandGlass
-
-            anchors.top:
-                parent.top
-
-            anchors.horizontalCenter:
-                parent.horizontalCenter
-
-            width:
-                visualBg.width
-
-            height:
-                visualBg.height
-
-            glassRadius:
-                visualBg.glassRadius
-
-            glassOpacity:
-                GlassMode.liquidQmlOpacity
-
-            showHighlight:
-                false
-
-            // visualBg keeps the original dynamic/alert border above us.
-            showBorder:
-                false
-        }
-    }
 
     mask: Region {
         item: visualBg
@@ -1215,19 +1112,6 @@ PanelWindow {
         height: targetHeight
 
         glassRadius: isExpanded ? 28 : height / 2
-
-        /*
-         * Classic is the original material.
-         *
-         * In Liquid mode the dedicated background surface behind this
-         * window owns the optical glass, so this GlassSurface keeps only
-         * its content and dynamic border.
-         */
-        glassOpacity:
-            GlassMode.liquid
-            ? 0.0
-            : Glass.opacity
-
         clip: true
 
         // GlassSurface dibuja por defecto un highlight horizontal de 1 px

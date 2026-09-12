@@ -14,8 +14,7 @@
 # Lid opened:
 #   1. Re-enable eDP-1 safely
 #   2. Restore the normal two-monitor layout
-#   3. Restore the refresh rate for the current power profile
-#   4. Refresh Quickshell LAST
+#   3. Refresh Quickshell LAST
 #
 # Fully event-driven:
 #   - no polling
@@ -34,7 +33,6 @@ INTERNAL="eDP-1"
 EXTERNAL="HDMI-A-1"
 
 QUICKSHELL_REFRESH="$HOME/.config/quickshell/scripts/launch.sh"
-DISPLAY_SYNC="$HOME/.config/hypr/scripts/display_power_profile.sh"
 
 
 # ============================================================
@@ -53,13 +51,6 @@ monitor_connected() {
 
 hypr_eval() {
     hyprctl eval "$1"
-}
-
-
-sync_display_power_profile() {
-    if [ -x "$DISPLAY_SYNC" ]; then
-        "$DISPLAY_SYNC"
-    fi
 }
 
 
@@ -91,10 +82,14 @@ case "$ACTION" in
         # ----------------------------------------------------
         # Only enter clamshell mode if HDMI-A-1 is connected.
         #
-        # Without an external monitor, lock and suspend.
+        # Without an external monitor we deliberately do
+        # nothing, preserving the normal systemd lid/suspend
+        # behaviour.
         # ----------------------------------------------------
 
         if ! monitor_connected "$EXTERNAL"; then
+            # No external monitor:
+            # lock the session and suspend immediately.
             loginctl lock-session >/dev/null 2>&1 || true
             systemctl suspend
             exit 0
@@ -153,9 +148,8 @@ case "$ACTION" in
             # ------------------------------------------------
             # 1. Re-enable eDP-1 temporarily to the right.
             #
-            # Start at 60 Hz as a safe baseline. Once the
-            # layout is restored, the current power profile
-            # decides whether it remains at 60 or moves to 240.
+            # HDMI is currently at 0x0, so enabling eDP
+            # directly at 0x0 would cause overlap.
             # ------------------------------------------------
 
             hypr_eval \
@@ -205,6 +199,7 @@ case "$ACTION" in
 
             # ------------------------------------------------
             # HDMI was disconnected while the lid was closed.
+            #
             # Restore eDP-1 as the standalone display.
             # ------------------------------------------------
 
@@ -221,22 +216,9 @@ case "$ACTION" in
 
 
         # ----------------------------------------------------
-        # 4. Apply the refresh rate associated with the current
-        #    power profile:
-        #
-        #       power-saver -> 60 Hz
-        #       balanced    -> 240 Hz
-        #
-        # This must happen after eDP-1 exists again.
-        # ----------------------------------------------------
-
-        sync_display_power_profile
-
-
-        # ----------------------------------------------------
-        # 5. LAST OPERATION:
+        # 4. LAST OPERATION:
         #    Restart Quickshell only after the monitor topology
-        #    and refresh rate are fully restored.
+        #    is fully restored.
         # ----------------------------------------------------
 
         refresh_quickshell
@@ -245,10 +227,8 @@ case "$ACTION" in
 
 
     *)
-
         echo "Usage: $0 {close|open}" >&2
         exit 2
-
         ;;
 
 esac

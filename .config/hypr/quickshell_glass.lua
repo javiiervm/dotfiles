@@ -1,159 +1,40 @@
--- =============================================================
--- QUICKSHELL GLASS MODE ROUTER
--- =============================================================
+-- Quickshell Liquid Glass compositor integration.
 --
--- Punto de entrada global para el sistema de cristal de Quickshell.
---
--- Modos persistentes:
---
---   classic
---       Blur normal de Hyprland.
---
---   liquid
---       HyprGlass Liquid Glass real.
---
--- Estado:
---
---   $XDG_STATE_HOME/quickshell/glass-mode
---
--- normalmente:
---
---   ~/.local/state/quickshell/glass-mode
---
--- Durante la migración también se acepta:
---
---   ~/.config/quickshell/state/glass-mode
---
--- =============================================================
+-- NOTE: decoration.blur is still a global Hyprland compositor setting. It
+-- lives here only to keep the Liquid Glass experiment organized with the
+-- Quickshell blur routing below; Hyprland does not make size, passes, or
+-- vibrancy per namespace.
 
+hl.config({
+    decoration = {
+        blur = {
+            enabled = true,
+            -- size = 8,
+            size = 10,
+            -- passes = 2,
+            passes = 5,
+            new_optimizations = true,
+            ignore_opacity = true,
+            xray = false,
+            -- vibrancy = 0.06,
+            vibrancy = 0.1696
+        },
+    },
+})
 
--- =============================================================
--- ENVIRONMENT
--- =============================================================
+-- Existing explicit Quickshell surface.
+hl.layer_rule({ match = { namespace = "wall_carousel" }, blur = true, ignore_alpha = 0.05 })
 
-local home =
-    os.getenv("HOME")
+-- Isolated Liquid Glass sandbox.
+-- quickshell:glass-raw intentionally has no blur rule.
+hl.layer_rule({ match = { namespace = "quickshell:glass-blur" }, blur = true, ignore_alpha = 0.001 })
+hl.layer_rule({ match = { namespace = "quickshell:glass-material" }, blur = true, ignore_alpha = 0.001 })
 
-if not home then
-    return
-end
-
-
-local state_home =
-    os.getenv("XDG_STATE_HOME")
-
-if not state_home or state_home == "" then
-    state_home =
-        home .. "/.local/state"
-end
-
-
-local config_dir =
-    home .. "/.config/hypr"
-
-local state_file =
-    state_home
-    .. "/quickshell/glass-mode"
-
-local legacy_state_file =
-    home
-    .. "/.config/quickshell/state/glass-mode"
-
-
--- =============================================================
--- HELPERS
--- =============================================================
-
-local function read_first_line(path)
-    local file =
-        io.open(path, "r")
-
-    if not file then
-        return nil
-    end
-
-
-    local value =
-        file:read("*l")
-
-    file:close()
-
-    return value
-end
-
-
-local function read_glass_mode()
-    local value =
-        read_first_line(state_file)
-
-
-    -- ---------------------------------------------------------
-    -- Legacy fallback
-    -- ---------------------------------------------------------
-
-    if value ~= "classic"
-        and value ~= "liquid"
-    then
-        value =
-            read_first_line(
-                legacy_state_file
-            )
-    end
-
-
-    -- ---------------------------------------------------------
-    -- Validation
-    -- ---------------------------------------------------------
-
-    if value == "classic" then
-        return "classic"
-    end
-
-    return "liquid"
-end
-
-
--- =============================================================
--- CURRENT MODE
--- =============================================================
-
-local glass_mode =
-    read_glass_mode()
-
-
--- =============================================================
--- NORMAL HYPRLAND BLUR BASE
--- =============================================================
---
--- Se carga siempre.
---
--- Esto es importante durante la migración gradual porque todavía
--- existen componentes Quickshell que no han sido migrados al nuevo
--- sistema y siguen dependiendo del blur normal.
--- =============================================================
-
-dofile(
-    config_dir
-    .. "/quickshell_blur_base.lua"
-)
-
-
--- =============================================================
--- ACTIVE GLASS BACKEND
--- =============================================================
-
-if glass_mode == "liquid" then
-
-    dofile(
-        config_dir
-        .. "/quickshell_liquid_glass.lua"
-    )
-
-else
-
-    dofile(
-        config_dir
-        .. "/quickshell_classic_blur.lua"
-    )
-
-end
+-- Future production namespaces should be added explicitly here when their
+-- QML surfaces opt into Liquid Glass. Avoid a broad "quickshell" rule.
+-- Examples:
+-- hl.layer_rule({ match = { namespace = "quickshell:launcher" }, blur = true, ignore_alpha = 0.001 })
+-- hl.layer_rule({ match = { namespace = "quickshell:notification-center" }, blur = true, ignore_alpha = 0.001 })
+-- hl.layer_rule({ match = { namespace = "quickshell:island" }, blur = true, ignore_alpha = 0.001 })
+-- hl.layer_rule({ match = { namespace = "quickshell:dock" }, blur = true, ignore_alpha = 0.001 })
+-- hl.layer_rule({ match = { namespace = "quickshell:sysmenu" }, blur = true, ignore_alpha = 0.001 })

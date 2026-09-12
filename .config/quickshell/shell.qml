@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
@@ -110,13 +109,7 @@ ShellRoot {
 
     // --- ESTADOS PARA CAVA VISUALIZER ---
     property bool isPlayingMedia: false
-
-    // Native, reactive Hyprland state.
-    // No bash/socat/hyprctl watcher is needed.
-    readonly property bool isWorkspaceEmpty:
-        !Hyprland.focusedWorkspace
-        || Hyprland.focusedWorkspace.toplevels.values.length === 0
-
+    property bool isWorkspaceEmpty: true
     property bool showCavaVisualizer: false 
 
     property string cavaColor: Theme.blue 
@@ -144,12 +137,7 @@ ShellRoot {
     property int altTabCurrentIndex: 0
 
     // --- ESTADOS DE PANTALLA COMPLETA ---
-    // Native reactive state from Quickshell.Hyprland.
-    readonly property bool isFullscreen:
-        Hyprland.focusedWorkspace
-        ? Hyprland.focusedWorkspace.hasFullscreen
-        : false
-
+    property bool isFullscreen: false
     property bool isTopHovered: false
 
     property alias sharedNotifModel: sharedNotifModel
@@ -396,7 +384,41 @@ ShellRoot {
         }
     }
 
-    // --- MONITOR DE MEDIOS ---
+    // --- 1. MONITOR DE ESCRITORIO ---
+    Process {
+        id: workspaceMonitorProc
+        command: [
+            "bash", "-c",
+            "check_empty() { w=$(hyprctl activeworkspace -j 2>/tmp/qs_dock_err.log | jq -e '.windows' 2>>/tmp/qs_dock_err.log); rc=$?; if [ $rc -ne 0 ] || [ -z \"$w\" ]; then echo \"ERR rc=$rc w=$w\" >> /tmp/qs_dock_err.log; return; fi; [ \"$w\" = \"0\" ] && echo 1 || echo 0; }; " +
+            "check_empty; " +
+            "SOCAT_BIN=$(command -v socat 2>/dev/null); " +
+            "if [ -z \"$SOCAT_BIN\" ]; then " +
+            "  for p in /usr/bin/socat /usr/local/bin/socat /bin/socat; do [ -x \"$p\" ] && SOCAT_BIN=\"$p\" && break; done; " +
+            "fi; " +
+            "if [ -z \"$SOCAT_BIN\" ]; then " +
+            "  echo \"socat no encontrado en ninguna ruta conocida, usando sondeo (polling) cada 2s\" >> /tmp/qs_dock_err.log; " +
+            "  while true; do check_empty; sleep 2; done; " +
+            "else " +
+            "  echo \"usando socat: $SOCAT_BIN\" >> /tmp/qs_dock_err.log; " +
+            "  while true; do " +
+            "    \"$SOCAT_BIN\" -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock 2>>/tmp/qs_dock_err.log | grep --line-buffered -E '(workspace|openwindow|closewindow|movewindow)' | while read -r _; do check_empty; done; " +
+            "    echo \"socat desconectado, reintentando en 1s\" >> /tmp/qs_dock_err.log; " +
+            "    sleep 1; " +
+            "  done; " +
+            "fi"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var val = data.trim();
+                if (val === "1" || val === "0") {
+                    root.isWorkspaceEmpty = (val === "1");
+                }
+            }
+        }
+    }
+
+    // --- 2. MONITOR DE MEDIOS ---
     Process {
         id: mediaMonitorProc
         command: [
@@ -504,9 +526,6 @@ ShellRoot {
         }
     }
 
-    // ============================================================
-    // NOTIFICATION CENTER — CLASSIC
-    // ============================================================
     NotificationCenter {
         id: notifCenterWindow
         screen: root.primaryUiScreen
@@ -523,69 +542,7 @@ ShellRoot {
             ? 10
             : 12
 
-        visible_state: root.isNotifOpen && GlassMode.classic
-        dndState: root.dnd
-        modelData: sharedNotifModel
-        
-        wifiState: root.wifiSsid !== "" && root.wifiSsid !== "disconnected" && root.wifiSsid !== "Disconnected"
-        btState: root.btStat === "on"
-        airplaneState: root.airplaneMode
-        caffeineState: root.caffeineMode
-        powerSaverState: root.perfMode === "power-saver"
-        powerSaverAvailable: !root.onAcPower
-        nightLightState: root.nightLightMode
-        nightLightTemperature: root.nightLightTemperature
-        
-        onRequestClose: { root.isNotifOpen = false }
-        onToggleDndRequested: { root.toggleDnd() }
-        onClearRequested: { root.clearNotifications() }
-
-        onToggleWifiRequested: { wifiProc.running = true }
-        onToggleBtRequested: { btProc.running = true }
-        onToggleAirplaneRequested: {
-            airplaneProc.running = true
-            root.airplaneMode = !root.airplaneMode
-        }
-        onToggleCaffeineRequested: {
-            caffeineProc.running = true
-            root.caffeineMode = !root.caffeineMode
-        }
-        onTogglePowerSaverRequested: {
-            if (!root.onAcPower && !powerSaverProc.running)
-                powerSaverProc.running = true
-        }
-        onToggleNightLightRequested: {
-            if (!nightLightProc.running)
-                nightLightProc.running = true
-        }
-        onSetNightLightTemperatureRequested: function(temperature) {
-            root.setNightLightTemperature(temperature)
-        }
-        onPowerRequested: { console.log("Acción de power pulsada") }
-    }
-
-    // ============================================================
-    // NOTIFICATION CENTER — LIQUID GLASS
-    // ============================================================
-    NotificationCenter {
-        id: liquidNotifCenterWindow
-        screen: root.primaryUiScreen
-        WlrLayershell.namespace: "quickshell:notification-center"
-        BackgroundEffect.blurRegion: null
-
-        // Laptop keeps the original position. The HDMI value is used only
-        // when eDP-1 is disabled and HDMI-A-1 becomes primaryUiScreen.
-        panelTopMargin: root.primaryUiScreen
-            && root.primaryUiScreen.name === "HDMI-A-1"
-            ? 10
-            : 2
-
-        panelRightMargin: root.primaryUiScreen
-            && root.primaryUiScreen.name === "HDMI-A-1"
-            ? 10
-            : 12
-
-        visible_state: root.isNotifOpen && GlassMode.liquid
+        visible_state: root.isNotifOpen
         dndState: root.dnd
         modelData: sharedNotifModel
         
@@ -913,9 +870,6 @@ ShellRoot {
         }
     }
 
-    // ============================================================
-    // POP-UP NOTIFICATIONS — CLASSIC
-    // ============================================================
     PanelWindow {
         id: osdWindow
         screen: root.primaryUiScreen
@@ -926,7 +880,7 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
         WlrLayershell.layer: WlrLayershell.Top
-        visible: GlassMode.classic && popupModel.count > 0
+        visible: popupModel.count > 0
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? osdBlurRegion : null
 
@@ -1030,420 +984,6 @@ ShellRoot {
         }
     }
 
-    // ============================================================
-    // POP-UP NOTIFICATIONS — LIQUID GLASS
-    // ============================================================
-    // ============================================================
-    // POP-UP NOTIFICATIONS — LIQUID GLASS
-    // ============================================================
-    //
-    // IMPORTANT:
-    //
-    // Every notification is its OWN layer surface.
-    //
-    // HyprGlass operates on layer surfaces, so this is the only robust
-    // way to guarantee that the optical material belongs to each rounded
-    // notification card individually and never to a rectangular window
-    // containing the whole notification stack.
-    // ============================================================
-    Instantiator {
-        id: liquidPopupInstantiator
-
-        active:
-            GlassMode.liquid
-
-        model:
-            popupModel
-
-        delegate: PanelWindow {
-            id: liquidPopupWindow
-
-            screen:
-                root.primaryUiScreen
-
-            anchors {
-                top: true
-                right: true
-            }
-
-            margins {
-                top:
-                    50
-                    + index * 90
-
-                right:
-                    15
-            }
-
-            implicitWidth:
-                360
-
-            implicitHeight:
-                80
-
-            exclusiveZone:
-                0
-
-            color:
-                "transparent"
-
-            WlrLayershell.layer:
-                WlrLayershell.Overlay
-
-            WlrLayershell.namespace:
-                "quickshell:notification-popup"
-
-            /*
-             * The requested background-effect region is now exactly the
-             * individual notification card.
-             *
-             * With HyprGlass mask_mode="region", only this rounded 360x80
-             * surface receives the real Liquid Glass material.
-             */
-            BackgroundEffect.blurRegion:
-                GlassMode.liquid
-                ? liquidPopupRegion
-                : null
-
-            Region {
-                id: liquidPopupRegion
-
-                item:
-                    liquidPopupItem
-
-                radius:
-                    liquidPopupItem.glassRadius
-            }
-
-            GlassSurface {
-                id: liquidPopupItem
-
-                anchors.fill:
-                    parent
-
-                glassRadius:
-                    15
-
-                glassTint:
-                    pUrgency === 2
-                    ? Theme.red
-                    : Glass.tint
-
-                glassOpacity:
-                    pUrgency === 2
-                    ? 0.18
-                    : GlassMode.liquidQmlOpacity
-
-                showHighlight:
-                    false
-
-                border.color:
-                    pUrgency === 2
-                    ? Qt.alpha(
-                          Theme.red,
-                          0.62
-                      )
-                    : Glass.borderColor
-
-                border.width:
-                    pUrgency === 2
-                    ? 1
-                    : Glass.borderWidth
-
-
-                // --------------------------------------------------------
-                // ENTRY / EXIT
-                // --------------------------------------------------------
-
-                transform: Translate {
-                    id: liquidSlideTrans
-
-                    x:
-                        400
-                }
-
-                Component.onCompleted: {
-                    liquidSlideIn.start()
-                    liquidHideTimer.start()
-                }
-
-                NumberAnimation {
-                    id: liquidSlideIn
-
-                    target:
-                        liquidSlideTrans
-
-                    property:
-                        "x"
-
-                    to:
-                        0
-
-                    duration:
-                        400
-
-                    easing.type:
-                        Easing.OutBack
-                }
-
-                NumberAnimation {
-                    id: liquidSlideOut
-
-                    target:
-                        liquidSlideTrans
-
-                    property:
-                        "x"
-
-                    to:
-                        400
-
-                    duration:
-                        300
-
-                    easing.type:
-                        Easing.InBack
-
-                    onFinished:
-                        root.removePopup(
-                            nId
-                        )
-                }
-
-                Timer {
-                    id: liquidHideTimer
-
-                    interval:
-                        5000
-
-                    onTriggered:
-                        liquidSlideOut.start()
-                }
-
-
-                // --------------------------------------------------------
-                // INTERACTION
-                // --------------------------------------------------------
-
-                MouseArea {
-                    anchors.fill:
-                        parent
-
-                    onClicked:
-                        liquidSlideOut.start()
-                }
-
-
-                // --------------------------------------------------------
-                // CONTENT
-                // --------------------------------------------------------
-
-                RowLayout {
-                    anchors.fill:
-                        parent
-
-                    anchors.margins:
-                        12
-
-                    spacing:
-                        12
-
-
-                    Item {
-                        Layout.preferredWidth:
-                            35
-
-                        Layout.preferredHeight:
-                            35
-
-
-                        Image {
-                            id: liquidNotifImgPopup
-
-                            anchors.fill:
-                                parent
-
-                            source:
-                                pIcon.startsWith("/")
-                                ? "file://" + pIcon
-                                : "image://icon/" + pIcon
-
-                            fillMode:
-                                Image.PreserveAspectCrop
-
-                            visible:
-                                false
-                        }
-
-
-                        Rectangle {
-                            id: liquidMaskPopup
-
-                            anchors.fill:
-                                parent
-
-                            radius:
-                                width / 2
-
-                            visible:
-                                false
-                        }
-
-
-                        OpacityMask {
-                            anchors.fill:
-                                parent
-
-                            source:
-                                liquidNotifImgPopup
-
-                            maskSource:
-                                liquidMaskPopup
-
-                            layer.enabled:
-                                pUrgency === 2
-                        }
-                    }
-
-
-                    ColumnLayout {
-                        spacing:
-                            2
-
-
-                        Text {
-                            text:
-                                pApp
-                                + (
-                                    pUrgency === 2
-                                    ? " • CRITICAL"
-                                    : ""
-                                )
-
-                            color:
-                                pUrgency === 2
-                                ? Theme.red
-                                : Theme.blue
-
-                            font.pixelSize:
-                                10
-
-                            font.bold:
-                                true
-                        }
-
-
-                        Text {
-                            text:
-                                pTitle
-
-                            color:
-                                Theme.white
-
-                            font.pixelSize:
-                                12
-
-                            font.bold:
-                                true
-
-                            elide:
-                                Text.ElideRight
-
-                            Layout.fillWidth:
-                                true
-                        }
-
-
-                        Text {
-                            text:
-                                pBody
-
-                            color:
-                                Theme.grey1
-
-                            font.pixelSize:
-                                11
-
-                            elide:
-                                Text.ElideRight
-
-                            Layout.fillWidth:
-                                true
-
-                            maximumLineCount:
-                                1
-                        }
-                    }
-
-
-                    Item {
-                        Layout.alignment:
-                            Qt.AlignTop
-                            | Qt.AlignRight
-
-                        width:
-                            20
-
-                        height:
-                            20
-
-
-                        Text {
-                            anchors.centerIn:
-                                parent
-
-                            text:
-                                "󰅖"
-
-                            font.family:
-                                Theme.fontIcons
-
-                            color:
-                                liquidXMousePopup.containsMouse
-                                ? Theme.white
-                                : Theme.grey1
-
-                            font.pixelSize:
-                                14
-                        }
-
-
-                        MouseArea {
-                            id: liquidXMousePopup
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
-
-                            onClicked: {
-                                liquidSlideOut.start()
-
-                                cmdProc.command = [
-                                    "sh",
-                                    "-c",
-                                    "echo 'REMOVE|"
-                                    + nId
-                                    + "' > /tmp/qs_notif_cmd"
-                                ]
-
-                                cmdProc.running =
-                                    true
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ============================================================
-    // TOP BAR — CLASSIC
-    // ============================================================
     PanelWindow {
         id: topBar
         screen: root.primaryUiScreen
@@ -1453,8 +993,6 @@ ShellRoot {
         // while eDP-1 is disabled (clamshell mode). Tune 38 if desired.
         exclusiveZone: screen && screen.name === "HDMI-A-1" ? 38 : 44
         color: "transparent"
-
-        visible: GlassMode.classic
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? topBarBlurRegion : null
 
@@ -1538,566 +1076,228 @@ ShellRoot {
                 }
             }
         }
-    }
 
-    // ============================================================
-    // TOP BAR — LIQUID GLASS
-    // ============================================================
-    PanelWindow {
-        id: liquidTopBar
-        screen: root.primaryUiScreen
-        anchors { top: true; left: true; right: true }
-        implicitHeight: 44
-        // Keep the laptop exactly as before. The HDMI value is used only
-        // while eDP-1 is disabled (clamshell mode). Tune 38 if desired.
-        exclusiveZone: screen && screen.name === "HDMI-A-1" ? 38 : 44
-        color: "transparent"
-        WlrLayershell.namespace: "quickshell:topbar"
+        PanelWindow {
+            id: popupMenuWindow
+            screen: root.primaryUiScreen
+            anchors { top: true; right: true }
+            WlrLayershell.layer: WlrLayershell.Overlay
+            implicitHeight: root.isMenuVisible ? 90 : 0
+            implicitWidth: 200
+            margins { right: root.activeMenuOffset }
+            exclusiveZone: 0
+            color: "transparent"
 
-        visible: GlassMode.liquid
+            /*
+             * SysMenu is a reusable GlassSurface, not a PanelWindow itself.
+             * The parent window therefore owns the backdrop blur request.
+             *
+             * A separate geometry target is used instead of the animated
+             * SysMenu surface, keeping the blur region stable while the menu
+             * fades/scales in and out.
+             */
+            BackgroundEffect.blurRegion: Glass.blurEnabled ? sysMenuBlurRegion : null
 
-        /*
-         * No BackgroundEffect in Liquid mode.
-         *
-         * The PanelWindow remains fully transparent and HyprGlass derives its
-         * mask only from the rendered alpha of the two actual GlassSurface
-         * capsules below.
-         */
-        Item {
-            anchors.fill: parent
-            opacity: 0
-            NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
-            
-            GlassSurface {
-                id: liquidLeftBarGlass
-                anchors.left: parent.left
-                anchors.leftMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                height: 34
-                width: liquidLeftRow.implicitWidth + 30
-                glassRadius: height / 2
-                glassOpacity: GlassMode.liquidQmlOpacity
-                showHighlight: false
+            Item {
+                id: sysMenuBlurTarget
+                anchors.fill: parent
+            }
 
-                RowLayout {
-                    id: liquidLeftRow
-                    anchors.centerIn: parent
-                    spacing: 25
-                    
-                    Text { 
-                        text: ""; color: Theme.white; font.family: Theme.fontIcons; font.pixelSize: 22; 
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { mainLauncher.toggle() } } 
-                    }
-                    Workspaces { showContainer: false } 
-                }
+            Region {
+                id: sysMenuBlurRegion
+                item: sysMenuBlurTarget
+                radius: 12
+            }
+
+            SysMenu {
+                id: sysMenu
+                title: root.activeMenuTitle
+                info1: root.activeMenuInfo1
+                info2: root.activeMenuInfo2
+                accent: root.activeMenuAccent
+                isOpen: root.isMenuOpen
+            }
+        }
+
+        // --- VENTANA DEL MENÚ DEL PORTAPAPELES ---
+        PanelWindow {
+            id: clipMenuWindow
+            screen: root.primaryUiScreen
+            anchors { top: true; right: true }
+            WlrLayershell.layer: WlrLayershell.Overlay
+            implicitWidth: 260
+            implicitHeight: root.isClipMenuOpen
+                ? Math.min(320, 63 + (root.clipboardModel.count * 32))
+                : 0
+            margins { right: 22 } // Alineado bajo el icono
+            exclusiveZone: 0
+            color: "transparent"
+
+            BackgroundEffect.blurRegion: Glass.blurEnabled ? clipBlurRegion : null
+
+            Region {
+                id: clipBlurRegion
+                item: clipGlass
+                radius: clipGlass.radius
             }
 
             GlassSurface {
-                id: liquidRightBarGlass
-                anchors.right: parent.right
-                anchors.rightMargin: 12
-                anchors.verticalCenter: parent.verticalCenter
-                height: 34
-                width: liquidRightRow.implicitWidth + 30
-                glassRadius: height / 2
-                glassOpacity: GlassMode.liquidQmlOpacity
-                showHighlight: false
+                id: clipGlass
+                anchors.fill: parent
+                glassRadius: 12
+                clip: true
 
-                RowLayout {
-                    id: liquidRightRow
-                    anchors.centerIn: parent
-                    spacing: 18
-                    
-                    Updates { Layout.rightMargin: 15 }
+                opacity: root.isClipMenuOpen ? 1.0 : 0.0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-                    SystemIcons { 
-                        id: liquidSysIconsModule; rootRef: root; ssid: root.wifiSsid; wifiSignal: root.wifiSig; freq: root.wifiFreq
-                        btOn: root.btStat === "on"; btDev: root.btDev; perf: root.perfMode; vol: root.vol; volMute: root.volMute; volDesc: root.volDesc
-                    }
+                transform: Translate {
+                    y: root.isClipMenuOpen ? 0 : -10
+                    Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+                }
 
-                    AppTray { Layout.alignment: Qt.AlignVCenter }
-                    Battery {
-                        percentage: root.batCap
-                        charging: (root.batStat === "Charging" || root.batStat === "Full")
-                        onAcPower: root.onAcPower
-                        batteryStatus: root.batStat
-                        powerSaverMode: root.perfMode === "power-saver"
-                    }
-                    MouseArea {
-                        width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
-                        Notification { 
-                            dnd: root.dnd; 
-                            count: root.notifCount; 
-                            hasUnread: root.hasUnread; 
-                            showContainer: false; 
-                            anchors.fill: parent 
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            root.isClipMenuHovered = true;
+                            clipHideTimer.stop();
+                        } else {
+                            root.isClipMenuHovered = false;
+                            clipHideTimer.start();
                         }
                     }
                 }
-            }
-        }
-    }
 
-    // =========================================================
-    // SYSTEM MENU — CLASSIC
-    // =========================================================
-    //
-    // Keep the original compositor path untouched:
-    // PanelWindow + BackgroundEffect.blurRegion + SysMenu.
-    // =========================================================
-    PanelWindow {
-        id: popupMenuWindow
-        screen: root.primaryUiScreen
-        anchors { top: true; right: true }
-        WlrLayershell.layer: WlrLayershell.Overlay
-        implicitHeight: root.isMenuVisible ? 90 : 0
-        implicitWidth: 200
-        margins { right: root.activeMenuOffset }
-        exclusiveZone: 0
-        color: "transparent"
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
 
-        visible: GlassMode.classic
-
-        /*
-         * SysMenu is a reusable GlassSurface, not a PanelWindow itself.
-         * The parent window therefore owns the backdrop blur request.
-         *
-         * A separate geometry target is used instead of the animated
-         * SysMenu surface, keeping the blur region stable while the menu
-         * fades/scales in and out.
-         */
-        BackgroundEffect.blurRegion: Glass.blurEnabled ? sysMenuBlurRegion : null
-
-        Item {
-            id: sysMenuBlurTarget
-            anchors.fill: parent
-        }
-
-        Region {
-            id: sysMenuBlurRegion
-            item: sysMenuBlurTarget
-            radius: 12
-        }
-
-        SysMenu {
-            id: sysMenu
-            title: root.activeMenuTitle
-            info1: root.activeMenuInfo1
-            info2: root.activeMenuInfo2
-            accent: root.activeMenuAccent
-            isOpen: root.isMenuOpen
-        }
-    }
-
-    // =========================================================
-    // SYSTEM MENU — LIQUID GLASS
-    // =========================================================
-    //
-    // Separate layer surface so HyprGlass can target the menu
-    // without changing the known-good Classic path above.
-    // =========================================================
-    PanelWindow {
-        id: liquidPopupMenuWindow
-        screen: root.primaryUiScreen
-        anchors { top: true; right: true }
-
-        WlrLayershell.layer: WlrLayershell.Overlay
-        WlrLayershell.namespace: "quickshell:sysmenu"
-
-        implicitHeight: root.isMenuVisible ? 90 : 0
-        implicitWidth: 200
-
-        margins {
-            right: root.activeMenuOffset
-        }
-
-        exclusiveZone: 0
-        color: "transparent"
-
-        visible: GlassMode.liquid
-
-        SysMenu {
-            id: liquidSysMenu
-
-            title: root.activeMenuTitle
-            info1: root.activeMenuInfo1
-            info2: root.activeMenuInfo2
-            accent: root.activeMenuAccent
-            isOpen: root.isMenuOpen
-
-            glassOpacity: GlassMode.liquidQmlOpacity
-            showHighlight: false
-        }
-    }
-
-    // ============================================================
-    // CLIPBOARD — CLASSIC
-    // ============================================================
-    PanelWindow {
-        id: clipMenuWindow
-        screen: root.primaryUiScreen
-        anchors { top: true; right: true }
-        WlrLayershell.layer: WlrLayershell.Overlay
-        implicitWidth: 260
-        implicitHeight: root.isClipMenuOpen
-            ? Math.min(320, 63 + (root.clipboardModel.count * 32))
-            : 0
-        margins { right: 22 } // Alineado bajo el icono
-        exclusiveZone: 0
-        color: "transparent"
-
-        visible: GlassMode.classic
-
-        BackgroundEffect.blurRegion: Glass.blurEnabled ? clipBlurRegion : null
-
-        Region {
-            id: clipBlurRegion
-            item: clipGlass
-            radius: clipGlass.radius
-        }
-
-        GlassSurface {
-            id: clipGlass
-            anchors.fill: parent
-            glassRadius: 12
-            clip: true
-
-            opacity: root.isClipMenuOpen ? 1.0 : 0.0
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-            transform: Translate {
-                y: root.isClipMenuOpen ? 0 : -10
-                Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-            }
-
-            HoverHandler {
-                onHoveredChanged: {
-                    if (hovered) {
-                        root.isClipMenuHovered = true;
-                        clipHideTimer.stop();
-                    } else {
-                        root.isClipMenuHovered = false;
-                        clipHideTimer.start();
-                    }
-                }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20
-
-                    Text {
-                        text: "Clipboard"
-                        color: Theme.white
-                        font.family: Theme.fontMain
-                        font.pixelSize: 12
-                        font.bold: true
+                    RowLayout {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 20
+
+                        Text {
+                            text: "Clipboard"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            font.bold: true
+                            Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: 55
+                            Layout.preferredHeight: 18
+                            radius: 4
+                            color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
+                            border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Clear"
+                                color: clearMouse.containsMouse ? Theme.red : Theme.grey1
+                                font.pixelSize: 9
+                            }
+
+                            MouseArea {
+                                id: clearMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: root.clipboardModel.count > 0
+                                onClicked: root.clearClipHistory()
+                            }
+                        }
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 55
-                        Layout.preferredHeight: 18
-                        radius: 4
-                        color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
-                        border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Clear"
-                            color: clearMouse.containsMouse ? Theme.red : Theme.grey1
-                            font.pixelSize: 9
-                        }
-
-                        MouseArea {
-                            id: clearMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: root.clipboardModel.count > 0
-                            onClicked: root.clearClipHistory()
-                        }
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Qt.alpha(Theme.white, 0.1)
                     }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: Qt.alpha(Theme.white, 0.1)
-                }
-
-                Text {
-                    visible: root.clipboardModel.count === 0
-                    text: "No clipboard history"
-                    color: Theme.grey1
-                    font.family: Theme.fontMain
-                    font.pixelSize: 10
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
-
-                ListView {
-                    id: clipboardList
-                    visible: root.clipboardModel.count > 0
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    spacing: 4
-                    model: root.clipboardModel
-
-                    delegate: Rectangle {
-                        required property string clipId
-                        required property string clipContent
-
-                        width: ListView.view.width
-                        height: 28
-                        radius: 6
-                        color: rowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 6
-                            anchors.rightMargin: 6
-                            spacing: 6
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-
-                                Text {
-                                    anchors.fill: parent
-                                    anchors.rightMargin: 4
-                                    text: clipContent
-                                    color: Theme.white
-                                    font.family: Theme.fontMain
-                                    font.pixelSize: 11
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 1
-                                }
-
-                                MouseArea {
-                                    id: rowMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.copyClipItem(clipId)
-                                }
-                            }
-
-                            Item {
-                                Layout.preferredWidth: 18
-                                Layout.preferredHeight: 18
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "󰅖"
-                                    font.family: Theme.fontIcons
-                                    font.pixelSize: 12
-                                    color: delArea.containsMouse ? Theme.red : Theme.grey1
-                                }
-
-                                MouseArea {
-                                    id: delArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.deleteClipItem(clipId)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ============================================================
-    // CLIPBOARD — LIQUID GLASS
-    // ============================================================
-    PanelWindow {
-        id: liquidClipMenuWindow
-        screen: root.primaryUiScreen
-        anchors { top: true; right: true }
-        WlrLayershell.layer: WlrLayershell.Overlay
-        WlrLayershell.namespace: "quickshell:clipboard"
-        implicitWidth: 260
-        implicitHeight: root.isClipMenuOpen
-            ? Math.min(320, 63 + (root.clipboardModel.count * 32))
-            : 0
-        margins { right: 22 } // Alineado bajo el icono
-        exclusiveZone: 0
-        color: "transparent"
-
-        visible: GlassMode.liquid
-
-        GlassSurface {
-            id: liquidClipGlass
-            anchors.fill: parent
-            glassRadius: 12
-            glassOpacity: GlassMode.liquidQmlOpacity
-            showHighlight: false
-            clip: true
-
-            opacity: root.isClipMenuOpen ? 1.0 : 0.0
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-
-            transform: Translate {
-                y: root.isClipMenuOpen ? 0 : -10
-                Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-            }
-
-            HoverHandler {
-                onHoveredChanged: {
-                    if (hovered) {
-                        root.isClipMenuHovered = true;
-                        clipHideTimer.stop();
-                    } else {
-                        root.isClipMenuHovered = false;
-                        clipHideTimer.start();
-                    }
-                }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 20
 
                     Text {
-                        text: "Clipboard"
-                        color: Theme.white
+                        visible: root.clipboardModel.count === 0
+                        text: "No clipboard history"
+                        color: Theme.grey1
                         font.family: Theme.fontMain
-                        font.pixelSize: 12
-                        font.bold: true
+                        font.pixelSize: 10
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
                     }
 
-                    Rectangle {
-                        Layout.preferredWidth: 55
-                        Layout.preferredHeight: 18
-                        radius: 4
-                        color: liquidClipClearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
-                        border.color: liquidClipClearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
-                        border.width: 1
+                    ListView {
+                        id: clipboardList
+                        visible: root.clipboardModel.count > 0
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        spacing: 4
+                        model: root.clipboardModel
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Clear"
-                            color: liquidClipClearMouse.containsMouse ? Theme.red : Theme.grey1
-                            font.pixelSize: 9
-                        }
+                        delegate: Rectangle {
+                            required property string clipId
+                            required property string clipContent
 
-                        MouseArea {
-                            id: liquidClipClearMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: root.clipboardModel.count > 0
-                            onClicked: root.clearClipHistory()
-                        }
-                    }
-                }
+                            width: ListView.view.width
+                            height: 28
+                            radius: 6
+                            color: rowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: Qt.alpha(Theme.white, 0.1)
-                }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 6
+                                spacing: 6
 
-                Text {
-                    visible: root.clipboardModel.count === 0
-                    text: "No clipboard history"
-                    color: Theme.grey1
-                    font.family: Theme.fontMain
-                    font.pixelSize: 10
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
+                                Item {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
 
-                ListView {
-                    id: liquidClipboardList
-                    visible: root.clipboardModel.count > 0
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    spacing: 4
-                    model: root.clipboardModel
+                                    Text {
+                                        anchors.fill: parent
+                                        anchors.rightMargin: 4
+                                        text: clipContent
+                                        color: Theme.white
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+                                    }
 
-                    delegate: Rectangle {
-                        required property string clipId
-                        required property string clipContent
-
-                        width: ListView.view.width
-                        height: 28
-                        radius: 6
-                        color: liquidClipRowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 6
-                            anchors.rightMargin: 6
-                            spacing: 6
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-
-                                Text {
-                                    anchors.fill: parent
-                                    anchors.rightMargin: 4
-                                    text: clipContent
-                                    color: Theme.white
-                                    font.family: Theme.fontMain
-                                    font.pixelSize: 11
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 1
+                                    MouseArea {
+                                        id: rowMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.copyClipItem(clipId)
+                                    }
                                 }
 
-                                MouseArea {
-                                    id: liquidClipRowMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.copyClipItem(clipId)
-                                }
-                            }
+                                Item {
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
 
-                            Item {
-                                Layout.preferredWidth: 18
-                                Layout.preferredHeight: 18
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "󰅖"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 12
+                                        color: delArea.containsMouse ? Theme.red : Theme.grey1
+                                    }
 
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "󰅖"
-                                    font.family: Theme.fontIcons
-                                    font.pixelSize: 12
-                                    color: liquidClipDelArea.containsMouse ? Theme.red : Theme.grey1
-                                }
-
-                                MouseArea {
-                                    id: liquidClipDelArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.deleteClipItem(clipId)
+                                    MouseArea {
+                                        id: delArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.deleteClipItem(clipId)
+                                    }
                                 }
                             }
                         }
@@ -2105,28 +1305,58 @@ ShellRoot {
                 }
             }
         }
-    }
 
-    // ============================================================
-    // DYNAMIC ISLAND — NOT MIGRATED YET
-    // ============================================================
-    DynamicIsland {
-        id: islandWidget
+        DynamicIsland {
+            id: islandWidget
 
-        // Laptop keeps its original -38 value. The HDMI value is used
-        // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
-        topMargin: root.primaryUiScreen
-            && root.primaryUiScreen.name === "HDMI-A-1"
-            ? -32
-            : -38
+            // Laptop keeps its original -38 value. The HDMI value is used
+            // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
+            topMargin: root.primaryUiScreen
+                && root.primaryUiScreen.name === "HDMI-A-1"
+                ? -32
+                : -38
 
-        isFullscreen: root.isFullscreen
-        isBtConnected: {
-            var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
-            return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            isFullscreen: root.isFullscreen
+            isBtConnected: {
+                var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
+                return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
         }
     }
 
+    // --- MONITOR DE PANTALLA COMPLETA ---
+    Process {
+        id: fullscreenMonitorProc
+        command: [
+            "bash", "-c",
+            // check_fs: usamos 'jq' para EXTRAER el valor (no para decidir verdad/falso con -e,
+            // ya que jq considera "truthy" cualquier valor != null/false, incluido el entero 0).
+            "check_fs() { " +
+            "  val=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.hasfullscreen' 2>/dev/null); " +
+            "  if [ \"$val\" = \"true\" ] || [ \"$val\" = \"1\" ]; then echo 1; else echo 0; fi; " +
+            "}; " +
+            "check_fs; " +
+            "SOCAT_BIN=$(command -v socat); " +
+            "if [ -n \"$SOCAT_BIN\" ]; then " +
+            "  \"$SOCAT_BIN\" -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock 2>/dev/null | grep --line-buffered -E '(fullscreen|workspace)' | while read -r _; do check_fs; done; " +
+            "else " +
+            "  while true; do check_fs; sleep 2; done; " +
+            "fi"
+        ]
+        running: true
+        stdout: SplitParser {
+            onRead: (data) => {
+                var val = data.trim();
+                root.isFullscreen = (val === "1");
+
+                // Never carry a reveal state across fullscreen sessions.
+                if (!root.isFullscreen) {
+                    root.isTopHovered = false;
+                    topHideTimer.stop();
+                }
+            }
+        }
+    }
 
     // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en una franja central del borde superior) ---
     PanelWindow {
@@ -2162,33 +1392,15 @@ ShellRoot {
         interval: 180
         repeat: false
         onTriggered: {
-            if (!topTriggerArea.containsMouse
-                    && !fsGhostMouseArea.containsMouse
-                    && !liquidFsGhostMouseArea.containsMouse) {
+            if (!topTriggerArea.containsMouse && !fsGhostMouseArea.containsMouse) {
                 root.isTopHovered = false
             }
         }
     }
 
-    // Do not carry the fullscreen reveal state into normal desktop mode.
-    onIsFullscreenChanged: {
-        if (!isFullscreen) {
-            isTopHovered = false
-            topHideTimer.stop()
-        }
-    }
-
-    // ============================================================
-    // FULLSCREEN GHOST ISLAND — CLASSIC
-    // ============================================================
-    //
-    // Classic deliberately keeps the old, known-good implementation:
-    //
-    //   GlassSurface + BackgroundEffect.blurRegion
-    //
-    // It has no custom namespace and therefore follows the exact same
-    // compositor path it used before the Liquid Glass migration.
-    // ============================================================
+    // --- WIDGET FULLSCREEN: solo reloj + batería ---
+    // It is a separate, non-expandable pill; the real Dynamic Island stays
+    // hidden in fullscreen through DynamicIsland.isFullscreen.
     PanelWindow {
         id: fullscreenGhostIsland
         screen: root.primaryUiScreen
@@ -2198,14 +1410,16 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
 
-        visible:
-            GlassMode.classic
-            && root.isFullscreen
-            && root.isTopHovered
+        // Important: do not keep the pill permanently mapped and merely move
+        // it above the screen. It exists visually only while the pointer is in
+        // the top-centre reveal area (or over the pill itself).
+        visible: root.isFullscreen && root.isTopHovered
 
         implicitWidth: fsGhostLayout.implicitWidth + 36
         implicitHeight: 32
 
+        // Same resting position as the normal island. Keep the clamshell HDMI
+        // adjustment in sync with DynamicIsland.topMargin above.
         margins {
             top: root.primaryUiScreen
                 && root.primaryUiScreen.name === "HDMI-A-1"
@@ -2213,10 +1427,7 @@ ShellRoot {
                 : -38
         }
 
-        BackgroundEffect.blurRegion:
-            Glass.blurEnabled
-            ? ghostBlurRegion
-            : null
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? ghostBlurRegion : null
 
         Region {
             id: ghostBlurRegion
@@ -2229,18 +1440,16 @@ ShellRoot {
             anchors.fill: parent
             glassRadius: height / 2
 
+            // Hovering the pill keeps it visible, but never opens or expands it.
             MouseArea {
                 id: fsGhostMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
-
                 onEntered: {
                     root.isTopHovered = true
                     topHideTimer.stop()
                 }
-
-                onExited:
-                    topHideTimer.start()
+                onExited: topHideTimer.start()
             }
 
             RowLayout {
@@ -2268,126 +1477,12 @@ ShellRoot {
 
         Timer {
             interval: 2000
-            running:
-                GlassMode.classic
-                && root.isFullscreen
-                && root.isTopHovered
-
+            running: root.isFullscreen && root.isTopHovered
             repeat: true
             triggeredOnStart: true
-
             onTriggered: {
-                var timeStr =
-                    new Date().toLocaleTimeString(
-                        Qt.locale("en_US"),
-                        "hh:mm A"
-                    )
-
-                if (fsGhostClockText.text !== timeStr)
-                    fsGhostClockText.text = timeStr
-            }
-        }
-    }
-
-    // ============================================================
-    // FULLSCREEN GHOST ISLAND — LIQUID GLASS
-    // ============================================================
-    //
-    // Liquid uses its own layer surface so HyprGlass can target it
-    // without changing the Classic compositor path.
-    // ============================================================
-    PanelWindow {
-        id: liquidFullscreenGhostIsland
-        screen: root.primaryUiScreen
-        anchors { top: true }
-
-        WlrLayershell.layer: WlrLayershell.Overlay
-        WlrLayershell.namespace: "quickshell:fullscreen-ghost"
-
-        exclusiveZone: 0
-        color: "transparent"
-
-        visible:
-            GlassMode.liquid
-            && root.isFullscreen
-            && root.isTopHovered
-
-        implicitWidth: liquidFsGhostLayout.implicitWidth + 36
-        implicitHeight: 32
-
-        margins {
-            top: root.primaryUiScreen
-                && root.primaryUiScreen.name === "HDMI-A-1"
-                ? -32
-                : -38
-        }
-
-        GlassSurface {
-            id: liquidFsGhostGlass
-            anchors.fill: parent
-            glassRadius: height / 2
-
-            // QML only provides the lightweight colour/body layer.
-            // HyprGlass owns the real blur/refraction/Fresnel material.
-            glassOpacity: GlassMode.liquidQmlOpacity
-            showHighlight: false
-
-            MouseArea {
-                id: liquidFsGhostMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-
-                onEntered: {
-                    root.isTopHovered = true
-                    topHideTimer.stop()
-                }
-
-                onExited:
-                    topHideTimer.start()
-            }
-
-            RowLayout {
-                id: liquidFsGhostLayout
-                anchors.centerIn: parent
-                spacing: 10
-
-                Text {
-                    id: liquidFsGhostClockText
-                    color: Theme.white
-                    font.family: Theme.fontMain
-                    font.pixelSize: 14
-                    font.bold: true
-                }
-
-                Battery {
-                    percentage: root.batCap
-                    charging: (root.batStat === "Charging" || root.batStat === "Full")
-                    onAcPower: root.onAcPower
-                    batteryStatus: root.batStat
-                    powerSaverMode: root.perfMode === "power-saver"
-                }
-            }
-        }
-
-        Timer {
-            interval: 2000
-            running:
-                GlassMode.liquid
-                && root.isFullscreen
-                && root.isTopHovered
-
-            repeat: true
-            triggeredOnStart: true
-
-            onTriggered: {
-                var timeStr =
-                    new Date().toLocaleTimeString(
-                        Qt.locale("en_US"),
-                        "hh:mm A"
-                    )
-
-                if (liquidFsGhostClockText.text !== timeStr)
-                    liquidFsGhostClockText.text = timeStr
+                var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
+                if (fsGhostClockText.text !== timeStr) fsGhostClockText.text = timeStr;
             }
         }
     }
@@ -2728,28 +1823,13 @@ ShellRoot {
         id: dockHideTimer
         interval: 350
         onTriggered: {
-            if (!classicDockHoverHandler.hovered
-                    && !liquidDockHoverHandler.hovered
-                    && !triggerArea.containsMouse) {
+            if (!dockHoverHandler.hovered && !triggerArea.containsMouse) {
                 root.isDockHovered = false;
             }
         }
     }
 
-    // ============================================================
-    // CLASSIC DOCK
-    // ============================================================
-    //
-    // This window intentionally preserves the old, known-good dock
-    // implementation:
-    //
-    //   - no custom layer namespace
-    //   - the original BackgroundEffect.blurRegion
-    //   - the original GlassSurface material
-    //
-    // Keeping Classic as its own layer surface avoids changing the
-    // compositor path that made the old dock render correctly.
-    // ============================================================
+    // --- COMPONENTE DEL DOCK ---
     PanelWindow {
         id: customDockWindow
         screen: root.primaryUiScreen
@@ -2760,9 +1840,7 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
 
-        visible: GlassMode.classic
-
-        // Same position/behaviour as the old working dock.
+        // Same position/behaviour as before, just a little larger visually.
         implicitWidth: dockLayout.implicitWidth + 34
         implicitHeight: 66
 
@@ -2782,7 +1860,6 @@ ShellRoot {
             id: emptyDockInputRegion
         }
 
-        // Keep the exact classic blur path from the old working shell.
         BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
 
         Region {
@@ -2816,11 +1893,8 @@ ShellRoot {
                 anchors.fill: parent
                 glassRadius: 18
 
-                // Intentionally no Liquid-specific overrides here.
-                // Classic must behave exactly like the old dock.
-
                 HoverHandler {
-                    id: classicDockHoverHandler
+                    id: dockHoverHandler
                     onHoveredChanged: {
                         if (hovered) {
                             root.isDockHovered = true;
@@ -2868,121 +1942,6 @@ ShellRoot {
         }
 
         Process { id: dockLauncherProc }
-    }
-
-    // ============================================================
-    // LIQUID GLASS DOCK
-    // ============================================================
-    //
-    // Liquid Glass gets its own independent layer surface and namespace.
-    // This means enabling Liquid Glass never changes the Classic dock's
-    // namespace, blur region or compositor behaviour.
-    // ============================================================
-    PanelWindow {
-        id: liquidDockWindow
-        screen: root.primaryUiScreen
-        anchors { bottom: true }
-        margins { bottom: root.bottomGap }
-
-        WlrLayershell.layer: WlrLayershell.Overlay
-        WlrLayershell.namespace: "quickshell:dock"
-
-        exclusiveZone: 0
-        color: "transparent"
-
-        visible: GlassMode.liquid
-
-        implicitWidth: liquidDockLayout.implicitWidth + 34
-        implicitHeight: 66
-
-        mask: liquidDockVisual.showDock
-            ? liquidDockInputRegion
-            : emptyLiquidDockInputRegion
-
-        Region {
-            id: liquidDockInputRegion
-            item: liquidDockGlass
-            radius: liquidDockGlass.radius
-        }
-
-        Region {
-            id: emptyLiquidDockInputRegion
-        }
-
-        Item {
-            id: liquidDockVisual
-            anchors.fill: parent
-
-            property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
-
-            opacity: showDock ? 1 : 0
-            visible: opacity > 0
-
-            transform: Translate {
-                y: liquidDockVisual.showDock ? 0 : 25
-                Behavior on y {
-                    NumberAnimation { duration: 400; easing.type: Easing.OutQuint }
-                }
-            }
-
-            Behavior on opacity {
-                NumberAnimation { duration: 300; easing.type: Easing.OutQuint }
-            }
-
-            GlassSurface {
-                id: liquidDockGlass
-                anchors.fill: parent
-                glassRadius: 18
-
-                // QML only contributes the light tint/body in Liquid mode.
-                // HyprGlass renders the actual optical effect for this namespace.
-                glassOpacity: GlassMode.liquidQmlOpacity
-                showHighlight: false
-
-                HoverHandler {
-                    id: liquidDockHoverHandler
-                    onHoveredChanged: {
-                        if (hovered) {
-                            root.isDockHovered = true;
-                            dockHideTimer.stop();
-                        } else {
-                            dockHideTimer.start();
-                        }
-                    }
-                }
-
-                RowLayout {
-                    id: liquidDockLayout
-                    anchors.centerIn: parent
-                    spacing: 9
-
-                    Repeater {
-                        model: DockConfig.apps
-
-                        DockItem {
-                            required property var modelData
-                            app: modelData
-
-                            onActivated: function(app) {
-                                if (app.action === "launcher") {
-                                    mainLauncher.toggle()
-                                    return
-                                }
-
-                                if (app.command && app.command.length > 0) {
-                                    dockLauncherProc.command = [
-                                        "bash",
-                                        "-c",
-                                        app.command + " & disown"
-                                    ]
-                                    dockLauncherProc.running = true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 
     // --- COMPONENTE OVERLAY DE ALT+TAB ---

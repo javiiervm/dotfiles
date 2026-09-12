@@ -41,7 +41,6 @@ PanelWindow {
     property bool nightLightState: false
     property int nightLightTemperature: 4000
     property bool nightLightTemperatureOpen: false
-
     // Which value the shared Brightness/Night-Light slider is editing.
     // Left click on the icon toggles Night Light; right click toggles this mode.
     property bool brightnessTemperatureMode: false
@@ -92,7 +91,6 @@ PanelWindow {
     readonly property int calendarHeight: topTileHeight * 2 + tileGap
     readonly property int smallButtonSize: 62
     readonly property int notificationHeight: 86
-
     // Compact horizontal Volume/Brightness controls. They deliberately use
     // almost the same height as the "Clear All" pill so this row feels
     // lighter than the large connectivity tiles above it.
@@ -151,6 +149,9 @@ PanelWindow {
         if (!notionEventsData || notionEventsData.length === 0)
             return []
 
+        // Match the exact ISO date produced by notion_sync.py.
+        // This prevents "2 Sep" from matching "12 Sep", "6 Aug" from
+        // matching "26 Aug", etc.
         var dateKey = Qt.formatDate(date, "yyyy-MM-dd")
 
         for (var i = 0; i < notionEventsData.length; i++) {
@@ -162,10 +163,7 @@ PanelWindow {
     }
 
     function eventStartMinutes(eventObject) {
-        var value = (eventObject && eventObject.time)
-            ? String(eventObject.time)
-            : ""
-
+        var value = (eventObject && eventObject.time) ? String(eventObject.time) : ""
         var match = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i)
 
         if (!match)
@@ -194,9 +192,11 @@ PanelWindow {
             var aAllDay = a && String(a.time).toLowerCase() === "all day"
             var bAllDay = b && String(b.time).toLowerCase() === "all day"
 
+            // All-day events always come first.
             if (aAllDay !== bAllDay)
                 return aAllDay ? -1 : 1
 
+            // Timed events remain ordered chronologically by start time.
             return eventStartMinutes(a) - eventStartMinutes(b)
         })
 
@@ -209,7 +209,6 @@ PanelWindow {
             date.getMonth(),
             date.getDate()
         )
-
         selectedEvents = sortedEventsForDate(selectedDateObj)
         agendaVisible = true
     }
@@ -230,10 +229,12 @@ PanelWindow {
         var now = new Date()
 
         if (sameCalendarDay(selectedDateObj, now)) {
+            // On today, clicking the date toggles back to the month view.
             agendaVisible = false
             displayMonth = now.getMonth()
             displayYear = now.getFullYear()
         } else {
+            // On any other day, the date label jumps back to today's agenda.
             selectAgendaDate(now)
             displayMonth = now.getMonth()
             displayYear = now.getFullYear()
@@ -242,38 +243,26 @@ PanelWindow {
 
     Process {
         id: notionSyncProc
-
-        running:
-            ncWindow.visible_state
-
+        running: ncWindow.visible_state
         command: [
-            "bash",
-            "-c",
-            "source ~/.config/quickshell/secrets.env 2>/dev/null; "
-            + "python3 ~/.config/quickshell/scripts/notion_sync.py; "
-            + "cat ~/.cache/qs_notion.json 2>/dev/null || "
-            + "echo '{\"header\": \"Not Configured\", \"events\": []}'"
+            "bash", "-c",
+            "source ~/.config/quickshell/secrets.env 2>/dev/null; " +
+            "python3 ~/.config/quickshell/scripts/notion_sync.py; " +
+            "cat ~/.cache/qs_notion.json 2>/dev/null || " +
+            "echo '{\"header\": \"Not Configured\", \"events\": []}'"
         ]
 
         stdout: SplitParser {
             onRead: function(data) {
                 try {
                     var parsed = JSON.parse(data.trim())
+                    ncWindow.notionEventsData = parsed.days || []
 
-                    ncWindow.notionEventsData =
-                        parsed.days || []
-
-                    if (ncWindow.agendaVisible) {
+                    if (ncWindow.agendaVisible)
                         ncWindow.selectedEvents =
-                            ncWindow.sortedEventsForDate(
-                                ncWindow.selectedDateObj
-                            )
-                    }
+                            ncWindow.sortedEventsForDate(ncWindow.selectedDateObj)
                 } catch (e) {
-                    console.warn(
-                        "NotificationCenter: calendar backend parse error:",
-                        e
-                    )
+                    console.warn("NotificationCenter: calendar backend parse error:", e)
                 }
             }
         }
@@ -299,19 +288,16 @@ PanelWindow {
         if (trackWidth <= 0)
             return
 
-        volumeLevel =
-            clamp01(mouseX / trackWidth)
+        volumeLevel = clamp01(mouseX / trackWidth)
     }
 
     function setBrightnessPreviewFromX(mouseX, trackWidth) {
         if (trackWidth <= 0)
             return
 
-        brightnessLevel =
-            Math.max(
-                0.01,
-                clamp01(mouseX / trackWidth)
-            )
+        // Keep a tiny non-zero floor. Many laptop backlights accept 0%, but
+        // on some panels that effectively turns the screen completely black.
+        brightnessLevel = Math.max(0.01, clamp01(mouseX / trackWidth))
     }
 
     function applyVolume() {
@@ -321,15 +307,12 @@ PanelWindow {
         }
 
         volumeApplyPending = false
-
         volumeSetProc.command = [
-            "bash",
-            "-c",
+            "bash", "-c",
             "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "
             + volumeLevel.toFixed(3)
             + "; wpctl set-mute @DEFAULT_AUDIO_SINK@ 0"
         ]
-
         volumeSetProc.running = true
     }
 
@@ -340,54 +323,26 @@ PanelWindow {
         }
 
         brightnessApplyPending = false
-
-        var percent =
-            Math.max(
-                1,
-                Math.min(
-                    100,
-                    Math.round(
-                        brightnessLevel * 100
-                    )
-                )
-            )
-
+        var percent = Math.max(1, Math.min(100, Math.round(brightnessLevel * 100)))
         brightnessSetProc.command = [
-            "brightnessctl",
-            "set",
-            percent + "%"
+            "brightnessctl", "set", percent + "%"
         ]
-
         brightnessSetProc.running = true
     }
 
     Process {
         id: volumeSetProc
-
         onRunningChanged: {
-            if (
-                !running
-                && ncWindow.volumeApplyPending
-            ) {
-                Qt.callLater(
-                    ncWindow.applyVolume
-                )
-            }
+            if (!running && ncWindow.volumeApplyPending)
+                Qt.callLater(ncWindow.applyVolume)
         }
     }
 
     Process {
         id: brightnessSetProc
-
         onRunningChanged: {
-            if (
-                !running
-                && ncWindow.brightnessApplyPending
-            ) {
-                Qt.callLater(
-                    ncWindow.applyBrightness
-                )
-            }
+            if (!running && ncWindow.brightnessApplyPending)
+                Qt.callLater(ncWindow.applyBrightness)
         }
     }
 
@@ -395,155 +350,104 @@ PanelWindow {
         id: volumeMuteProc
     }
 
+    // Event-driven monitor, deliberately alive only while the Notification
+    // Center is open. It performs one initial read and then sleeps until
+    // PipeWire/PulseAudio or the kernel backlight emits a change event.
     Process {
         id: mediaControlsMonitor
-
-        running:
-            ncWindow.visible_state
-
+        running: ncWindow.visible_state
         command: [
-            "bash",
-            "-c",
-
-            "LC_ALL=C; "
-            + "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs_nc_media_$$\"; "
-            + "rm -f \"$F\"; mkfifo \"$F\"; exec 3<>\"$F\"; "
-
-            + "pactl subscribe 2>/dev/null "
-            + "| grep --line-buffered -E '(sink|server)' "
-            + "| while read -r _; do echo SND >&3; done & "
-
-            + "udevadm monitor --subsystem-match=backlight 2>/dev/null "
-            + "| grep --line-buffered 'change' "
-            + "| while read -r _; do echo BRI >&3; done & "
-
-            + "trap 'kill $(jobs -p) 2>/dev/null; rm -f \"$F\"' EXIT; "
-
-            + "read_values() { "
-            + "  vf=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0'); "
-            + "  vol=${vf#* }; vol=${vol% \\[MUTED\\]}; "
-            + "  [[ \"$vf\" == *MUTED* ]] && muted=1 || muted=0; "
-            + "  b_raw=$(brightnessctl -m 2>/dev/null || echo 'backlight,backlight,0,0%'); "
-            + "  IFS=, read -r _ _ _ pct _ <<< \"$b_raw\"; bri=${pct%%%}; "
-            + "  echo \"$vol;$muted;$bri\"; "
-            + "}; "
-
-            + "read_values; "
-            + "while read -r _ <&3; do read_values; done"
+            "bash", "-c",
+            "LC_ALL=C; " +
+            "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs_nc_media_$$\"; " +
+            "rm -f \"$F\"; mkfifo \"$F\"; exec 3<>\"$F\"; " +
+            "pactl subscribe 2>/dev/null | grep --line-buffered -E '(sink|server)' | while read -r _; do echo SND >&3; done & " +
+            "udevadm monitor --subsystem-match=backlight 2>/dev/null | grep --line-buffered 'change' | while read -r _; do echo BRI >&3; done & " +
+            "trap 'kill $(jobs -p) 2>/dev/null; rm -f \"$F\"' EXIT; " +
+            "read_values() { " +
+            "  vf=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0'); " +
+            "  vol=${vf#* }; vol=${vol% \\[MUTED\\]}; " +
+            "  [[ \"$vf\" == *MUTED* ]] && muted=1 || muted=0; " +
+            "  b_raw=$(brightnessctl -m 2>/dev/null || echo 'backlight,backlight,0,0%'); " +
+            "  IFS=, read -r _ _ _ pct _ <<< \"$b_raw\"; bri=${pct%%%}; " +
+            "  echo \"$vol;$muted;$bri\"; " +
+            "}; " +
+            "read_values; while read -r _ <&3; do read_values; done"
         ]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var fields =
-                    data.trim().split(";")
-
+                var fields = data.trim().split(";")
                 if (fields.length < 3)
                     return
 
-                var newVolume =
-                    parseFloat(fields[0])
+                var newVolume = parseFloat(fields[0])
+                var newBrightness = parseFloat(fields[2]) / 100.0
 
-                var newBrightness =
-                    parseFloat(fields[2]) / 100.0
+                if (!ncWindow.volumeDragging && !isNaN(newVolume))
+                    ncWindow.volumeLevel = ncWindow.clamp01(newVolume)
 
-                if (
-                    !ncWindow.volumeDragging
-                    && !isNaN(newVolume)
-                ) {
-                    ncWindow.volumeLevel =
-                        ncWindow.clamp01(
-                            newVolume
-                        )
-                }
+                ncWindow.volumeMuted = fields[1] === "1"
 
-                ncWindow.volumeMuted =
-                    fields[1] === "1"
-
-                if (
-                    !ncWindow.brightnessDragging
-                    && !isNaN(newBrightness)
-                ) {
-                    ncWindow.brightnessLevel =
-                        ncWindow.clamp01(
-                            newBrightness
-                        )
-                }
+                if (!ncWindow.brightnessDragging && !isNaN(newBrightness))
+                    ncWindow.brightnessLevel = ncWindow.clamp01(newBrightness)
             }
         }
     }
 
+    // These timers only exist while the user is actively dragging a slider.
+    // They make the controls feel live without introducing periodic work in
+    // the background when the panel is idle or closed.
     Timer {
         id: volumeDragApplyTimer
-
         interval: 45
         repeat: true
-
-        running:
-            ncWindow.volumeDragging
-
-        onTriggered:
-            ncWindow.applyVolume()
+        running: ncWindow.volumeDragging
+        onTriggered: ncWindow.applyVolume()
     }
 
     Timer {
         id: brightnessDragApplyTimer
-
         interval: 45
         repeat: true
-
-        running:
-            ncWindow.brightnessDragging
-
-        onTriggered:
-            ncWindow.applyBrightness()
+        running: ncWindow.brightnessDragging
+        onTriggered: ncWindow.applyBrightness()
     }
 
-    onWifiStateChanged:
-        wifiPending = false
-
-    onBtStateChanged:
-        btPending = false
-
-    onAirplaneStateChanged:
-        airplanePending = false
-
-    onCaffeineStateChanged:
-        caffeinePending = false
+    onWifiStateChanged: wifiPending = false
+    onBtStateChanged: btPending = false
+    onAirplaneStateChanged: airplanePending = false
+    onCaffeineStateChanged: caffeinePending = false
 
     Timer {
         id: wifiTimer
         interval: 3000
-        onTriggered:
-            ncWindow.wifiPending = false
+        onTriggered: ncWindow.wifiPending = false
     }
 
     Timer {
         id: btTimer
         interval: 3000
-        onTriggered:
-            ncWindow.btPending = false
+        onTriggered: ncWindow.btPending = false
     }
 
     Timer {
         id: airplaneTimer
         interval: 3000
-        onTriggered:
-            ncWindow.airplanePending = false
+        onTriggered: ncWindow.airplanePending = false
     }
 
     Timer {
         id: caffeineTimer
         interval: 3000
-        onTriggered:
-            ncWindow.caffeinePending = false
+        onTriggered: ncWindow.caffeinePending = false
     }
 
     // ---------------------------------------------------------------------
     // Window
     // ---------------------------------------------------------------------
 
-    screen:
-        Quickshell.screens[0]
+    screen: Quickshell.screens[0]
 
     anchors.top: true
     anchors.bottom: true
@@ -551,65 +455,42 @@ PanelWindow {
     anchors.right: true
 
     exclusiveZone: 0
-
-    WlrLayershell.layer:
-        WlrLayershell.Overlay
-
+    WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.keyboardFocus:
-        visible_state
-        ? WlrLayershell.OnDemand
-        : WlrLayershell.None
+        visible_state ? WlrLayershell.OnDemand : WlrLayershell.None
 
-    visible:
-        isReallyVisible
-
-    color:
-        "transparent"
+    visible: isReallyVisible
+    color: "transparent"
 
     /*
      * Un único backdrop blur para la zona visual del Control Center.
      * Las tarjetas internas usan GlassSurface para tint/border/highlight.
-     *
-     * NOTA:
-     * En esta fase todavía NO migramos el Notification Center al
-     * backend Liquid Glass global. Conserva exactamente el blur clásico
-     * que ya utilizaba.
      */
     BackgroundEffect.blurRegion:
-        Glass.blurEnabled
-        ? controlCenterBlurRegion
-        : null
+        Glass.blurEnabled ? controlCenterBlurRegion : null
 
     Region {
         id: controlCenterBlurRegion
 
-        x:
-            Math.round(
-                ncWindow.width
-                - animationContainer.anchors.rightMargin
-                - contentColumn.width
-                + panelSlide.x
-            )
+        x: Math.round(
+            ncWindow.width
+            - animationContainer.anchors.rightMargin
+            - contentColumn.width
+            + panelSlide.x
+        )
 
         y: 0
 
-        width:
-            Math.round(
-                contentColumn.width
-            )
+        width: Math.round(contentColumn.width)
 
-        height:
-            Math.round(
-                Math.min(
-                    contentColumn.height,
-                    ncWindow.height
-                )
+        height: Math.round(
+            Math.min(
+                contentColumn.height,
+                ncWindow.height
             )
+        )
 
-        radius:
-            Math.round(
-                Glass.radiusLarge
-            )
+        radius: Math.round(Glass.radiusLarge)
     }
 
     onVisible_stateChanged: {
@@ -617,6 +498,8 @@ PanelWindow {
             closeTimer.stop()
             isReallyVisible = true
         } else {
+            // The temperature slider is transient UI: always collapse it as
+            // soon as the Notification Center begins closing.
             nightLightTemperatureOpen = false
             brightnessTemperatureMode = false
             closeTimer.start()
@@ -625,18 +508,14 @@ PanelWindow {
 
     Timer {
         id: closeTimer
-
         interval: 350
-
-        onTriggered:
-            isReallyVisible = false
+        onTriggered: isReallyVisible = false
     }
 
+    // Click fuera del panel = cerrar.
     MouseArea {
         anchors.fill: parent
-
-        onClicked:
-            ncWindow.requestClose()
+        onClicked: ncWindow.requestClose()
     }
 
     // ---------------------------------------------------------------------
@@ -646,31 +525,17 @@ PanelWindow {
     Item {
         id: animationContainer
 
-        width:
-            ncWindow.panelWidth
-
-        anchors.right:
-            parent.right
-
-        anchors.top:
-            parent.top
-
-        anchors.bottom:
-            parent.bottom
-
-        anchors.rightMargin:
-            ncWindow.panelRightMargin
-
-        anchors.topMargin:
-            ncWindow.panelTopMargin
+        width: ncWindow.panelWidth
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: ncWindow.panelRightMargin
+        anchors.topMargin: ncWindow.panelTopMargin
 
         transform: Translate {
             id: panelSlide
 
-            x:
-                ncWindow.visible_state
-                ? 0
-                : ncWindow.panelWidth + 30
+            x: ncWindow.visible_state ? 0 : ncWindow.panelWidth + 30
 
             Behavior on x {
                 NumberAnimation {
@@ -680,10 +545,7 @@ PanelWindow {
             }
         }
 
-        opacity:
-            ncWindow.visible_state
-            ? 1
-            : 0
+        opacity: ncWindow.visible_state ? 1 : 0
 
         Behavior on opacity {
             NumberAnimation {
@@ -694,199 +556,109 @@ PanelWindow {
         Column {
             id: contentColumn
 
-            width:
-                parent.width
-
-            anchors.right:
-                parent.right
-
-            spacing:
-                ncWindow.tileGap
+            width: parent.width
+            anchors.right: parent.right
+            spacing: ncWindow.tileGap
 
             // =============================================================
             // TOP CONTROLS
+            // Left:  Wi-Fi / Bluetooth / Caffeine
+            // Right: Calendar / Airplane Mode
             // =============================================================
 
             Row {
                 id: topRow
 
-                width:
-                    parent.width
-
-                height:
-                    ncWindow.calendarHeight
-                    + ncWindow.tileGap
-                    + ncWindow.topTileHeight
-
-                spacing:
-                    ncWindow.tileGap
+                width: parent.width
+                height: ncWindow.calendarHeight + ncWindow.tileGap + ncWindow.topTileHeight
+                spacing: ncWindow.tileGap
 
                 // ---------------------------------------------------------
-                // LEFT COLUMN
+                // LEFT COLUMN: Wi-Fi / Bluetooth / Caffeine
                 // ---------------------------------------------------------
 
                 Column {
-                    width:
-                        (parent.width - ncWindow.tileGap) / 2
-
-                    height:
-                        parent.height
-
-                    spacing:
-                        ncWindow.tileGap
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: parent.height
+                    spacing: ncWindow.tileGap
 
                     GlassSurface {
                         id: wifiTile
 
-                        width:
-                            parent.width
-
-                        height:
-                            ncWindow.topTileHeight
-
-                        glassRadius:
-                            22
-
+                        width: parent.width
+                        height: ncWindow.topTileHeight
+                        glassRadius: 22
                         glassOpacity:
-                            ncWindow.wifiPending
-                            ? 0.45
-                            : wifiMouse.containsMouse
-                              ? 0.45
-                              : 0.34
+                            ncWindow.wifiPending ? 0.45
+                            : wifiMouse.containsMouse ? 0.45
+                            : 0.34
 
                         Row {
-                            anchors.fill:
-                                parent
-
-                            anchors.leftMargin:
-                                14
-
-                            anchors.rightMargin:
-                                12
-
-                            spacing:
-                                12
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            spacing: 12
 
                             Item {
                                 width: 46
                                 height: parent.height
 
                                 Rectangle {
-                                    anchors.centerIn:
-                                        parent
-
+                                    anchors.centerIn: parent
                                     width: 42
                                     height: 42
                                     radius: 21
 
                                     color:
                                         ncWindow.wifiPending
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.16
-                                          )
+                                        ? Qt.alpha(Theme.white, 0.16)
                                         : ncWindow.wifiState
                                           ? Theme.white
-                                          : Qt.alpha(
-                                                Theme.white,
-                                                0.13
-                                            )
+                                          : Qt.alpha(Theme.white, 0.13)
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            ""
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            18
-
-                                        color:
-                                            ncWindow.wifiState
-                                            && !ncWindow.wifiPending
-                                            ? Theme.bg0
-                                            : Theme.white
+                                        anchors.centerIn: parent
+                                        text: ""
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 18
+                                        color: ncWindow.wifiState && !ncWindow.wifiPending ? Theme.bg0 : Theme.white
                                     }
                                 }
                             }
 
                             Column {
-                                width:
-                                    parent.width - 58
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                spacing:
-                                    2
+                                width: parent.width - 58
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
 
                                 Text {
-                                    width:
-                                        parent.width
-
-                                    text:
-                                        "Wi-Fi"
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        15
-
-                                    font.bold:
-                                        true
-
-                                    elide:
-                                        Text.ElideRight
+                                    width: parent.width
+                                    text: "Wi-Fi"
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
                                 Text {
-                                    width:
-                                        parent.width
-
+                                    width: parent.width
                                     text:
-                                        ncWindow.wifiPending
-                                        ? "Changing…"
-                                        : ncWindow.wifiState
-                                          ? "On"
-                                          : "Off"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.60
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    elide:
-                                        Text.ElideRight
+                                        ncWindow.wifiPending ? "Changing…"
+                                        : ncWindow.wifiState ? "On" : "Off"
+                                    color: Qt.alpha(Theme.white, 0.60)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
 
                         MouseArea {
                             id: wifiMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
 
                             onClicked: {
                                 if (!ncWindow.wifiPending) {
@@ -901,155 +673,80 @@ PanelWindow {
                     GlassSurface {
                         id: bluetoothTile
 
-                        width:
-                            parent.width
-
-                        height:
-                            ncWindow.topTileHeight
-
-                        glassRadius:
-                            22
-
+                        width: parent.width
+                        height: ncWindow.topTileHeight
+                        glassRadius: 22
                         glassOpacity:
-                            ncWindow.btPending
-                            ? 0.45
-                            : btMouse.containsMouse
-                              ? 0.45
-                              : 0.34
+                            ncWindow.btPending ? 0.45
+                            : btMouse.containsMouse ? 0.45
+                            : 0.34
 
                         Row {
-                            anchors.fill:
-                                parent
-
-                            anchors.leftMargin:
-                                14
-
-                            anchors.rightMargin:
-                                12
-
-                            spacing:
-                                12
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            spacing: 12
 
                             Item {
                                 width: 46
                                 height: parent.height
 
                                 Rectangle {
-                                    anchors.centerIn:
-                                        parent
-
+                                    anchors.centerIn: parent
                                     width: 42
                                     height: 42
                                     radius: 21
 
                                     color:
                                         ncWindow.btPending
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.16
-                                          )
+                                        ? Qt.alpha(Theme.white, 0.16)
                                         : ncWindow.btState
                                           ? Theme.white
-                                          : Qt.alpha(
-                                                Theme.white,
-                                                0.13
-                                            )
+                                          : Qt.alpha(Theme.white, 0.13)
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            ""
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            18
-
-                                        color:
-                                            ncWindow.btState
-                                            && !ncWindow.btPending
-                                            ? Theme.bg0
-                                            : Theme.white
+                                        anchors.centerIn: parent
+                                        text: ""
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 18
+                                        color: ncWindow.btState && !ncWindow.btPending ? Theme.bg0 : Theme.white
                                     }
                                 }
                             }
 
                             Column {
-                                width:
-                                    parent.width - 58
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                spacing:
-                                    2
+                                width: parent.width - 58
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
 
                                 Text {
-                                    width:
-                                        parent.width
-
-                                    text:
-                                        "Bluetooth"
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        14
-
-                                    font.bold:
-                                        true
-
-                                    elide:
-                                        Text.ElideRight
+                                    width: parent.width
+                                    text: "Bluetooth"
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
                                 Text {
-                                    width:
-                                        parent.width
-
+                                    width: parent.width
                                     text:
-                                        ncWindow.btPending
-                                        ? "Changing…"
-                                        : ncWindow.btState
-                                          ? "On"
-                                          : "Off"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.60
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    elide:
-                                        Text.ElideRight
+                                        ncWindow.btPending ? "Changing…"
+                                        : ncWindow.btState ? "On" : "Off"
+                                    color: Qt.alpha(Theme.white, 0.60)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
 
                         MouseArea {
                             id: btMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
 
                             onClicked: {
                                 if (!ncWindow.btPending) {
@@ -1064,78 +761,44 @@ PanelWindow {
                     GlassSurface {
                         id: caffeineTile
 
-                        width:
-                            parent.width
-
-                        height:
-                            ncWindow.topTileHeight
-
-                        glassRadius:
-                            22
-
+                        width: parent.width
+                        height: ncWindow.topTileHeight
+                        glassRadius: 22
                         glassOpacity:
-                            ncWindow.caffeinePending
-                            ? 0.45
-                            : caffeineMouse.containsMouse
-                              ? 0.45
-                              : 0.34
+                            ncWindow.caffeinePending ? 0.45
+                            : caffeineMouse.containsMouse ? 0.45
+                            : 0.34
 
                         Row {
-                            anchors.fill:
-                                parent
-
-                            anchors.leftMargin:
-                                14
-
-                            anchors.rightMargin:
-                                12
-
-                            spacing:
-                                12
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            spacing: 12
 
                             Item {
                                 width: 46
                                 height: parent.height
 
                                 Rectangle {
-                                    anchors.centerIn:
-                                        parent
-
+                                    anchors.centerIn: parent
                                     width: 42
                                     height: 42
                                     radius: 21
 
                                     color:
                                         ncWindow.caffeinePending
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.16
-                                          )
+                                        ? Qt.alpha(Theme.white, 0.16)
                                         : ncWindow.caffeineState
                                           ? Theme.white
-                                          : Qt.alpha(
-                                                Theme.white,
-                                                0.13
-                                            )
+                                          : Qt.alpha(Theme.white, 0.13)
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            ncWindow.caffeineState
-                                            ? ""
-                                            : ""
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            18
-
+                                        anchors.centerIn: parent
+                                        text: ncWindow.caffeineState ? "" : ""
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 18
                                         color:
-                                            ncWindow.caffeineState
-                                            && !ncWindow.caffeinePending
+                                            ncWindow.caffeineState && !ncWindow.caffeinePending
                                             ? Theme.bg0
                                             : Theme.white
                                     }
@@ -1143,78 +806,38 @@ PanelWindow {
                             }
 
                             Column {
-                                width:
-                                    parent.width - 58
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                spacing:
-                                    2
+                                width: parent.width - 58
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
 
                                 Text {
-                                    width:
-                                        parent.width
-
-                                    text:
-                                        "Caffeine"
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        14
-
-                                    font.bold:
-                                        true
-
-                                    elide:
-                                        Text.ElideRight
+                                    width: parent.width
+                                    text: "Caffeine"
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
                                 Text {
-                                    width:
-                                        parent.width
-
+                                    width: parent.width
                                     text:
-                                        ncWindow.caffeinePending
-                                        ? "Changing…"
-                                        : ncWindow.caffeineState
-                                          ? "On"
-                                          : "Off"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.60
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    elide:
-                                        Text.ElideRight
+                                        ncWindow.caffeinePending ? "Changing…"
+                                        : ncWindow.caffeineState ? "On" : "Off"
+                                    color: Qt.alpha(Theme.white, 0.60)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
 
                         MouseArea {
                             id: caffeineMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
 
                             onClicked: {
                                 if (!ncWindow.caffeinePending) {
@@ -1228,102 +851,51 @@ PanelWindow {
                 }
 
                 // ---------------------------------------------------------
-                // RIGHT COLUMN
+                // RIGHT COLUMN: Calendar / Airplane Mode
                 // ---------------------------------------------------------
 
                 Column {
-                    width:
-                        (parent.width - ncWindow.tileGap) / 2
-
-                    height:
-                        parent.height
-
-                    spacing:
-                        ncWindow.tileGap
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: parent.height
+                    spacing: ncWindow.tileGap
 
                     GlassSurface {
                         id: calendarTile
 
-                        width:
-                            parent.width
+                        width: parent.width
+                        height: ncWindow.calendarHeight
+                        glassRadius: 22
+                        glassOpacity: calendarMouse.containsMouse ? 0.42 : 0.34
+                        clip: true
 
-                        height:
-                            ncWindow.calendarHeight
+                        property date today: new Date()
 
-                        glassRadius:
-                            22
-
-                        glassOpacity:
-                            calendarMouse.containsMouse
-                            ? 0.42
-                            : 0.34
-
-                        clip:
-                            true
-
-                        property date today:
-                            new Date()
-
+                        // ---------------- MONTH VIEW ----------------
                         Column {
                             id: monthView
-
-                            anchors.fill:
-                                parent
-
-                            anchors.margins:
-                                12
-
-                            spacing:
-                                5
-
-                            visible:
-                                !ncWindow.agendaVisible
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 5
+                            visible: !ncWindow.agendaVisible
 
                             Item {
-                                width:
-                                    parent.width
-
-                                height:
-                                    21
+                                width: parent.width
+                                height: 21
 
                                 Text {
-                                    anchors.left:
-                                        parent.left
-
-                                    anchors.verticalCenter:
-                                        parent.verticalCenter
-
-                                    text:
-                                        "󰅁"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            previousMonthMouse.containsMouse
-                                            ? 1.0
-                                            : 0.58
-                                        )
-
-                                    font.family:
-                                        Theme.fontIcons
-
-                                    font.pixelSize:
-                                        13
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "󰅁"
+                                    color: Qt.alpha(Theme.white, previousMonthMouse.containsMouse ? 1.0 : 0.58)
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 13
 
                                     MouseArea {
                                         id: previousMonthMouse
-
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
 
                                         onClicked: {
                                             if (ncWindow.displayMonth === 0) {
@@ -1337,96 +909,45 @@ PanelWindow {
                                 }
 
                                 Text {
-                                    anchors.centerIn:
-                                        parent
-
-                                    text:
-                                        Qt.formatDateTime(
-                                            new Date(
-                                                ncWindow.displayYear,
-                                                ncWindow.displayMonth,
-                                                1
-                                            ),
-                                            "MMMM yyyy"
-                                        )
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    font.bold:
-                                        true
+                                    anchors.centerIn: parent
+                                    text: Qt.formatDateTime(
+                                        new Date(ncWindow.displayYear, ncWindow.displayMonth, 1),
+                                        "MMMM yyyy"
+                                    )
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    font.bold: true
 
                                     MouseArea {
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
 
                                         onClicked: {
                                             var now = new Date()
-
                                             calendarTile.today = now
-
-                                            ncWindow.displayMonth =
-                                                now.getMonth()
-
-                                            ncWindow.displayYear =
-                                                now.getFullYear()
+                                            ncWindow.displayMonth = now.getMonth()
+                                            ncWindow.displayYear = now.getFullYear()
                                         }
                                     }
                                 }
 
                                 Text {
-                                    anchors.right:
-                                        parent.right
-
-                                    anchors.verticalCenter:
-                                        parent.verticalCenter
-
-                                    text:
-                                        "󰅂"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            nextMonthMouse.containsMouse
-                                            ? 1.0
-                                            : 0.58
-                                        )
-
-                                    font.family:
-                                        Theme.fontIcons
-
-                                    font.pixelSize:
-                                        13
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "󰅂"
+                                    color: Qt.alpha(Theme.white, nextMonthMouse.containsMouse ? 1.0 : 0.58)
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 13
 
                                     MouseArea {
                                         id: nextMonthMouse
-
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
 
                                         onClicked: {
                                             if (ncWindow.displayMonth === 11) {
@@ -1441,497 +962,222 @@ PanelWindow {
                             }
 
                             DayOfWeekRow {
-                                width:
-                                    parent.width
-
-                                height:
-                                    15
-
-                                locale:
-                                    Qt.locale("en_GB")
+                                width: parent.width
+                                height: 15
+                                locale: Qt.locale("en_GB")
 
                                 delegate: Text {
-                                    text:
-                                        model.narrowName
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.50
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        8
-
-                                    font.bold:
-                                        true
-
-                                    horizontalAlignment:
-                                        Text.AlignHCenter
-
-                                    verticalAlignment:
-                                        Text.AlignVCenter
+                                    text: model.narrowName
+                                    color: Qt.alpha(Theme.white, 0.50)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 8
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
                                 }
                             }
 
                             MonthGrid {
                                 id: compactMonthGrid
-
-                                width:
-                                    parent.width
-
-                                height:
-                                    parent.height - 43
-
-                                month:
-                                    ncWindow.displayMonth
-
-                                year:
-                                    ncWindow.displayYear
-
-                                locale:
-                                    Qt.locale("en_GB")
+                                width: parent.width
+                                height: parent.height - 43
+                                month: ncWindow.displayMonth
+                                year: ncWindow.displayYear
+                                locale: Qt.locale("en_GB")
 
                                 delegate: Item {
-                                    implicitWidth:
-                                        20
+                                    implicitWidth: 20
+                                    implicitHeight: 18
+                                    opacity: model.month === compactMonthGrid.month ? 1 : 0.20
 
-                                    implicitHeight:
-                                        18
-
-                                    opacity:
-                                        model.month
-                                        === compactMonthGrid.month
-                                        ? 1
-                                        : 0.20
-
-                                    property var dayEvents:
-                                        ncWindow.getEventsForDate(
-                                            model.date
-                                        )
-
-                                    property bool hasEvents:
-                                        dayEvents.length > 0
+                                    property var dayEvents: ncWindow.getEventsForDate(model.date)
+                                    property bool hasEvents: dayEvents.length > 0
 
                                     Rectangle {
-                                        anchors.horizontalCenter:
-                                            parent.horizontalCenter
-
-                                        anchors.verticalCenter:
-                                            parent.verticalCenter
-
-                                        anchors.verticalCenterOffset:
-                                            -1
-
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.verticalCenterOffset: -1
                                         width: 19
                                         height: 19
                                         radius: 9.5
-
-                                        visible:
-                                            model.today
-
-                                        color:
-                                            Theme.white
+                                        visible: model.today
+                                        color: Theme.white
                                     }
 
                                     Text {
-                                        anchors.horizontalCenter:
-                                            parent.horizontalCenter
-
-                                        anchors.verticalCenter:
-                                            parent.verticalCenter
-
-                                        anchors.verticalCenterOffset:
-                                            -1
-
-                                        text:
-                                            model.day
-
-                                        color:
-                                            model.today
-                                            ? Theme.bg0
-                                            : Qt.alpha(
-                                                  Theme.white,
-                                                  0.82
-                                              )
-
-                                        font.family:
-                                            Theme.fontMain
-
-                                        font.pixelSize:
-                                            8
-
-                                        font.bold:
-                                            model.today
-                                            || hasEvents
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.verticalCenterOffset: -1
+                                        text: model.day
+                                        color: model.today
+                                               ? Theme.bg0
+                                               : Qt.alpha(Theme.white, 0.82)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 8
+                                        font.bold: model.today || hasEvents
                                     }
 
+                                    // White dot under every day that contains events.
                                     Rectangle {
-                                        anchors.horizontalCenter:
-                                            parent.horizontalCenter
-
-                                        anchors.bottom:
-                                            parent.bottom
-
-                                        anchors.bottomMargin:
-                                            0
-
-                                        width:
-                                            2.5
-
-                                        height:
-                                            2.5
-
-                                        radius:
-                                            1.25
-
-                                        color:
-                                            model.today
-                                            ? Theme.bg0
-                                            : Theme.white
-
-                                        visible:
-                                            hasEvents
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.bottom: parent.bottom
+                                        anchors.bottomMargin: 0
+                                        width: 2.5
+                                        height: 2.5
+                                        radius: 1.25
+                                        color: model.today ? Theme.bg0 : Theme.white
+                                        visible: hasEvents
                                     }
 
                                     MouseArea {
-                                        anchors.fill:
-                                            parent
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
 
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
-
-                                        onClicked:
-                                            ncWindow.selectAgendaDate(
-                                                model.date
-                                            )
+                                        onClicked: {
+                                            ncWindow.selectAgendaDate(model.date)
+                                        }
                                     }
                                 }
                             }
                         }
 
+                        // ---------------- DAILY AGENDA VIEW ----------------
                         Column {
                             id: agendaView
-
-                            anchors.fill:
-                                parent
-
-                            anchors.margins:
-                                12
-
-                            spacing:
-                                7
-
-                            visible:
-                                ncWindow.agendaVisible
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 7
+                            visible: ncWindow.agendaVisible
 
                             Item {
-                                width:
-                                    parent.width
-
-                                height:
-                                    22
+                                width: parent.width
+                                height: 22
 
                                 Text {
-                                    anchors.left:
-                                        parent.left
-
-                                    anchors.verticalCenter:
-                                        parent.verticalCenter
-
-                                    text:
-                                        "󰅁"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            previousDayMouse.containsMouse
-                                            ? 1.0
-                                            : 0.58
-                                        )
-
-                                    font.family:
-                                        Theme.fontIcons
-
-                                    font.pixelSize:
-                                        13
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "󰅁"
+                                    color: Qt.alpha(Theme.white, previousDayMouse.containsMouse ? 1.0 : 0.58)
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 13
 
                                     MouseArea {
                                         id: previousDayMouse
-
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
-
-                                        onClicked:
-                                            ncWindow.goToPreviousAgendaDay()
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: ncWindow.goToPreviousAgendaDay()
                                     }
                                 }
 
                                 Text {
-                                    anchors.centerIn:
-                                        parent
-
-                                    text:
-                                        Qt.formatDateTime(
-                                            ncWindow.selectedDateObj,
-                                            "MMMM d, yyyy"
-                                        )
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        9
-
-                                    font.bold:
-                                        true
+                                    anchors.centerIn: parent
+                                    text: Qt.formatDateTime(
+                                        ncWindow.selectedDateObj,
+                                        "MMMM d, yyyy"
+                                    )
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 9
+                                    font.bold: true
 
                                     MouseArea {
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
-
-                                        onClicked:
-                                            ncWindow.handleAgendaDateClick()
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: ncWindow.handleAgendaDateClick()
                                     }
                                 }
 
                                 Text {
-                                    anchors.right:
-                                        parent.right
-
-                                    anchors.verticalCenter:
-                                        parent.verticalCenter
-
-                                    text:
-                                        "󰅂"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            nextDayMouse.containsMouse
-                                            ? 1.0
-                                            : 0.58
-                                        )
-
-                                    font.family:
-                                        Theme.fontIcons
-
-                                    font.pixelSize:
-                                        13
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "󰅂"
+                                    color: Qt.alpha(Theme.white, nextDayMouse.containsMouse ? 1.0 : 0.58)
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 13
 
                                     MouseArea {
                                         id: nextDayMouse
-
-                                        anchors.fill:
-                                            parent
-
-                                        anchors.margins:
-                                            -5
-
-                                        hoverEnabled:
-                                            true
-
-                                        cursorShape:
-                                            Qt.PointingHandCursor
-
-                                        onClicked:
-                                            ncWindow.goToNextAgendaDay()
+                                        anchors.fill: parent
+                                        anchors.margins: -5
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: ncWindow.goToNextAgendaDay()
                                     }
                                 }
                             }
 
                             Rectangle {
-                                width:
-                                    parent.width
-
-                                height:
-                                    1
-
-                                color:
-                                    Qt.alpha(
-                                        Theme.white,
-                                        0.10
-                                    )
+                                width: parent.width
+                                height: 1
+                                color: Qt.alpha(Theme.white, 0.10)
                             }
 
                             Text {
-                                width:
-                                    parent.width
-
-                                height:
-                                    parent.height - 30
-
-                                visible:
-                                    ncWindow.selectedEvents.length === 0
-
-                                text:
-                                    "No events this day"
-
-                                color:
-                                    Qt.alpha(
-                                        Theme.white,
-                                        0.48
-                                    )
-
-                                font.family:
-                                    Theme.fontMain
-
-                                font.pixelSize:
-                                    9
-
-                                font.bold:
-                                    true
-
-                                horizontalAlignment:
-                                    Text.AlignHCenter
-
-                                verticalAlignment:
-                                    Text.AlignVCenter
+                                width: parent.width
+                                height: parent.height - 30
+                                visible: ncWindow.selectedEvents.length === 0
+                                text: "No events this day"
+                                color: Qt.alpha(Theme.white, 0.48)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                             }
 
                             ListView {
                                 id: compactAgendaList
-
-                                width:
-                                    parent.width
-
-                                height:
-                                    parent.height - 30
-
-                                visible:
-                                    ncWindow.selectedEvents.length > 0
-
-                                clip:
-                                    true
-
-                                spacing:
-                                    6
-
-                                boundsBehavior:
-                                    Flickable.StopAtBounds
-
-                                model:
-                                    ncWindow.selectedEvents
+                                width: parent.width
+                                height: parent.height - 30
+                                visible: ncWindow.selectedEvents.length > 0
+                                clip: true
+                                spacing: 6
+                                boundsBehavior: Flickable.StopAtBounds
+                                model: ncWindow.selectedEvents
 
                                 delegate: Item {
-                                    width:
-                                        ListView.view.width
-
-                                    height:
-                                        30
+                                    width: ListView.view.width
+                                    height: 30
 
                                     Row {
-                                        anchors.fill:
-                                            parent
-
-                                        spacing:
-                                            8
+                                        anchors.fill: parent
+                                        spacing: 8
 
                                         Text {
-                                            width:
-                                                54
-
-                                            anchors.verticalCenter:
-                                                parent.verticalCenter
-
-                                            text:
-                                                modelData.time
-                                                || ""
-
-                                            color:
-                                                Theme.white
-
-                                            opacity:
-                                                0.68
-
-                                            font.family:
-                                                Theme.fontMain
-
-                                            font.pixelSize:
-                                                7
-
-                                            font.bold:
-                                                true
-
-                                            wrapMode:
-                                                Text.Wrap
-
-                                            maximumLineCount:
-                                                2
-
-                                            elide:
-                                                Text.ElideRight
+                                            width: 54
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.time || ""
+                                            color: Theme.white
+                                            opacity: 0.68
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 7
+                                            font.bold: true
+                                            wrapMode: Text.Wrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
                                         }
 
                                         Rectangle {
-                                            width:
-                                                1
-
-                                            height:
-                                                20
-
-                                            anchors.verticalCenter:
-                                                parent.verticalCenter
-
-                                            color:
-                                                Qt.alpha(
-                                                    Theme.white,
-                                                    0.14
-                                                )
+                                            width: 1
+                                            height: 20
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: Qt.alpha(Theme.white, 0.14)
                                         }
 
                                         Text {
-                                            width:
-                                                parent.width - 63
-
-                                            anchors.verticalCenter:
-                                                parent.verticalCenter
-
-                                            text:
-                                                modelData.title
-                                                || "Untitled event"
-
-                                            color:
-                                                Theme.white
-
-                                            font.family:
-                                                Theme.fontMain
-
-                                            font.pixelSize:
-                                                9
-
-                                            font.bold:
-                                                true
-
-                                            elide:
-                                                Text.ElideRight
+                                            width: parent.width - 63
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.title || "Untitled event"
+                                            color: Theme.white
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                            elide: Text.ElideRight
                                         }
                                     }
                                 }
@@ -1940,99 +1186,53 @@ PanelWindow {
 
                         MouseArea {
                             id: calendarMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            acceptedButtons:
-                                Qt.NoButton
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
                         }
                     }
 
                     GlassSurface {
                         id: airplaneTile
 
-                        width:
-                            parent.width
-
-                        height:
-                            ncWindow.topTileHeight
-
-                        glassRadius:
-                            22
-
+                        width: parent.width
+                        height: ncWindow.topTileHeight
+                        glassRadius: 22
                         glassOpacity:
-                            ncWindow.airplanePending
-                            ? 0.45
-                            : airplaneMouse.containsMouse
-                              ? 0.45
-                              : 0.34
+                            ncWindow.airplanePending ? 0.45
+                            : airplaneMouse.containsMouse ? 0.45
+                            : 0.34
 
                         Row {
-                            anchors.fill:
-                                parent
-
-                            anchors.leftMargin:
-                                14
-
-                            anchors.rightMargin:
-                                12
-
-                            spacing:
-                                12
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            spacing: 12
 
                             Item {
-                                width:
-                                    46
-
-                                height:
-                                    parent.height
+                                width: 46
+                                height: parent.height
 
                                 Rectangle {
-                                    anchors.centerIn:
-                                        parent
-
-                                    width:
-                                        42
-
-                                    height:
-                                        42
-
-                                    radius:
-                                        21
+                                    anchors.centerIn: parent
+                                    width: 42
+                                    height: 42
+                                    radius: 21
 
                                     color:
                                         ncWindow.airplanePending
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.16
-                                          )
+                                        ? Qt.alpha(Theme.white, 0.16)
                                         : ncWindow.airplaneState
                                           ? Theme.white
-                                          : Qt.alpha(
-                                                Theme.white,
-                                                0.13
-                                            )
+                                          : Qt.alpha(Theme.white, 0.13)
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            ""
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            18
-
+                                        anchors.centerIn: parent
+                                        text: ""
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 18
                                         color:
-                                            ncWindow.airplaneState
-                                            && !ncWindow.airplanePending
+                                            ncWindow.airplaneState && !ncWindow.airplanePending
                                             ? Theme.bg0
                                             : Theme.white
                                     }
@@ -2040,78 +1240,38 @@ PanelWindow {
                             }
 
                             Column {
-                                width:
-                                    parent.width - 58
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                spacing:
-                                    2
+                                width: parent.width - 58
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
 
                                 Text {
-                                    width:
-                                        parent.width
-
-                                    text:
-                                        "Airplane"
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        14
-
-                                    font.bold:
-                                        true
-
-                                    elide:
-                                        Text.ElideRight
+                                    width: parent.width
+                                    text: "Airplane"
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
                                 Text {
-                                    width:
-                                        parent.width
-
+                                    width: parent.width
                                     text:
-                                        ncWindow.airplanePending
-                                        ? "Changing…"
-                                        : ncWindow.airplaneState
-                                          ? "On"
-                                          : "Off"
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.60
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    elide:
-                                        Text.ElideRight
+                                        ncWindow.airplanePending ? "Changing…"
+                                        : ncWindow.airplaneState ? "On" : "Off"
+                                    color: Qt.alpha(Theme.white, 0.60)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
 
                         MouseArea {
                             id: airplaneMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
 
                             onClicked: {
                                 if (!ncWindow.airplanePending) {
@@ -2127,103 +1287,55 @@ PanelWindow {
 
             // =============================================================
             // VOLUME / BRIGHTNESS
+            // Two compact pills side by side. They keep Dynamic Island's OSD
+            // language: icon, thin rounded progress track and percentage.
             // =============================================================
 
             Row {
                 id: mediaControls
-
-                width:
-                    parent.width
-
-                height:
-                    ncWindow.mediaControlsHeight
-
-                spacing:
-                    ncWindow.tileGap
+                width: parent.width
+                height: ncWindow.mediaControlsHeight
+                spacing: ncWindow.tileGap
 
                 GlassSurface {
                     id: volumeControl
-
-                    width:
-                        (parent.width - ncWindow.tileGap) / 2
-
-                    height:
-                        ncWindow.mediaSliderHeight
-
-                    glassRadius:
-                        height / 2
-
-                    glassOpacity:
-                        volumeControlMouse.containsMouse
-                        ? 0.43
-                        : 0.34
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: ncWindow.mediaSliderHeight
+                    glassRadius: height / 2
+                    glassOpacity: volumeControlMouse.containsMouse ? 0.43 : 0.34
 
                     RowLayout {
-                        anchors.fill:
-                            parent
-
-                        anchors.leftMargin:
-                            11
-
-                        anchors.rightMargin:
-                            11
-
-                        spacing:
-                            8
+                        anchors.fill: parent
+                        anchors.leftMargin: 11
+                        anchors.rightMargin: 11
+                        spacing: 8
 
                         Item {
-                            Layout.preferredWidth:
-                                20
-
-                            Layout.preferredHeight:
-                                parent.height
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: parent.height
 
                             Text {
-                                anchors.centerIn:
-                                    parent
-
-                                text:
-                                    ncWindow.volumeMuted
-                                    || ncWindow.volumeLevel <= 0.001
-                                    ? "󰝟"
-                                    : "󰕾"
-
-                                font.family:
-                                    Theme.fontIcons
-
-                                font.pixelSize:
-                                    15
-
-                                color:
-                                    ncWindow.volumeMuted
-                                    ? Qt.alpha(
-                                          Theme.white,
-                                          0.42
-                                      )
-                                    : Theme.white
+                                anchors.centerIn: parent
+                                text: ncWindow.volumeMuted || ncWindow.volumeLevel <= 0.001
+                                      ? "󰝟" : "󰕾"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15
+                                color: ncWindow.volumeMuted
+                                       ? Qt.alpha(Theme.white, 0.42)
+                                       : Theme.white
                             }
 
                             MouseArea {
-                                anchors.fill:
-                                    parent
-
-                                hoverEnabled:
-                                    true
-
-                                cursorShape:
-                                    Qt.PointingHandCursor
-
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     if (!volumeMuteProc.running) {
                                         volumeMuteProc.command = [
-                                            "wpctl",
-                                            "set-mute",
-                                            "@DEFAULT_AUDIO_SINK@",
-                                            "toggle"
+                                            "wpctl", "set-mute",
+                                            "@DEFAULT_AUDIO_SINK@", "toggle"
                                         ]
-
-                                        volumeMuteProc.running =
-                                            true
+                                        volumeMuteProc.running = true
                                     }
                                 }
                             }
@@ -2231,68 +1343,31 @@ PanelWindow {
 
                         Item {
                             id: volumeTrackHitbox
-
-                            Layout.fillWidth:
-                                true
-
-                            Layout.preferredHeight:
-                                parent.height
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: parent.height
 
                             Rectangle {
                                 id: volumeTrack
-
-                                anchors.left:
-                                    parent.left
-
-                                anchors.right:
-                                    parent.right
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                height:
-                                    5
-
-                                radius:
-                                    height / 2
-
-                                color:
-                                    Qt.alpha(
-                                        Theme.white,
-                                        0.20
-                                    )
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 5
+                                radius: height / 2
+                                color: Qt.alpha(Theme.white, 0.20)
 
                                 Rectangle {
-                                    height:
-                                        parent.height
-
-                                    radius:
-                                        height / 2
-
-                                    width:
-                                        parent.width
-                                        * ncWindow.clamp01(
-                                            ncWindow.volumeLevel
-                                        )
-
-                                    color:
-                                        ncWindow.volumeMuted
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.42
-                                          )
-                                        : Theme.white
+                                    height: parent.height
+                                    radius: height / 2
+                                    width: parent.width * ncWindow.clamp01(ncWindow.volumeLevel)
+                                    color: ncWindow.volumeMuted
+                                           ? Qt.alpha(Theme.white, 0.42)
+                                           : Theme.white
 
                                     Behavior on width {
-                                        enabled:
-                                            !ncWindow.volumeDragging
-
+                                        enabled: !ncWindow.volumeDragging
                                         NumberAnimation {
-                                            duration:
-                                                150
-
-                                            easing.type:
-                                                Easing.OutQuad
+                                            duration: 150
+                                            easing.type: Easing.OutQuad
                                         }
                                     }
                                 }
@@ -2300,38 +1375,20 @@ PanelWindow {
 
                             MouseArea {
                                 id: volumeControlMouse
-
-                                anchors.fill:
-                                    parent
-
-                                hoverEnabled:
-                                    true
-
-                                cursorShape:
-                                    Qt.PointingHandCursor
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
 
                                 onPressed: function(mouse) {
-                                    ncWindow.volumeDragging =
-                                        true
-
-                                    ncWindow.setVolumePreviewFromX(
-                                        mouse.x,
-                                        width
-                                    )
-
-                                    ncWindow.volumeMuted =
-                                        false
-
+                                    ncWindow.volumeDragging = true
+                                    ncWindow.setVolumePreviewFromX(mouse.x, width)
+                                    ncWindow.volumeMuted = false
                                     ncWindow.applyVolume()
                                 }
 
                                 onPositionChanged: function(mouse) {
-                                    if (pressed) {
-                                        ncWindow.setVolumePreviewFromX(
-                                            mouse.x,
-                                            width
-                                        )
-                                    }
+                                    if (pressed)
+                                        ncWindow.setVolumePreviewFromX(mouse.x, width)
                                 }
 
                                 onReleased: {
@@ -2347,136 +1404,65 @@ PanelWindow {
                         }
 
                         Text {
-                            text:
-                                Math.round(
-                                    ncWindow.volumeLevel
-                                    * 100
-                                )
-                                + "%"
-
-                            color:
-                                ncWindow.volumeMuted
-                                ? Qt.alpha(
-                                      Theme.white,
-                                      0.60
-                                  )
-                                : Theme.white
-
-                            font.family:
-                                Theme.fontMain
-
-                            font.pixelSize:
-                                10
-
-                            font.bold:
-                                true
-
-                            Layout.minimumWidth:
-                                29
-
-                            horizontalAlignment:
-                                Text.AlignRight
+                            text: Math.round(ncWindow.volumeLevel * 100) + "%"
+                            color: ncWindow.volumeMuted
+                                   ? Qt.alpha(Theme.white, 0.60)
+                                   : Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                            font.bold: true
+                            Layout.minimumWidth: 29
+                            horizontalAlignment: Text.AlignRight
                         }
                     }
                 }
 
                 GlassSurface {
                     id: brightnessControl
-
-                    width:
-                        (parent.width - ncWindow.tileGap) / 2
-
-                    height:
-                        ncWindow.mediaSliderHeight
-
-                    glassRadius:
-                        height / 2
-
-                    glassTint:
-                        ncWindow.nightLightState
-                        ? "#ffd38a"
-                        : Glass.tint
-
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: ncWindow.mediaSliderHeight
+                    glassRadius: height / 2
+                    // The surface indicates whether Night Light itself is active.
+                    // Slider mode is independent and is toggled with right click.
+                    glassTint: ncWindow.nightLightState ? "#ffd38a" : Glass.tint
                     glassOpacity:
-                        ncWindow.nightLightState
-                        ? 0.42
-                        : (
-                            brightnessModeMouse.containsMouse
-                            || brightnessControlMouse.containsMouse
-                            ? 0.43
-                            : 0.34
-                        )
+                        ncWindow.nightLightState ? 0.42
+                        : (brightnessModeMouse.containsMouse || brightnessControlMouse.containsMouse ? 0.43 : 0.34)
 
                     RowLayout {
-                        anchors.fill:
-                            parent
+                        anchors.fill: parent
+                        anchors.leftMargin: 11
+                        anchors.rightMargin: 11
+                        spacing: 8
 
-                        anchors.leftMargin:
-                            11
-
-                        anchors.rightMargin:
-                            11
-
-                        spacing:
-                            8
-
+                        // Shared Brightness / Night Light button:
+                        //   left click  -> toggle Night Light itself
+                        //   right click -> switch the slider between brightness
+                        //                  and colour-temperature adjustment
                         Item {
                             id: brightnessModeButton
-
-                            Layout.preferredWidth:
-                                20
-
-                            Layout.preferredHeight:
-                                parent.height
+                            Layout.preferredWidth: 20
+                            Layout.preferredHeight: parent.height
 
                             Text {
-                                anchors.centerIn:
-                                    parent
-
-                                text:
-                                    ncWindow.nightLightState
-                                    ? "󰖔"
-                                    : "󰃠"
-
-                                font.family:
-                                    Theme.fontIcons
-
-                                font.pixelSize:
-                                    15
-
-                                color:
-                                    ncWindow.nightLightState
-                                    ? "#ffd38a"
-                                    : Theme.white
+                                anchors.centerIn: parent
+                                text: ncWindow.nightLightState ? "󰖔" : "󰃠"
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 15
+                                color: ncWindow.nightLightState ? "#ffd38a" : Theme.white
                             }
 
                             MouseArea {
                                 id: brightnessModeMouse
-
-                                anchors.fill:
-                                    parent
-
-                                hoverEnabled:
-                                    true
-
-                                acceptedButtons:
-                                    Qt.LeftButton
-                                    | Qt.RightButton
-
-                                cursorShape:
-                                    Qt.PointingHandCursor
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: Qt.PointingHandCursor
 
                                 onClicked: function(mouse) {
-                                    if (
-                                        mouse.button
-                                        === Qt.RightButton
-                                    ) {
-                                        ncWindow.brightnessTemperatureMode =
-                                            !ncWindow.brightnessTemperatureMode
-                                    } else if (
-                                        mouse.button
-                                        === Qt.LeftButton
-                                    ) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        ncWindow.brightnessTemperatureMode = !ncWindow.brightnessTemperatureMode
+                                    } else if (mouse.button === Qt.LeftButton) {
                                         ncWindow.toggleNightLightRequested()
                                     }
                                 }
@@ -2485,80 +1471,35 @@ PanelWindow {
 
                         Item {
                             id: brightnessTrackHitbox
-
-                            Layout.fillWidth:
-                                true
-
-                            Layout.preferredHeight:
-                                parent.height
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: parent.height
 
                             readonly property real shownLevel:
                                 ncWindow.brightnessTemperatureMode
-                                ? Math.max(
-                                      0.0,
-                                      Math.min(
-                                          1.0,
-                                          (
-                                              ncWindow.nightLightTemperature
-                                              - 2500
-                                          )
-                                          / 3500.0
-                                      )
-                                  )
-                                : ncWindow.clamp01(
-                                      ncWindow.brightnessLevel
-                                  )
+                                ? Math.max(0.0, Math.min(1.0,
+                                      (ncWindow.nightLightTemperature - 2500) / 3500.0))
+                                : ncWindow.clamp01(ncWindow.brightnessLevel)
 
                             Rectangle {
                                 id: brightnessTrack
-
-                                anchors.left:
-                                    parent.left
-
-                                anchors.right:
-                                    parent.right
-
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                height:
-                                    5
-
-                                radius:
-                                    height / 2
-
-                                color:
-                                    Qt.alpha(
-                                        Theme.white,
-                                        0.20
-                                    )
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 5
+                                radius: height / 2
+                                color: Qt.alpha(Theme.white, 0.20)
 
                                 Rectangle {
-                                    height:
-                                        parent.height
-
-                                    radius:
-                                        height / 2
-
-                                    width:
-                                        parent.width
-                                        * brightnessTrackHitbox.shownLevel
-
-                                    color:
-                                        ncWindow.brightnessTemperatureMode
-                                        ? "#ffd38a"
-                                        : Theme.white
+                                    height: parent.height
+                                    radius: height / 2
+                                    width: parent.width * brightnessTrackHitbox.shownLevel
+                                    color: ncWindow.brightnessTemperatureMode ? "#ffd38a" : Theme.white
 
                                     Behavior on width {
-                                        enabled:
-                                            !ncWindow.brightnessDragging
-
+                                        enabled: !ncWindow.brightnessDragging
                                         NumberAnimation {
-                                            duration:
-                                                150
-
-                                            easing.type:
-                                                Easing.OutQuad
+                                            duration: 150
+                                            easing.type: Easing.OutQuad
                                         }
                                     }
                                 }
@@ -2566,32 +1507,16 @@ PanelWindow {
 
                             MouseArea {
                                 id: brightnessControlMouse
-
-                                anchors.fill:
-                                    parent
-
-                                hoverEnabled:
-                                    true
-
-                                cursorShape:
-                                    Qt.PointingHandCursor
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
 
                                 onPressed: function(mouse) {
-                                    if (
-                                        ncWindow.brightnessTemperatureMode
-                                    ) {
-                                        ncWindow.setNightLightTemperatureFromX(
-                                            mouse.x,
-                                            width
-                                        )
+                                    if (ncWindow.brightnessTemperatureMode) {
+                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
                                     } else {
                                         ncWindow.brightnessDragging = true
-
-                                        ncWindow.setBrightnessPreviewFromX(
-                                            mouse.x,
-                                            width
-                                        )
-
+                                        ncWindow.setBrightnessPreviewFromX(mouse.x, width)
                                         ncWindow.applyBrightness()
                                     }
                                 }
@@ -2600,34 +1525,21 @@ PanelWindow {
                                     if (!pressed)
                                         return
 
-                                    if (
-                                        ncWindow.brightnessTemperatureMode
-                                    ) {
-                                        ncWindow.setNightLightTemperatureFromX(
-                                            mouse.x,
-                                            width
-                                        )
-                                    } else {
-                                        ncWindow.setBrightnessPreviewFromX(
-                                            mouse.x,
-                                            width
-                                        )
-                                    }
+                                    if (ncWindow.brightnessTemperatureMode)
+                                        ncWindow.setNightLightTemperatureFromX(mouse.x, width)
+                                    else
+                                        ncWindow.setBrightnessPreviewFromX(mouse.x, width)
                                 }
 
                                 onReleased: {
-                                    if (
-                                        !ncWindow.brightnessTemperatureMode
-                                    ) {
+                                    if (!ncWindow.brightnessTemperatureMode) {
                                         ncWindow.applyBrightness()
                                         ncWindow.brightnessDragging = false
                                     }
                                 }
 
                                 onCanceled: {
-                                    if (
-                                        !ncWindow.brightnessTemperatureMode
-                                    ) {
+                                    if (!ncWindow.brightnessTemperatureMode) {
                                         ncWindow.applyBrightness()
                                         ncWindow.brightnessDragging = false
                                     }
@@ -2636,37 +1548,15 @@ PanelWindow {
                         }
 
                         Text {
-                            text:
-                                ncWindow.brightnessTemperatureMode
-                                ? ncWindow.nightLightTemperature
-                                  + "K"
-                                : Math.round(
-                                      ncWindow.brightnessLevel
-                                      * 100
-                                  )
-                                  + "%"
-
-                            color:
-                                ncWindow.brightnessTemperatureMode
-                                ? "#ffd38a"
-                                : Theme.white
-
-                            font.family:
-                                Theme.fontMain
-
-                            font.pixelSize:
-                                10
-
-                            font.bold:
-                                true
-
-                            Layout.minimumWidth:
-                                ncWindow.brightnessTemperatureMode
-                                ? 36
-                                : 29
-
-                            horizontalAlignment:
-                                Text.AlignRight
+                            text: ncWindow.brightnessTemperatureMode
+                                  ? ncWindow.nightLightTemperature + "K"
+                                  : Math.round(ncWindow.brightnessLevel * 100) + "%"
+                            color: ncWindow.brightnessTemperatureMode ? "#ffd38a" : Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                            font.bold: true
+                            Layout.minimumWidth: ncWindow.brightnessTemperatureMode ? 36 : 29
+                            horizontalAlignment: Text.AlignRight
                         }
                     }
                 }
@@ -2674,14 +1564,14 @@ PanelWindow {
 
             // =============================================================
             // NOTIFICATIONS
+            // Header always visible; when there are no notifications, an
+            // empty-state message is shown below it.
             // =============================================================
 
             Item {
                 id: notificationsSection
 
-                readonly property int topInset:
-                    6
-
+                readonly property int topInset: 6
                 readonly property int bodyHeight:
                     ncWindow.notificationCount > 0
                     ? Math.min(
@@ -2697,353 +1587,123 @@ PanelWindow {
                       )
                     : 62
 
-                width:
-                    parent.width
-
+                width: parent.width
                 height:
                     topInset
                     + notificationsHeader.height
                     + 8
                     + bodyHeight
 
+                // Header ----------------------------------------------------
                 Item {
                     id: notificationsHeader
 
-                    y:
-                        notificationsSection.topInset
-
-                    width:
-                        parent.width
-
-                    height:
-                        30
+                    y: notificationsSection.topInset
+                    width: parent.width
+                    height: 30
 
                     GlassSurface {
                         id: notificationsTitle
 
-                        anchors.left:
-                            parent.left
-
-                        anchors.verticalCenter:
-                            parent.verticalCenter
-
-                        width:
-                            126
-
-                        height:
-                            30
-
-                        glassRadius:
-                            12
-
-                        glassOpacity:
-                            0.28
-
-                        showHighlight:
-                            false
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 126
+                        height: 30
+                        glassRadius: 12
+                        glassOpacity: 0.28
+                        showHighlight: false
 
                         Text {
-                            anchors.centerIn:
-                                parent
-
-                            text:
-                                "Notifications"
-
-                            color:
-                                Qt.alpha(
-                                    Theme.white,
-                                    0.88
-                                )
-
-                            font.family:
-                                Theme.fontMain
-
-                            font.pixelSize:
-                                13
-
-                            font.bold:
-                                true
-
-                            horizontalAlignment:
-                                Text.AlignHCenter
-
-                            verticalAlignment:
-                                Text.AlignVCenter
+                            anchors.centerIn: parent
+                            text: "Notifications"
+                            color: Qt.alpha(Theme.white, 0.88)
+                            font.family: Theme.fontMain
+                            font.pixelSize: 13
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
                         }
                     }
 
-                    // =====================================================
-                    // FOCUS / DO NOT DISTURB
-                    // =====================================================
-
+                    // Focus / Do Not Disturb, moved next to the title.
                     GlassSurface {
                         id: focusButton
 
-                        anchors.left:
-                            notificationsTitle.right
-
-                        anchors.leftMargin:
-                            8
-
-                        anchors.verticalCenter:
-                            parent.verticalCenter
-
-                        width:
-                            30
-
-                        height:
-                            30
-
-                        glassRadius:
-                            15
-
+                        anchors.left: notificationsTitle.right
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 30
+                        height: 30
+                        glassRadius: 15
                         glassTint:
-                            ncWindow.dndState
-                            ? Theme.white
-                            : Glass.tint
-
+                            ncWindow.dndState ? Theme.white : Glass.tint
                         glassOpacity:
-                            ncWindow.dndState
-                            ? 0.92
-                            : focusMouse.containsMouse
-                              ? 0.46
-                              : 0.34
-
-                        showHighlight:
-                            false
+                            ncWindow.dndState ? 0.92
+                            : focusMouse.containsMouse ? 0.46
+                            : 0.34
+                        showHighlight: false
 
                         Text {
-                            anchors.centerIn:
-                                parent
-
-                            text:
-                                ncWindow.dndState
-                                ? "󰂛"
-                                : "󰂚"
-
-                            font.family:
-                                Theme.fontIcons
-
-                            font.pixelSize:
-                                15
-
-                            color:
-                                ncWindow.dndState
-                                ? Theme.bg0
-                                : Theme.white
+                            anchors.centerIn: parent
+                            text: ncWindow.dndState ? "󰂛" : "󰂚"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 15
+                            color: ncWindow.dndState ? Theme.bg0 : Theme.white
                         }
 
                         MouseArea {
                             id: focusMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
-
-                            onClicked:
-                                ncWindow.toggleDndRequested()
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: ncWindow.toggleDndRequested()
                         }
                     }
 
-                    // =====================================================
-                    // GLOBAL GLASS MODE
-                    // =====================================================
-                    //
-                    // Este botón controla el MISMO estado global que el
-                    // sandbox LiquidGlassTest.qml.
-                    //
-                    // ◇  Classic Blur
-                    // ◆  Real Liquid Glass
-                    //
-                    // GlassMode se ocupa de:
-                    //
-                    //   - persistir el estado,
-                    //   - actualizar QML,
-                    //   - recargar Hyprland.
-                    // =====================================================
-
-                    GlassSurface {
-                        id: glassModeButton
-
-                        anchors.left:
-                            focusButton.right
-
-                        anchors.leftMargin:
-                            8
-
-                        anchors.verticalCenter:
-                            parent.verticalCenter
-
-                        width:
-                            30
-
-                        height:
-                            30
-
-                        glassRadius:
-                            15
-
-                        glassTint:
-                            GlassMode.liquid
-                            ? Theme.blue
-                            : Glass.tint
-
-                        glassOpacity:
-                            GlassMode.liquid
-                            ? 0.92
-                            : glassModeMouse.containsMouse
-                              ? 0.46
-                              : 0.34
-
-                        showHighlight:
-                            false
-
-                        opacity:
-                            GlassMode.loaded
-                            ? 1.0
-                            : 0.48
-
-                        Text {
-                            anchors.centerIn:
-                                parent
-
-                            text:
-                                GlassMode.liquid
-                                ? "◆"
-                                : "◇"
-
-                            font.family:
-                                Theme.fontMain
-
-                            font.pixelSize:
-                                15
-
-                            font.bold:
-                                true
-
-                            color:
-                                GlassMode.liquid
-                                ? Theme.bg0
-                                : Theme.white
-                        }
-
-                        MouseArea {
-                            id: glassModeMouse
-
-                            anchors.fill:
-                                parent
-
-                            enabled:
-                                GlassMode.loaded
-
-                            hoverEnabled:
-                                enabled
-
-                            cursorShape:
-                                enabled
-                                ? Qt.PointingHandCursor
-                                : Qt.ArrowCursor
-
-                            onClicked:
-                                GlassMode.toggle()
-                        }
-                    }
-
-                    // =====================================================
-                    // POWER SAVER
-                    // =====================================================
-
+                    // Power Saver. Automatic policy remains owned by
+                    // ~/.config/hypr/scripts/power_mode.sh: unplugging enables
+                    // power-saver and plugging in restores balanced. This button
+                    // is only an on-battery manual override, so it is disabled on AC.
                     GlassSurface {
                         id: powerSaverButton
 
-                        anchors.left:
-                            glassModeButton.right
-
-                        anchors.leftMargin:
-                            8
-
-                        anchors.verticalCenter:
-                            parent.verticalCenter
-
-                        width:
-                            30
-
-                        height:
-                            30
-
-                        glassRadius:
-                            15
-
+                        anchors.left: focusButton.right
+                        anchors.leftMargin: 8
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 30
+                        height: 30
+                        glassRadius: 15
                         glassTint:
-                            ncWindow.powerSaverState
-                            && ncWindow.powerSaverAvailable
-                            ? "#2ecc71"
-                            : Glass.tint
-
+                            ncWindow.powerSaverState && ncWindow.powerSaverAvailable
+                            ? "#2ecc71" : Glass.tint
                         glassOpacity:
-                            !ncWindow.powerSaverAvailable
-                            ? 0.16
-                            : ncWindow.powerSaverState
-                              ? 0.92
-                              : powerSaverMouse.containsMouse
-                                ? 0.46
-                                : 0.34
-
-                        showHighlight:
-                            false
-
-                        opacity:
-                            ncWindow.powerSaverAvailable
-                            ? 1.0
-                            : 0.48
+                            !ncWindow.powerSaverAvailable ? 0.16
+                            : ncWindow.powerSaverState ? 0.92
+                            : powerSaverMouse.containsMouse ? 0.46
+                            : 0.34
+                        showHighlight: false
+                        opacity: ncWindow.powerSaverAvailable ? 1.0 : 0.48
 
                         Text {
-                            anchors.centerIn:
-                                parent
-
-                            anchors.horizontalCenterOffset:
-                                1.5
-
-                            text:
-                                "󰌪"
-
-                            font.family:
-                                Theme.fontIcons
-
-                            font.pixelSize:
-                                15
-
+                            anchors.centerIn: parent
+                            // The leaf glyph has asymmetric side bearings, so a
+                            // tiny optical offset centers the visible shape.
+                            anchors.horizontalCenterOffset: 1.5
+                            text: "󰌪"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 15
                             color:
-                                ncWindow.powerSaverState
-                                && ncWindow.powerSaverAvailable
-                                ? Theme.bg0
-                                : Theme.white
+                                ncWindow.powerSaverState && ncWindow.powerSaverAvailable
+                                ? Theme.bg0 : Theme.white
                         }
 
                         MouseArea {
                             id: powerSaverMouse
-
-                            anchors.fill:
-                                parent
-
-                            enabled:
-                                ncWindow.powerSaverAvailable
-
-                            hoverEnabled:
-                                enabled
-
-                            cursorShape:
-                                enabled
-                                ? Qt.PointingHandCursor
-                                : Qt.ArrowCursor
-
-                            onClicked:
-                                ncWindow.togglePowerSaverRequested()
+                            anchors.fill: parent
+                            enabled: ncWindow.powerSaverAvailable
+                            hoverEnabled: enabled
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: ncWindow.togglePowerSaverRequested()
                         }
                     }
 
@@ -3053,91 +1713,46 @@ PanelWindow {
                         readonly property bool hasNotifications:
                             ncWindow.notificationCount > 0
 
-                        anchors.right:
-                            parent.right
-
-                        anchors.verticalCenter:
-                            parent.verticalCenter
-
-                        width:
-                            82
-
-                        height:
-                            30
-
-                        glassRadius:
-                            15
-
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 82
+                        height: 30
+                        glassRadius: 15
                         glassOpacity:
                             hasNotifications
-                            ? (
-                                clearMouse.containsMouse
-                                ? 0.48
-                                : 0.34
-                            )
+                            ? (clearMouse.containsMouse ? 0.48 : 0.34)
                             : 0.18
-
-                        showHighlight:
-                            false
-
-                        opacity:
-                            hasNotifications
-                            ? 1.0
-                            : 0.62
+                        showHighlight: false
+                        opacity: hasNotifications ? 1.0 : 0.62
 
                         Row {
-                            anchors.centerIn:
-                                parent
-
-                            spacing:
-                                6
+                            anchors.centerIn: parent
+                            spacing: 6
 
                             Text {
-                                anchors.verticalCenter:
-                                    parent.verticalCenter
-
-                                text:
-                                    "Clear All"
-
-                                font.family:
-                                    Theme.fontMain
-
-                                font.pixelSize:
-                                    11
-
-                                font.bold:
-                                    true
-
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "Clear All"
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                                font.bold: true
                                 color:
                                     clearAllButton.hasNotifications
                                     ? Theme.white
-                                    : Qt.alpha(
-                                          Theme.white,
-                                          0.45
-                                      )
+                                    : Qt.alpha(Theme.white, 0.45)
                             }
                         }
 
                         MouseArea {
                             id: clearMouse
-
-                            anchors.fill:
-                                parent
-
-                            hoverEnabled:
-                                clearAllButton.hasNotifications
-
+                            anchors.fill: parent
+                            hoverEnabled: clearAllButton.hasNotifications
                             cursorShape:
                                 clearAllButton.hasNotifications
                                 ? Qt.PointingHandCursor
                                 : Qt.ArrowCursor
-
                             onClicked: {
-                                if (
-                                    clearAllButton.hasNotifications
-                                ) {
+                                if (clearAllButton.hasNotifications)
                                     ncWindow.clearRequested()
-                                }
                             }
                         }
                     }
@@ -3146,87 +1761,47 @@ PanelWindow {
                 Text {
                     id: emptyNotificationsText
 
-                    anchors.top:
-                        notificationsHeader.bottom
+                    anchors.top: notificationsHeader.bottom
+                    anchors.topMargin: 8
+                    width: parent.width
+                    height: notificationsSection.bodyHeight
+                    visible: ncWindow.notificationCount === 0
 
-                    anchors.topMargin:
-                        8
-
-                    width:
-                        parent.width
-
-                    height:
-                        notificationsSection.bodyHeight
-
-                    visible:
-                        ncWindow.notificationCount === 0
-
-                    text:
-                        "No new notifications"
-
-                    color:
-                        Qt.alpha(
-                            Theme.white,
-                            0.46
-                        )
-
-                    font.family:
-                        Theme.fontMain
-
-                    font.pixelSize:
-                        13
-
-                    horizontalAlignment:
-                        Text.AlignHCenter
-
-                    verticalAlignment:
-                        Text.AlignVCenter
+                    text: "No new notifications"
+                    color: Qt.alpha(Theme.white, 0.46)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
 
                 ListView {
                     id: notificationsList
 
-                    anchors.top:
-                        notificationsHeader.bottom
+                    anchors.top: notificationsHeader.bottom
+                    anchors.topMargin: 8
+                    width: parent.width
 
-                    anchors.topMargin:
-                        8
+                    height: notificationsSection.bodyHeight
+                    visible: ncWindow.notificationCount > 0
 
-                    width:
-                        parent.width
-
-                    height:
-                        notificationsSection.bodyHeight
-
-                    visible:
-                        ncWindow.notificationCount > 0
-
-                    model:
-                        ncWindow.modelData
-
-                    spacing:
-                        9
-
-                    clip:
-                        true
-
-                    boundsBehavior:
-                        Flickable.StopAtBounds
+                    model: ncWindow.modelData
+                    spacing: 9
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
 
                     delegate: GlassSurface {
                         id: notificationPopup
 
-                        width:
-                            ListView.view.width
-
-                        height:
-                            ncWindow.notificationHeight
-
-                        glassRadius:
-                            20
-
-                        showHighlight:
-                            false
+                        // IMPORTANT:
+                        // Do not declare `required property int index` here.
+                        // Doing so changes delegate role injection in QML and
+                        // breaks the existing `model.<role>` accesses used by
+                        // the notification daemon model.
+                        width: ListView.view.width
+                        height: ncWindow.notificationHeight
+                        glassRadius: 20
+                        showHighlight: false
 
                         glassTint:
                             model.urgency === 2
@@ -3235,37 +1810,16 @@ PanelWindow {
 
                         glassOpacity:
                             model.urgency === 2
-                            ? (
-                                GlassMode.liquid
-                                ? 0.18
-                                : 0.24
-                              )
-                            : notificationMouse.containsMouse
-                              ? (
-                                  GlassMode.liquid
-                                  ? 0.30
-                                  : 0.46
-                                )
-                              : (
-                                  GlassMode.liquid
-                                  ? 0.23
-                                  : 0.36
-                                )
+                            ? 0.24
+                            : notificationMouse.containsMouse ? 0.46 : 0.36
 
                         MouseArea {
                             id: notificationMouse
 
-                            anchors.fill:
-                                parent
-
-                            z:
-                                0
-
-                            hoverEnabled:
-                                true
-
-                            cursorShape:
-                                Qt.PointingHandCursor
+                            anchors.fill: parent
+                            z: 0
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
 
                             onClicked: {
                                 ncWindow.requestClose()
@@ -3285,144 +1839,78 @@ PanelWindow {
                         }
 
                         RowLayout {
-                            z:
-                                1
+                            z: 1
+                            anchors.fill: parent
+                            anchors.leftMargin: 13
+                            anchors.rightMargin: 11
+                            anchors.topMargin: 10
+                            anchors.bottomMargin: 10
+                            spacing: 11
 
-                            anchors.fill:
-                                parent
-
-                            anchors.leftMargin:
-                                13
-
-                            anchors.rightMargin:
-                                11
-
-                            anchors.topMargin:
-                                10
-
-                            anchors.bottomMargin:
-                                10
-
-                            spacing:
-                                11
-
+                            // Application icon --------------------------------
                             Item {
-                                Layout.preferredWidth:
-                                    42
-
-                                Layout.preferredHeight:
-                                    42
+                                Layout.preferredWidth: 42
+                                Layout.preferredHeight: 42
 
                                 Image {
                                     id: rawNotificationIcon
-
-                                    anchors.fill:
-                                        parent
+                                    anchors.fill: parent
 
                                     source:
                                         model.icon
                                         ? (
-                                            String(
-                                                model.icon
-                                            ).startsWith("/")
-                                            ? "file://"
-                                              + model.icon
-                                            : "image://icon/"
-                                              + model.icon
+                                            String(model.icon).startsWith("/")
+                                            ? "file://" + model.icon
+                                            : "image://icon/" + model.icon
                                           )
                                         : ""
 
-                                    fillMode:
-                                        Image.PreserveAspectCrop
-
-                                    visible:
-                                        false
+                                    fillMode: Image.PreserveAspectCrop
+                                    visible: false
                                 }
 
                                 Rectangle {
                                     id: notificationIconMask
-
-                                    anchors.fill:
-                                        parent
-
-                                    radius:
-                                        12
-
-                                    visible:
-                                        false
+                                    anchors.fill: parent
+                                    radius: 12
+                                    visible: false
                                 }
 
                                 OpacityMask {
-                                    anchors.fill:
-                                        parent
-
-                                    source:
-                                        rawNotificationIcon
-
-                                    maskSource:
-                                        notificationIconMask
-
-                                    visible:
-                                        rawNotificationIcon.status
-                                        === Image.Ready
+                                    anchors.fill: parent
+                                    source: rawNotificationIcon
+                                    maskSource: notificationIconMask
+                                    visible: rawNotificationIcon.status === Image.Ready
                                 }
 
                                 Rectangle {
-                                    anchors.fill:
-                                        parent
-
-                                    radius:
-                                        12
-
-                                    visible:
-                                        rawNotificationIcon.status
-                                        !== Image.Ready
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.11
-                                        )
+                                    anchors.fill: parent
+                                    radius: 12
+                                    visible: rawNotificationIcon.status !== Image.Ready
+                                    color: Qt.alpha(Theme.white, 0.11)
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            ""
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            16
-
-                                        color:
-                                            Theme.white
+                                        anchors.centerIn: parent
+                                        text: ""
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 16
+                                        color: Theme.white
                                     }
                                 }
                             }
 
+                            // Text --------------------------------------------
                             ColumnLayout {
-                                Layout.fillWidth:
-                                    true
-
-                                Layout.alignment:
-                                    Qt.AlignVCenter
-
-                                spacing:
-                                    2
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignVCenter
+                                spacing: 2
 
                                 RowLayout {
-                                    Layout.fillWidth:
-                                        true
-
-                                    spacing:
-                                        6
+                                    Layout.fillWidth: true
+                                    spacing: 6
 
                                     Text {
-                                        Layout.fillWidth:
-                                            true
+                                        Layout.fillWidth: true
 
                                         text:
                                             model.app
@@ -3435,132 +1923,66 @@ PanelWindow {
                                         color:
                                             model.urgency === 2
                                             ? Theme.red
-                                            : Qt.alpha(
-                                                  Theme.white,
-                                                  0.62
-                                              )
+                                            : Qt.alpha(Theme.white, 0.62)
 
-                                        font.family:
-                                            Theme.fontMain
-
-                                        font.pixelSize:
-                                            9
-
-                                        font.bold:
-                                            true
-
-                                        elide:
-                                            Text.ElideRight
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        elide: Text.ElideRight
                                     }
                                 }
 
                                 Text {
-                                    Layout.fillWidth:
-                                        true
+                                    Layout.fillWidth: true
 
-                                    text:
-                                        model.title
-
-                                    color:
-                                        Theme.white
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        12
-
-                                    font.bold:
-                                        true
-
-                                    elide:
-                                        Text.ElideRight
+                                    text: model.title
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    elide: Text.ElideRight
                                 }
 
                                 Text {
-                                    Layout.fillWidth:
-                                        true
+                                    Layout.fillWidth: true
 
-                                    text:
-                                        model.body
-
-                                    color:
-                                        Qt.alpha(
-                                            Theme.white,
-                                            0.60
-                                        )
-
-                                    font.family:
-                                        Theme.fontMain
-
-                                    font.pixelSize:
-                                        11
-
-                                    elide:
-                                        Text.ElideRight
-
-                                    maximumLineCount:
-                                        1
+                                    text: model.body
+                                    color: Qt.alpha(Theme.white, 0.60)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
                                 }
                             }
 
+                            // Dismiss -----------------------------------------
                             Item {
-                                Layout.preferredWidth:
-                                    24
-
-                                Layout.preferredHeight:
-                                    24
-
-                                Layout.alignment:
-                                    Qt.AlignTop
+                                Layout.preferredWidth: 24
+                                Layout.preferredHeight: 24
+                                Layout.alignment: Qt.AlignTop
 
                                 Rectangle {
-                                    anchors.fill:
-                                        parent
-
-                                    radius:
-                                        12
-
+                                    anchors.fill: parent
+                                    radius: 12
                                     color:
                                         dismissMouse.containsMouse
-                                        ? Qt.alpha(
-                                              Theme.white,
-                                              0.15
-                                          )
+                                        ? Qt.alpha(Theme.white, 0.15)
                                         : "transparent"
 
                                     Text {
-                                        anchors.centerIn:
-                                            parent
-
-                                        text:
-                                            "󰅖"
-
-                                        font.family:
-                                            Theme.fontIcons
-
-                                        font.pixelSize:
-                                            13
-
-                                        color:
-                                            Qt.alpha(
-                                                Theme.white,
-                                                0.70
-                                            )
+                                        anchors.centerIn: parent
+                                        text: "󰅖"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 13
+                                        color: Qt.alpha(Theme.white, 0.70)
                                     }
                                 }
 
                                 MouseArea {
                                     id: dismissMouse
-
-                                    anchors.fill:
-                                        parent
-
-                                    hoverEnabled:
-                                        true
-
-                                    cursorShape:
-                                        Qt.PointingHandCursor
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
 
                                     onClicked: {
                                         ncWindow.execCmd(
@@ -3572,9 +1994,12 @@ PanelWindow {
                                 }
                             }
                         }
+
                     }
                 }
             }
         }
+
+
     }
 }

@@ -1,6 +1,6 @@
 import QtQuick
 import Quickshell
-import Quickshell.Hyprland
+import Quickshell.Io
 import Quickshell.Wayland
 
 import "."
@@ -11,25 +11,117 @@ ShellRoot {
 
     /*
      * ============================================================
-     * LIQUID GLASS TEST
+     * GLASS MODE
      * ============================================================
      *
-     * Esta ventana sigue funcionando como sandbox visual, pero ya
-     * no mantiene un estado de Glass independiente.
+     * liquid  -> HyprGlass real Liquid Glass
+     * classic -> GlassSurface + blur clásico de Hyprland
      *
-     * El modo global lo controla:
+     * El estado persistente se guarda en:
      *
-     *     GlassMode
-     *
-     * classic
-     *     GlassSurface + blur normal de Hyprland.
-     *
-     * liquid
-     *     GlassSurface ligero + HyprGlass real.
-     *
-     * Cambiar el toggle aquí cambia el modo GLOBAL, igual que el
-     * botón que añadiremos al Notification Center.
+     * ~/.config/quickshell/state/glass-mode
      */
+
+    property bool liquidGlassEnabled: true
+    property bool glassModeLoaded: false
+
+
+    // ============================================================
+    // PERSISTENT STATE READER
+    // ============================================================
+
+    Process {
+        id: glassModeReader
+
+        running: true
+
+        command: [
+            "bash",
+            "-c",
+            "mkdir -p ~/.config/quickshell/state; " +
+            "cat ~/.config/quickshell/state/glass-mode 2>/dev/null || echo liquid"
+        ]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var mode = data.trim()
+
+                root.liquidGlassEnabled = (mode !== "classic")
+                root.glassModeLoaded = true
+            }
+        }
+    }
+
+
+    // ============================================================
+    // PERSISTENT STATE WRITER
+    // ============================================================
+
+    Process {
+        id: glassModeWriter
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var mode = data.trim()
+
+                if (mode === "liquid")
+                    root.liquidGlassEnabled = true
+                else if (mode === "classic")
+                    root.liquidGlassEnabled = false
+            }
+        }
+
+        onRunningChanged: {
+            if (!running && root.glassModeLoaded) {
+                if (!hyprReloadProc.running)
+                    hyprReloadProc.running = true
+            }
+        }
+    }
+
+
+    // ============================================================
+    // HYPRLAND RELOAD
+    // ============================================================
+
+    Process {
+        id: hyprReloadProc
+
+        command: [
+            "hyprctl",
+            "reload"
+        ]
+    }
+
+
+    // ============================================================
+    // TOGGLE FUNCTION
+    // ============================================================
+
+    function toggleGlassMode() {
+        if (!root.glassModeLoaded || glassModeWriter.running)
+            return
+
+        var newMode =
+            root.liquidGlassEnabled
+            ? "classic"
+            : "liquid"
+
+        // Actualización inmediata de la parte QML.
+        root.liquidGlassEnabled = (newMode === "liquid")
+
+        // Persistimos el cambio.
+        glassModeWriter.command = [
+            "bash",
+            "-c",
+            "mkdir -p ~/.config/quickshell/state && " +
+            "printf '%s\\n' '" + newMode + "' " +
+            "> ~/.config/quickshell/state/glass-mode && " +
+            "printf '%s\\n' '" + newMode + "'"
+        ]
+
+        glassModeWriter.running = true
+    }
 
 
     // ============================================================
@@ -48,59 +140,17 @@ ShellRoot {
 
         color: "transparent"
 
-        WlrLayershell.layer:
-            WlrLayershell.Overlay
-
-        WlrLayershell.namespace:
-            "liquid-glass-test"
-
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.namespace: "liquid-glass-test"
 
         anchors {
             top: true
             left: true
         }
 
-
         margins {
-            top:
-                Math.round(
-                    (screen.height - implicitHeight)
-                    / 2
-                )
-
-            left:
-                Math.round(
-                    (screen.width - implicitWidth)
-                    / 2
-                )
-        }
-
-
-        // ========================================================
-        // CLASSIC BACKDROP BLUR
-        // ========================================================
-        //
-        // En modo Classic conservamos explícitamente el blur normal
-        // que ya utilizaban los componentes Quickshell.
-        //
-        // En modo Liquid esta región desaparece por completo:
-        // HyprGlass pasa a ser el encargado del backdrop.
-        // ========================================================
-
-        BackgroundEffect.blurRegion:
-            Glass.blurEnabled
-            && GlassMode.classic
-            ? testBlurRegion
-            : null
-
-
-        Region {
-            id: testBlurRegion
-
-            item: testGlass
-
-            radius:
-                testGlass.radius
+            top: Math.round((screen.height - implicitHeight) / 2)
+            left: Math.round((screen.width - implicitWidth) / 2)
         }
 
 
@@ -109,43 +159,34 @@ ShellRoot {
         // ========================================================
 
         GlassSurface {
-            id: testGlass
-
             anchors.fill: parent
 
             glassRadius: 24
 
-
             /*
              * Classic:
-             *
-             *     comportamiento original de GlassSurface.
+             *   comportamiento visual original de GlassSurface.
              *
              * Liquid:
-             *
-             *     GlassSurface solamente mantiene una capa QML
-             *     ligera. HyprGlass genera el material óptico real.
+             *   dejamos una capa mucho más ligera para que
+             *   HyprGlass sea quien genere realmente el material.
              */
-
             glassOpacity:
-                GlassMode.liquid
-                ? GlassMode.liquidQmlOpacity
+                root.liquidGlassEnabled
+                ? 0.23
                 : Glass.opacity
-
 
             showBorder: true
 
-
             /*
-             * El highlight QML pertenece al aspecto clásico.
+             * En modo clásico conservamos el highlight superior
+             * original de GlassSurface.
              *
-             * Liquid Glass utiliza la iluminación óptica de
-             * HyprGlass mediante Fresnel.
+             * En Liquid Glass lo desactivamos porque HyprGlass
+             * genera su propia iluminación óptica mediante Fresnel.
              */
-
             showHighlight:
-                GlassMode.classic
-
+                !root.liquidGlassEnabled
 
             clip: true
 
@@ -165,231 +206,143 @@ ShellRoot {
                 // ------------------------------------------------
 
                 Column {
-                    anchors.horizontalCenter:
-                        parent.horizontalCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
 
                     spacing: 8
 
-
                     Text {
-                        anchors.horizontalCenter:
-                            parent.horizontalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
 
-                        text:
-                            "LIQUID GLASS TEST"
+                        text: "LIQUID GLASS TEST"
 
-                        color:
-                            Theme.white
+                        color: Theme.white
 
-                        font.family:
-                            Theme.fontMain
-
-                        font.pixelSize:
-                            24
-
-                        font.bold:
-                            true
+                        font.family: Theme.fontMain
+                        font.pixelSize: 24
+                        font.bold: true
                     }
 
-
                     Text {
-                        anchors.horizontalCenter:
-                            parent.horizontalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
 
                         text:
-                            GlassMode.liquid
+                            root.liquidGlassEnabled
                             ? "HyprGlass Liquid Glass"
                             : "Classic Quickshell Glass"
 
-                        color:
-                            Qt.alpha(
-                                Theme.white,
-                                0.58
-                            )
+                        color: Qt.alpha(Theme.white, 0.58)
 
-                        font.family:
-                            Theme.fontMain
-
-                        font.pixelSize:
-                            12
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
                     }
                 }
 
 
                 // ------------------------------------------------
-                // GLOBAL GLASS MODE TOGGLE
+                // GLASS MODE TOGGLE
                 // ------------------------------------------------
 
                 Row {
-                    anchors.horizontalCenter:
-                        parent.horizontalCenter
+                    anchors.horizontalCenter: parent.horizontalCenter
 
                     spacing: 12
 
 
-                    // --------------------------------------------
                     // Classic label
-                    // --------------------------------------------
-
                     Text {
-                        anchors.verticalCenter:
-                            parent.verticalCenter
+                        anchors.verticalCenter: parent.verticalCenter
 
-                        text:
-                            "Classic"
+                        text: "Classic"
 
                         color:
-                            GlassMode.classic
+                            !root.liquidGlassEnabled
                             ? Theme.white
-                            : Qt.alpha(
-                                  Theme.white,
-                                  0.45
-                              )
+                            : Qt.alpha(Theme.white, 0.45)
 
-                        font.family:
-                            Theme.fontMain
-
-                        font.pixelSize:
-                            12
-
-                        font.bold:
-                            GlassMode.classic
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
+                        font.bold: !root.liquidGlassEnabled
                     }
 
 
-                    // --------------------------------------------
                     // Toggle
-                    // --------------------------------------------
-
                     Rectangle {
                         id: glassToggle
 
                         width: 46
                         height: 26
 
-                        radius:
-                            height / 2
-
+                        radius: height / 2
 
                         color:
-                            GlassMode.liquid
-                            ? Qt.rgba(
-                                  0.22,
-                                  0.62,
-                                  1.0,
-                                  0.85
-                              )
-                            : Qt.alpha(
-                                  Theme.white,
-                                  0.16
-                              )
+                            root.liquidGlassEnabled
+                            ? Qt.rgba(0.22, 0.62, 1.0, 0.85)
+                            : Qt.alpha(Theme.white, 0.16)
 
-
-                        border.width:
-                            1
-
+                        border.width: 1
 
                         border.color:
-                            GlassMode.liquid
-                            ? Qt.alpha(
-                                  Theme.white,
-                                  0.22
-                              )
-                            : Qt.alpha(
-                                  Theme.white,
-                                  0.16
-                              )
+                            root.liquidGlassEnabled
+                            ? Qt.alpha(Theme.white, 0.22)
+                            : Qt.alpha(Theme.white, 0.16)
 
 
                         Rectangle {
                             width: 20
                             height: 20
 
-                            radius:
-                                width / 2
+                            radius: width / 2
 
-                            anchors.verticalCenter:
-                                parent.verticalCenter
-
+                            anchors.verticalCenter: parent.verticalCenter
 
                             x:
-                                GlassMode.liquid
-                                ? parent.width
-                                  - width
-                                  - 3
+                                root.liquidGlassEnabled
+                                ? parent.width - width - 3
                                 : 3
 
-
-                            color:
-                                Theme.white
-
+                            color: Theme.white
 
                             Behavior on x {
                                 NumberAnimation {
-                                    duration:
-                                        160
-
-                                    easing.type:
-                                        Easing.OutCubic
+                                    duration: 160
+                                    easing.type: Easing.OutCubic
                                 }
                             }
                         }
 
 
                         MouseArea {
-                            anchors.fill:
-                                parent
-
+                            anchors.fill: parent
 
                             enabled:
-                                GlassMode.loaded
-
-
-                            hoverEnabled:
-                                enabled
-
+                                root.glassModeLoaded &&
+                                !glassModeWriter.running
 
                             cursorShape:
                                 enabled
                                 ? Qt.PointingHandCursor
                                 : Qt.ArrowCursor
 
-
                             onClicked:
-                                GlassMode.toggle()
+                                root.toggleGlassMode()
                         }
                     }
 
 
-                    // --------------------------------------------
                     // Liquid Glass label
-                    // --------------------------------------------
-
                     Text {
-                        anchors.verticalCenter:
-                            parent.verticalCenter
+                        anchors.verticalCenter: parent.verticalCenter
 
-                        text:
-                            "Liquid Glass"
-
+                        text: "Liquid Glass"
 
                         color:
-                            GlassMode.liquid
+                            root.liquidGlassEnabled
                             ? Theme.white
-                            : Qt.alpha(
-                                  Theme.white,
-                                  0.45
-                              )
+                            : Qt.alpha(Theme.white, 0.45)
 
-
-                        font.family:
-                            Theme.fontMain
-
-                        font.pixelSize:
-                            12
-
-                        font.bold:
-                            GlassMode.liquid
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
+                        font.bold: root.liquidGlassEnabled
                     }
                 }
             }
