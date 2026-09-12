@@ -75,12 +75,35 @@ PanelWindow {
 
     anchors { top: true; bottom: true; left: true; right: true }
     WlrLayershell.layer: WlrLayershell.Overlay
+
+    /*
+     * Classic keeps the Launcher's original Quickshell namespace and
+     * compositor path. Liquid uses a dedicated namespace so HyprGlass can
+     * target the full-screen layer surface, then mask the actual material
+     * from mainCard's rendered alpha.
+     */
+    WlrLayershell.namespace:
+        GlassMode.liquid
+        ? "quickshell:launcher"
+        : "quickshell"
+
     WlrLayershell.exclusiveZone: -1
     WlrLayershell.keyboardFocus: isReallyVisible ? WlrLayershell.OnDemand : WlrLayershell.None
     visible: isReallyVisible
     color: "transparent"
 
-    BackgroundEffect.blurRegion: Glass.blurEnabled ? launcherBlurRegion : null
+    /*
+     * Classic keeps the exact original Hyprland blur path.
+     *
+     * Liquid deliberately does NOT publish a BackgroundEffect region:
+     * HyprGlass uses the rendered alpha of mainCard instead, matching the
+     * same composition path that already works correctly in NotificationCenter.
+     */
+    BackgroundEffect.blurRegion:
+        GlassMode.classic
+        && Glass.blurEnabled
+        ? launcherBlurRegion
+        : null
 
     /*
      * Do NOT bind the blur Region directly to mainCard.
@@ -380,6 +403,20 @@ PanelWindow {
         anchors.centerIn: parent
         transformOrigin: Item.Center
         glassRadius: 20
+
+        /*
+         * Classic intentionally resolves to the original GlassSurface
+         * appearance. Liquid keeps only a light QML body/tint while
+         * HyprGlass renders blur, refraction and Fresnel.
+         */
+        glassOpacity:
+            GlassMode.liquid
+            ? GlassMode.liquidQmlOpacity
+            : Glass.opacity
+
+        showHighlight:
+            GlassMode.classic
+
         clip: true
 
         scale: launcherWindow.visible_state ? 1.0 : 0.0

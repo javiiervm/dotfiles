@@ -58,6 +58,19 @@ return {
         -- Each pop-up notification is a separate PanelWindow and publishes
         -- one rounded ext-background-effect-v1 region matching its card.
         mask_mode = "region"
+    },
+
+    -- Launcher
+    {
+        namespace = "quickshell:launcher",
+        preset = "gnome_liquid_glass",
+
+        -- Match the working Notification Center path: HyprGlass masks the
+        -- material from the actual rendered alpha of mainCard. This preserves
+        -- the rounded shape and the full refraction/Fresnel effect without
+        -- mixing in Hyprland's classic BackgroundEffect.
+        mask_mode = "alpha",
+        mask_threshold = 0.01
     }
 
 }
