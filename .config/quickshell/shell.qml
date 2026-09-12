@@ -984,6 +984,9 @@ ShellRoot {
         }
     }
 
+    // ============================================================
+    // TOP BAR — CLASSIC
+    // ============================================================
     PanelWindow {
         id: topBar
         screen: root.primaryUiScreen
@@ -993,6 +996,8 @@ ShellRoot {
         // while eDP-1 is disabled (clamshell mode). Tune 38 if desired.
         exclusiveZone: screen && screen.name === "HDMI-A-1" ? 38 : 44
         color: "transparent"
+
+        visible: GlassMode.classic
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? topBarBlurRegion : null
 
@@ -1076,253 +1081,588 @@ ShellRoot {
                 }
             }
         }
+    }
 
-        PanelWindow {
-            id: popupMenuWindow
-            screen: root.primaryUiScreen
-            anchors { top: true; right: true }
-            WlrLayershell.layer: WlrLayershell.Overlay
-            implicitHeight: root.isMenuVisible ? 90 : 0
-            implicitWidth: 200
-            margins { right: root.activeMenuOffset }
-            exclusiveZone: 0
-            color: "transparent"
+    // ============================================================
+    // TOP BAR — LIQUID GLASS
+    // ============================================================
+    PanelWindow {
+        id: liquidTopBar
+        screen: root.primaryUiScreen
+        anchors { top: true; left: true; right: true }
+        implicitHeight: 44
+        // Keep the laptop exactly as before. The HDMI value is used only
+        // while eDP-1 is disabled (clamshell mode). Tune 38 if desired.
+        exclusiveZone: screen && screen.name === "HDMI-A-1" ? 38 : 44
+        color: "transparent"
+        WlrLayershell.namespace: "quickshell:topbar"
 
-            /*
-             * SysMenu is a reusable GlassSurface, not a PanelWindow itself.
-             * The parent window therefore owns the backdrop blur request.
-             *
-             * A separate geometry target is used instead of the animated
-             * SysMenu surface, keeping the blur region stable while the menu
-             * fades/scales in and out.
-             */
-            BackgroundEffect.blurRegion: Glass.blurEnabled ? sysMenuBlurRegion : null
+        visible: GlassMode.liquid
 
-            Item {
-                id: sysMenuBlurTarget
-                anchors.fill: parent
-            }
+        Item {
+            anchors.fill: parent
+            opacity: 0
+            NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
+            
+            GlassSurface {
+                id: liquidLeftBarGlass
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                height: 34
+                width: liquidLeftRow.implicitWidth + 30
+                glassRadius: height / 2
+                glassOpacity: GlassMode.liquidQmlOpacity
+                showHighlight: false
 
-            Region {
-                id: sysMenuBlurRegion
-                item: sysMenuBlurTarget
-                radius: 12
-            }
-
-            SysMenu {
-                id: sysMenu
-                title: root.activeMenuTitle
-                info1: root.activeMenuInfo1
-                info2: root.activeMenuInfo2
-                accent: root.activeMenuAccent
-                isOpen: root.isMenuOpen
-            }
-        }
-
-        // --- VENTANA DEL MENÚ DEL PORTAPAPELES ---
-        PanelWindow {
-            id: clipMenuWindow
-            screen: root.primaryUiScreen
-            anchors { top: true; right: true }
-            WlrLayershell.layer: WlrLayershell.Overlay
-            implicitWidth: 260
-            implicitHeight: root.isClipMenuOpen
-                ? Math.min(320, 63 + (root.clipboardModel.count * 32))
-                : 0
-            margins { right: 22 } // Alineado bajo el icono
-            exclusiveZone: 0
-            color: "transparent"
-
-            BackgroundEffect.blurRegion: Glass.blurEnabled ? clipBlurRegion : null
-
-            Region {
-                id: clipBlurRegion
-                item: clipGlass
-                radius: clipGlass.radius
+                RowLayout {
+                    id: liquidLeftRow
+                    anchors.centerIn: parent
+                    spacing: 25
+                    
+                    Text { 
+                        text: ""; color: Theme.white; font.family: Theme.fontIcons; font.pixelSize: 22; 
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { mainLauncher.toggle() } } 
+                    }
+                    Workspaces { showContainer: false } 
+                }
             }
 
             GlassSurface {
-                id: clipGlass
-                anchors.fill: parent
-                glassRadius: 12
-                clip: true
+                id: liquidRightBarGlass
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                height: 34
+                width: liquidRightRow.implicitWidth + 30
+                glassRadius: height / 2
+                glassOpacity: GlassMode.liquidQmlOpacity
+                showHighlight: false
 
-                opacity: root.isClipMenuOpen ? 1.0 : 0.0
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                RowLayout {
+                    id: liquidRightRow
+                    anchors.centerIn: parent
+                    spacing: 18
+                    
+                    Updates { Layout.rightMargin: 15 }
 
-                transform: Translate {
-                    y: root.isClipMenuOpen ? 0 : -10
-                    Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-                }
+                    SystemIcons { 
+                        id: liquidSysIconsModule; rootRef: root; ssid: root.wifiSsid; wifiSignal: root.wifiSig; freq: root.wifiFreq
+                        btOn: root.btStat === "on"; btDev: root.btDev; perf: root.perfMode; vol: root.vol; volMute: root.volMute; volDesc: root.volDesc
+                    }
 
-                HoverHandler {
-                    onHoveredChanged: {
-                        if (hovered) {
-                            root.isClipMenuHovered = true;
-                            clipHideTimer.stop();
-                        } else {
-                            root.isClipMenuHovered = false;
-                            clipHideTimer.start();
+                    AppTray { Layout.alignment: Qt.AlignVCenter }
+                    Battery {
+                        percentage: root.batCap
+                        charging: (root.batStat === "Charging" || root.batStat === "Full")
+                        onAcPower: root.onAcPower
+                        batteryStatus: root.batStat
+                        powerSaverMode: root.perfMode === "power-saver"
+                    }
+                    MouseArea {
+                        width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
+                        Notification { 
+                            dnd: root.dnd; 
+                            count: root.notifCount; 
+                            hasUnread: root.hasUnread; 
+                            showContainer: false; 
+                            anchors.fill: parent 
                         }
                     }
                 }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    spacing: 8
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 20
-
-                        Text {
-                            text: "Clipboard"
-                            color: Theme.white
-                            font.family: Theme.fontMain
-                            font.pixelSize: 12
-                            font.bold: true
-                            Layout.fillWidth: true
-                        }
-
-                        Rectangle {
-                            Layout.preferredWidth: 55
-                            Layout.preferredHeight: 18
-                            radius: 4
-                            color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
-                            border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "Clear"
-                                color: clearMouse.containsMouse ? Theme.red : Theme.grey1
-                                font.pixelSize: 9
-                            }
-
-                            MouseArea {
-                                id: clearMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: root.clipboardModel.count > 0
-                                onClicked: root.clearClipHistory()
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: Qt.alpha(Theme.white, 0.1)
-                    }
-
-                    Text {
-                        visible: root.clipboardModel.count === 0
-                        text: "No clipboard history"
-                        color: Theme.grey1
-                        font.family: Theme.fontMain
-                        font.pixelSize: 10
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                    }
-
-                    ListView {
-                        id: clipboardList
-                        visible: root.clipboardModel.count > 0
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        spacing: 4
-                        model: root.clipboardModel
-
-                        delegate: Rectangle {
-                            required property string clipId
-                            required property string clipContent
-
-                            width: ListView.view.width
-                            height: 28
-                            radius: 6
-                            color: rowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 6
-                                anchors.rightMargin: 6
-                                spacing: 6
-
-                                Item {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-
-                                    Text {
-                                        anchors.fill: parent
-                                        anchors.rightMargin: 4
-                                        text: clipContent
-                                        color: Theme.white
-                                        font.family: Theme.fontMain
-                                        font.pixelSize: 11
-                                        verticalAlignment: Text.AlignVCenter
-                                        elide: Text.ElideRight
-                                        maximumLineCount: 1
-                                    }
-
-                                    MouseArea {
-                                        id: rowMouse
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.copyClipItem(clipId)
-                                    }
-                                }
-
-                                Item {
-                                    Layout.preferredWidth: 18
-                                    Layout.preferredHeight: 18
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "󰅖"
-                                        font.family: Theme.fontIcons
-                                        font.pixelSize: 12
-                                        color: delArea.containsMouse ? Theme.red : Theme.grey1
-                                    }
-
-                                    MouseArea {
-                                        id: delArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.deleteClipItem(clipId)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        DynamicIsland {
-            id: islandWidget
-
-            // Laptop keeps its original -38 value. The HDMI value is used
-            // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
-            topMargin: root.primaryUiScreen
-                && root.primaryUiScreen.name === "HDMI-A-1"
-                ? -32
-                : -38
-
-            isFullscreen: root.isFullscreen
-            isBtConnected: {
-                var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
-                return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
             }
         }
     }
+
+    // =========================================================
+    // SYSTEM MENU — CLASSIC
+    // =========================================================
+    //
+    // Keep the original compositor path untouched:
+    // PanelWindow + BackgroundEffect.blurRegion + SysMenu.
+    // =========================================================
+    PanelWindow {
+        id: popupMenuWindow
+        screen: root.primaryUiScreen
+        anchors { top: true; right: true }
+        WlrLayershell.layer: WlrLayershell.Overlay
+        implicitHeight: root.isMenuVisible ? 90 : 0
+        implicitWidth: 200
+        margins { right: root.activeMenuOffset }
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible: GlassMode.classic
+
+        /*
+         * SysMenu is a reusable GlassSurface, not a PanelWindow itself.
+         * The parent window therefore owns the backdrop blur request.
+         *
+         * A separate geometry target is used instead of the animated
+         * SysMenu surface, keeping the blur region stable while the menu
+         * fades/scales in and out.
+         */
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? sysMenuBlurRegion : null
+
+        Item {
+            id: sysMenuBlurTarget
+            anchors.fill: parent
+        }
+
+        Region {
+            id: sysMenuBlurRegion
+            item: sysMenuBlurTarget
+            radius: 12
+        }
+
+        SysMenu {
+            id: sysMenu
+            title: root.activeMenuTitle
+            info1: root.activeMenuInfo1
+            info2: root.activeMenuInfo2
+            accent: root.activeMenuAccent
+            isOpen: root.isMenuOpen
+        }
+    }
+
+    // =========================================================
+    // SYSTEM MENU — LIQUID GLASS
+    // =========================================================
+    //
+    // Separate layer surface so HyprGlass can target the menu
+    // without changing the known-good Classic path above.
+    // =========================================================
+    PanelWindow {
+        id: liquidPopupMenuWindow
+        screen: root.primaryUiScreen
+        anchors { top: true; right: true }
+
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.namespace: "quickshell:sysmenu"
+
+        implicitHeight: root.isMenuVisible ? 90 : 0
+        implicitWidth: 200
+
+        margins {
+            right: root.activeMenuOffset
+        }
+
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible: GlassMode.liquid
+
+        SysMenu {
+            id: liquidSysMenu
+
+            title: root.activeMenuTitle
+            info1: root.activeMenuInfo1
+            info2: root.activeMenuInfo2
+            accent: root.activeMenuAccent
+            isOpen: root.isMenuOpen
+
+            glassOpacity: GlassMode.liquidQmlOpacity
+            showHighlight: false
+        }
+    }
+
+    // ============================================================
+    // CLIPBOARD — CLASSIC
+    // ============================================================
+    PanelWindow {
+        id: clipMenuWindow
+        screen: root.primaryUiScreen
+        anchors { top: true; right: true }
+        WlrLayershell.layer: WlrLayershell.Overlay
+        implicitWidth: 260
+        implicitHeight: root.isClipMenuOpen
+            ? Math.min(320, 63 + (root.clipboardModel.count * 32))
+            : 0
+        margins { right: 22 } // Alineado bajo el icono
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible: GlassMode.classic
+
+        BackgroundEffect.blurRegion: Glass.blurEnabled ? clipBlurRegion : null
+
+        Region {
+            id: clipBlurRegion
+            item: clipGlass
+            radius: clipGlass.radius
+        }
+
+        GlassSurface {
+            id: clipGlass
+            anchors.fill: parent
+            glassRadius: 12
+            clip: true
+
+            opacity: root.isClipMenuOpen ? 1.0 : 0.0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+            transform: Translate {
+                y: root.isClipMenuOpen ? 0 : -10
+                Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+            }
+
+            HoverHandler {
+                onHoveredChanged: {
+                    if (hovered) {
+                        root.isClipMenuHovered = true;
+                        clipHideTimer.stop();
+                    } else {
+                        root.isClipMenuHovered = false;
+                        clipHideTimer.start();
+                    }
+                }
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 20
+
+                    Text {
+                        text: "Clipboard"
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
+                        font.bold: true
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 55
+                        Layout.preferredHeight: 18
+                        radius: 4
+                        color: clearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
+                        border.color: clearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Clear"
+                            color: clearMouse.containsMouse ? Theme.red : Theme.grey1
+                            font.pixelSize: 9
+                        }
+
+                        MouseArea {
+                            id: clearMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: root.clipboardModel.count > 0
+                            onClicked: root.clearClipHistory()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: Qt.alpha(Theme.white, 0.1)
+                }
+
+                Text {
+                    visible: root.clipboardModel.count === 0
+                    text: "No clipboard history"
+                    color: Theme.grey1
+                    font.family: Theme.fontMain
+                    font.pixelSize: 10
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+
+                ListView {
+                    id: clipboardList
+                    visible: root.clipboardModel.count > 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 4
+                    model: root.clipboardModel
+
+                    delegate: Rectangle {
+                        required property string clipId
+                        required property string clipContent
+
+                        width: ListView.view.width
+                        height: 28
+                        radius: 6
+                        color: rowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 6
+                            anchors.rightMargin: 6
+                            spacing: 6
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+
+                                Text {
+                                    anchors.fill: parent
+                                    anchors.rightMargin: 4
+                                    text: clipContent
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+
+                                MouseArea {
+                                    id: rowMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.copyClipItem(clipId)
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 18
+                                Layout.preferredHeight: 18
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "󰅖"
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 12
+                                    color: delArea.containsMouse ? Theme.red : Theme.grey1
+                                }
+
+                                MouseArea {
+                                    id: delArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.deleteClipItem(clipId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // CLIPBOARD — LIQUID GLASS
+    // ============================================================
+    PanelWindow {
+        id: liquidClipMenuWindow
+        screen: root.primaryUiScreen
+        anchors { top: true; right: true }
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.namespace: "quickshell:clipboard"
+        implicitWidth: 260
+        implicitHeight: root.isClipMenuOpen
+            ? Math.min(320, 63 + (root.clipboardModel.count * 32))
+            : 0
+        margins { right: 22 } // Alineado bajo el icono
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible: GlassMode.liquid
+
+        GlassSurface {
+            id: liquidClipGlass
+            anchors.fill: parent
+            glassRadius: 12
+            glassOpacity: GlassMode.liquidQmlOpacity
+            showHighlight: false
+            clip: true
+
+            opacity: root.isClipMenuOpen ? 1.0 : 0.0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
+            transform: Translate {
+                y: root.isClipMenuOpen ? 0 : -10
+                Behavior on y { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+            }
+
+            HoverHandler {
+                onHoveredChanged: {
+                    if (hovered) {
+                        root.isClipMenuHovered = true;
+                        clipHideTimer.stop();
+                    } else {
+                        root.isClipMenuHovered = false;
+                        clipHideTimer.start();
+                    }
+                }
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 20
+
+                    Text {
+                        text: "Clipboard"
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 12
+                        font.bold: true
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 55
+                        Layout.preferredHeight: 18
+                        radius: 4
+                        color: liquidClipClearMouse.containsMouse ? Qt.alpha(Theme.red, 0.2) : "transparent"
+                        border.color: liquidClipClearMouse.containsMouse ? Theme.red : Qt.alpha(Theme.white, 0.2)
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Clear"
+                            color: liquidClipClearMouse.containsMouse ? Theme.red : Theme.grey1
+                            font.pixelSize: 9
+                        }
+
+                        MouseArea {
+                            id: liquidClipClearMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: root.clipboardModel.count > 0
+                            onClicked: root.clearClipHistory()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: Qt.alpha(Theme.white, 0.1)
+                }
+
+                Text {
+                    visible: root.clipboardModel.count === 0
+                    text: "No clipboard history"
+                    color: Theme.grey1
+                    font.family: Theme.fontMain
+                    font.pixelSize: 10
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+
+                ListView {
+                    id: liquidClipboardList
+                    visible: root.clipboardModel.count > 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 4
+                    model: root.clipboardModel
+
+                    delegate: Rectangle {
+                        required property string clipId
+                        required property string clipContent
+
+                        width: ListView.view.width
+                        height: 28
+                        radius: 6
+                        color: liquidClipRowMouse.containsMouse ? Qt.alpha(Theme.white, 0.10) : "transparent"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 6
+                            anchors.rightMargin: 6
+                            spacing: 6
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+
+                                Text {
+                                    anchors.fill: parent
+                                    anchors.rightMargin: 4
+                                    text: clipContent
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 11
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+
+                                MouseArea {
+                                    id: liquidClipRowMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.copyClipItem(clipId)
+                                }
+                            }
+
+                            Item {
+                                Layout.preferredWidth: 18
+                                Layout.preferredHeight: 18
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "󰅖"
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 12
+                                    color: liquidClipDelArea.containsMouse ? Theme.red : Theme.grey1
+                                }
+
+                                MouseArea {
+                                    id: liquidClipDelArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.deleteClipItem(clipId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // DYNAMIC ISLAND — NOT MIGRATED YET
+    // ============================================================
+    DynamicIsland {
+        id: islandWidget
+
+        // Laptop keeps its original -38 value. The HDMI value is used
+        // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
+        topMargin: root.primaryUiScreen
+            && root.primaryUiScreen.name === "HDMI-A-1"
+            ? -32
+            : -38
+
+        isFullscreen: root.isFullscreen
+        isBtConnected: {
+            var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
+            return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+        }
+    }
+
 
     // --- MONITOR DE PANTALLA COMPLETA ---
     Process {
