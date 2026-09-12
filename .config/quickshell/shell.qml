@@ -109,7 +109,13 @@ ShellRoot {
 
     // --- ESTADOS PARA CAVA VISUALIZER ---
     property bool isPlayingMedia: false
-    property bool isWorkspaceEmpty: true
+
+    // Native, reactive Hyprland state.
+    // No bash/socat/hyprctl watcher is needed.
+    readonly property bool isWorkspaceEmpty:
+        !Hyprland.focusedWorkspace
+        || Hyprland.focusedWorkspace.toplevels.values.length === 0
+
     property bool showCavaVisualizer: false 
 
     property string cavaColor: Theme.blue 
@@ -137,7 +143,12 @@ ShellRoot {
     property int altTabCurrentIndex: 0
 
     // --- ESTADOS DE PANTALLA COMPLETA ---
-    property bool isFullscreen: false
+    // Native reactive state from Quickshell.Hyprland.
+    readonly property bool isFullscreen:
+        Hyprland.focusedWorkspace
+        ? Hyprland.focusedWorkspace.hasFullscreen
+        : false
+
     property bool isTopHovered: false
 
     property alias sharedNotifModel: sharedNotifModel
@@ -384,41 +395,7 @@ ShellRoot {
         }
     }
 
-    // --- 1. MONITOR DE ESCRITORIO ---
-    Process {
-        id: workspaceMonitorProc
-        command: [
-            "bash", "-c",
-            "check_empty() { w=$(hyprctl activeworkspace -j 2>/tmp/qs_dock_err.log | jq -e '.windows' 2>>/tmp/qs_dock_err.log); rc=$?; if [ $rc -ne 0 ] || [ -z \"$w\" ]; then echo \"ERR rc=$rc w=$w\" >> /tmp/qs_dock_err.log; return; fi; [ \"$w\" = \"0\" ] && echo 1 || echo 0; }; " +
-            "check_empty; " +
-            "SOCAT_BIN=$(command -v socat 2>/dev/null); " +
-            "if [ -z \"$SOCAT_BIN\" ]; then " +
-            "  for p in /usr/bin/socat /usr/local/bin/socat /bin/socat; do [ -x \"$p\" ] && SOCAT_BIN=\"$p\" && break; done; " +
-            "fi; " +
-            "if [ -z \"$SOCAT_BIN\" ]; then " +
-            "  echo \"socat no encontrado en ninguna ruta conocida, usando sondeo (polling) cada 2s\" >> /tmp/qs_dock_err.log; " +
-            "  while true; do check_empty; sleep 2; done; " +
-            "else " +
-            "  echo \"usando socat: $SOCAT_BIN\" >> /tmp/qs_dock_err.log; " +
-            "  while true; do " +
-            "    \"$SOCAT_BIN\" -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock 2>>/tmp/qs_dock_err.log | grep --line-buffered -E '(workspace|openwindow|closewindow|movewindow)' | while read -r _; do check_empty; done; " +
-            "    echo \"socat desconectado, reintentando en 1s\" >> /tmp/qs_dock_err.log; " +
-            "    sleep 1; " +
-            "  done; " +
-            "fi"
-        ]
-        running: true
-        stdout: SplitParser {
-            onRead: (data) => {
-                var val = data.trim();
-                if (val === "1" || val === "0") {
-                    root.isWorkspaceEmpty = (val === "1");
-                }
-            }
-        }
-    }
-
-    // --- 2. MONITOR DE MEDIOS ---
+    // --- MONITOR DE MEDIOS ---
     Process {
         id: mediaMonitorProc
         command: [
@@ -1324,40 +1301,6 @@ ShellRoot {
         }
     }
 
-    // --- MONITOR DE PANTALLA COMPLETA ---
-    Process {
-        id: fullscreenMonitorProc
-        command: [
-            "bash", "-c",
-            // check_fs: usamos 'jq' para EXTRAER el valor (no para decidir verdad/falso con -e,
-            // ya que jq considera "truthy" cualquier valor != null/false, incluido el entero 0).
-            "check_fs() { " +
-            "  val=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.hasfullscreen' 2>/dev/null); " +
-            "  if [ \"$val\" = \"true\" ] || [ \"$val\" = \"1\" ]; then echo 1; else echo 0; fi; " +
-            "}; " +
-            "check_fs; " +
-            "SOCAT_BIN=$(command -v socat); " +
-            "if [ -n \"$SOCAT_BIN\" ]; then " +
-            "  \"$SOCAT_BIN\" -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock 2>/dev/null | grep --line-buffered -E '(fullscreen|workspace)' | while read -r _; do check_fs; done; " +
-            "else " +
-            "  while true; do check_fs; sleep 2; done; " +
-            "fi"
-        ]
-        running: true
-        stdout: SplitParser {
-            onRead: (data) => {
-                var val = data.trim();
-                root.isFullscreen = (val === "1");
-
-                // Never carry a reveal state across fullscreen sessions.
-                if (!root.isFullscreen) {
-                    root.isTopHovered = false;
-                    topHideTimer.stop();
-                }
-            }
-        }
-    }
-
     // --- ZONA DE GATILLO SUPERIOR (detecta el ratón en una franja central del borde superior) ---
     PanelWindow {
         id: topTriggerZone
@@ -1395,6 +1338,14 @@ ShellRoot {
             if (!topTriggerArea.containsMouse && !fsGhostMouseArea.containsMouse) {
                 root.isTopHovered = false
             }
+        }
+    }
+
+    // Do not carry the fullscreen reveal state into normal desktop mode.
+    onIsFullscreenChanged: {
+        if (!isFullscreen) {
+            isTopHovered = false
+            topHideTimer.stop()
         }
     }
 
