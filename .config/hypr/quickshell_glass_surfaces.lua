@@ -35,7 +35,13 @@ return {
     -- Top bar left/right capsules
     {
         namespace = "quickshell:topbar",
-        preset = "gnome_liquid_glass"
+        preset = "gnome_liquid_glass",
+
+        -- Only the actual rendered capsules are glassed. A slightly higher
+        -- threshold removes very-low-alpha antialias/shadow pixels that can
+        -- otherwise create tiny spikes around rounded edges.
+        mask_mode = "alpha",
+        mask_threshold = 0.05
     },
 
     -- Clipboard popup
@@ -71,6 +77,17 @@ return {
         -- mixing in Hyprland's classic BackgroundEffect.
         mask_mode = "alpha",
         mask_threshold = 0.01
+    },
+
+    -- Dynamic Island
+    {
+        namespace = "quickshell:dynamic-island",
+        preset = "gnome_liquid_glass",
+
+        -- The dedicated glass-only window is transparent everywhere except
+        -- the animated rounded island body.
+        mask_mode = "alpha",
+        mask_threshold = 0.05
     }
 
 }

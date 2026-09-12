@@ -1556,6 +1556,13 @@ ShellRoot {
 
         visible: GlassMode.liquid
 
+        /*
+         * No BackgroundEffect in Liquid mode.
+         *
+         * The PanelWindow remains fully transparent and HyprGlass derives its
+         * mask only from the rendered alpha of the two actual GlassSurface
+         * capsules below.
+         */
         Item {
             anchors.fill: parent
             opacity: 0
