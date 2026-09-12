@@ -1392,15 +1392,25 @@ ShellRoot {
         interval: 180
         repeat: false
         onTriggered: {
-            if (!topTriggerArea.containsMouse && !fsGhostMouseArea.containsMouse) {
+            if (!topTriggerArea.containsMouse
+                    && !fsGhostMouseArea.containsMouse
+                    && !liquidFsGhostMouseArea.containsMouse) {
                 root.isTopHovered = false
             }
         }
     }
 
-    // --- WIDGET FULLSCREEN: solo reloj + batería ---
-    // It is a separate, non-expandable pill; the real Dynamic Island stays
-    // hidden in fullscreen through DynamicIsland.isFullscreen.
+    // ============================================================
+    // FULLSCREEN GHOST ISLAND — CLASSIC
+    // ============================================================
+    //
+    // Classic deliberately keeps the old, known-good implementation:
+    //
+    //   GlassSurface + BackgroundEffect.blurRegion
+    //
+    // It has no custom namespace and therefore follows the exact same
+    // compositor path it used before the Liquid Glass migration.
+    // ============================================================
     PanelWindow {
         id: fullscreenGhostIsland
         screen: root.primaryUiScreen
@@ -1410,16 +1420,14 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
 
-        // Important: do not keep the pill permanently mapped and merely move
-        // it above the screen. It exists visually only while the pointer is in
-        // the top-centre reveal area (or over the pill itself).
-        visible: root.isFullscreen && root.isTopHovered
+        visible:
+            GlassMode.classic
+            && root.isFullscreen
+            && root.isTopHovered
 
         implicitWidth: fsGhostLayout.implicitWidth + 36
         implicitHeight: 32
 
-        // Same resting position as the normal island. Keep the clamshell HDMI
-        // adjustment in sync with DynamicIsland.topMargin above.
         margins {
             top: root.primaryUiScreen
                 && root.primaryUiScreen.name === "HDMI-A-1"
@@ -1427,7 +1435,10 @@ ShellRoot {
                 : -38
         }
 
-        BackgroundEffect.blurRegion: Glass.blurEnabled ? ghostBlurRegion : null
+        BackgroundEffect.blurRegion:
+            Glass.blurEnabled
+            ? ghostBlurRegion
+            : null
 
         Region {
             id: ghostBlurRegion
@@ -1440,16 +1451,18 @@ ShellRoot {
             anchors.fill: parent
             glassRadius: height / 2
 
-            // Hovering the pill keeps it visible, but never opens or expands it.
             MouseArea {
                 id: fsGhostMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
+
                 onEntered: {
                     root.isTopHovered = true
                     topHideTimer.stop()
                 }
-                onExited: topHideTimer.start()
+
+                onExited:
+                    topHideTimer.start()
             }
 
             RowLayout {
@@ -1477,12 +1490,126 @@ ShellRoot {
 
         Timer {
             interval: 2000
-            running: root.isFullscreen && root.isTopHovered
+            running:
+                GlassMode.classic
+                && root.isFullscreen
+                && root.isTopHovered
+
             repeat: true
             triggeredOnStart: true
+
             onTriggered: {
-                var timeStr = new Date().toLocaleTimeString(Qt.locale("en_US"), "hh:mm A");
-                if (fsGhostClockText.text !== timeStr) fsGhostClockText.text = timeStr;
+                var timeStr =
+                    new Date().toLocaleTimeString(
+                        Qt.locale("en_US"),
+                        "hh:mm A"
+                    )
+
+                if (fsGhostClockText.text !== timeStr)
+                    fsGhostClockText.text = timeStr
+            }
+        }
+    }
+
+    // ============================================================
+    // FULLSCREEN GHOST ISLAND — LIQUID GLASS
+    // ============================================================
+    //
+    // Liquid uses its own layer surface so HyprGlass can target it
+    // without changing the Classic compositor path.
+    // ============================================================
+    PanelWindow {
+        id: liquidFullscreenGhostIsland
+        screen: root.primaryUiScreen
+        anchors { top: true }
+
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.namespace: "quickshell:fullscreen-ghost"
+
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible:
+            GlassMode.liquid
+            && root.isFullscreen
+            && root.isTopHovered
+
+        implicitWidth: liquidFsGhostLayout.implicitWidth + 36
+        implicitHeight: 32
+
+        margins {
+            top: root.primaryUiScreen
+                && root.primaryUiScreen.name === "HDMI-A-1"
+                ? -32
+                : -38
+        }
+
+        GlassSurface {
+            id: liquidFsGhostGlass
+            anchors.fill: parent
+            glassRadius: height / 2
+
+            // QML only provides the lightweight colour/body layer.
+            // HyprGlass owns the real blur/refraction/Fresnel material.
+            glassOpacity: GlassMode.liquidQmlOpacity
+            showHighlight: false
+
+            MouseArea {
+                id: liquidFsGhostMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+
+                onEntered: {
+                    root.isTopHovered = true
+                    topHideTimer.stop()
+                }
+
+                onExited:
+                    topHideTimer.start()
+            }
+
+            RowLayout {
+                id: liquidFsGhostLayout
+                anchors.centerIn: parent
+                spacing: 10
+
+                Text {
+                    id: liquidFsGhostClockText
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+
+                Battery {
+                    percentage: root.batCap
+                    charging: (root.batStat === "Charging" || root.batStat === "Full")
+                    onAcPower: root.onAcPower
+                    batteryStatus: root.batStat
+                    powerSaverMode: root.perfMode === "power-saver"
+                }
+            }
+        }
+
+        Timer {
+            interval: 2000
+            running:
+                GlassMode.liquid
+                && root.isFullscreen
+                && root.isTopHovered
+
+            repeat: true
+            triggeredOnStart: true
+
+            onTriggered: {
+                var timeStr =
+                    new Date().toLocaleTimeString(
+                        Qt.locale("en_US"),
+                        "hh:mm A"
+                    )
+
+                if (liquidFsGhostClockText.text !== timeStr)
+                    liquidFsGhostClockText.text = timeStr
             }
         }
     }

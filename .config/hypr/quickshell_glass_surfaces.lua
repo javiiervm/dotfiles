@@ -2,47 +2,28 @@
 -- QUICKSHELL LIQUID GLASS SURFACES
 -- =============================================================
 --
--- Lista central de superficies Quickshell que ya soportan
--- Liquid Glass real.
---
--- Cada componente migrado debe tener un namespace Wayland único.
---
--- Para añadir un nuevo componente:
---
--- {
---     namespace = "quickshell:component-name",
---     preset = "gnome_liquid_glass"
--- }
---
+-- Central list of Quickshell layer surfaces already migrated to
+-- real HyprGlass Liquid Glass.
 -- =============================================================
-
 
 return {
 
-
-    -- =========================================================
-    -- LIQUID GLASS TEST
-    -- =========================================================
-
+    -- Liquid Glass sandbox
     {
-        namespace =
-            "liquid-glass-test",
-
-        preset =
-            "gnome_liquid_glass"
+        namespace = "liquid-glass-test",
+        preset = "gnome_liquid_glass"
     },
 
-
-    -- =========================================================
-    -- DOCK
-    -- =========================================================
-
+    -- Dock
     {
-        namespace =
-            "quickshell:dock",
+        namespace = "quickshell:dock",
+        preset = "gnome_liquid_glass"
+    },
 
-        preset =
-            "gnome_liquid_glass"
+    -- Fullscreen clock + battery ghost island
+    {
+        namespace = "quickshell:fullscreen-ghost",
+        preset = "gnome_liquid_glass"
     }
 
 }
