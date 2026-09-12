@@ -182,8 +182,8 @@ hl.config({
     },
 })
 
--- HyprGlass isolated testing
-dofile("/home/javier/.config/hypr/quickshell_glass_test.lua")
+-- Quickshell global glass system
+dofile("/home/javier/.config/hypr/quickshell_glass.lua")
 
 -- https://wiki.hypr.land/Configuring/Variables/#animations
 

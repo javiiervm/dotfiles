@@ -166,6 +166,20 @@ hl.config({
 -- Normal application window transparency
 dofile("/home/javier/.config/hypr/window_transparency.lua")
 
+-- ============================================================
+-- QUICKSHELL GLOBAL GLASS SYSTEM
+-- ============================================================
+--
+-- Single entry point for both:
+--
+--   classic -> normal Hyprland backdrop blur
+--   liquid  -> real HyprGlass Liquid Glass
+--
+-- The selected mode is read from the persistent GlassMode state.
+-- ============================================================
+
+dofile("/home/javier/.config/hypr/quickshell_glass.lua")
+
 -- https://wiki.hypr.land/Configuring/Variables/#animations
 
 hl.config({
@@ -478,12 +492,6 @@ hl.config({
 --     blur = true,
 --     ignore_alpha = 0.05,
 -- })
-
--- Quickshell Liquid Glass integration
-dofile("/home/javier/.config/hypr/quickshell_glass.lua")
-
--- HyprGlass testing
-dofile("/home/javier/.config/hypr/quickshell_glass_test.lua")
 
 -- HyprMod managed settings
 -- CONVERSION NOTE: "hyprland-gui.conf" is still .conf (hyprlang), and

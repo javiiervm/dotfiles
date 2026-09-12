@@ -1823,13 +1823,28 @@ ShellRoot {
         id: dockHideTimer
         interval: 350
         onTriggered: {
-            if (!dockHoverHandler.hovered && !triggerArea.containsMouse) {
+            if (!classicDockHoverHandler.hovered
+                    && !liquidDockHoverHandler.hovered
+                    && !triggerArea.containsMouse) {
                 root.isDockHovered = false;
             }
         }
     }
 
-    // --- COMPONENTE DEL DOCK ---
+    // ============================================================
+    // CLASSIC DOCK
+    // ============================================================
+    //
+    // This window intentionally preserves the old, known-good dock
+    // implementation:
+    //
+    //   - no custom layer namespace
+    //   - the original BackgroundEffect.blurRegion
+    //   - the original GlassSurface material
+    //
+    // Keeping Classic as its own layer surface avoids changing the
+    // compositor path that made the old dock render correctly.
+    // ============================================================
     PanelWindow {
         id: customDockWindow
         screen: root.primaryUiScreen
@@ -1840,7 +1855,9 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
 
-        // Same position/behaviour as before, just a little larger visually.
+        visible: GlassMode.classic
+
+        // Same position/behaviour as the old working dock.
         implicitWidth: dockLayout.implicitWidth + 34
         implicitHeight: 66
 
@@ -1860,6 +1877,7 @@ ShellRoot {
             id: emptyDockInputRegion
         }
 
+        // Keep the exact classic blur path from the old working shell.
         BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
 
         Region {
@@ -1893,8 +1911,11 @@ ShellRoot {
                 anchors.fill: parent
                 glassRadius: 18
 
+                // Intentionally no Liquid-specific overrides here.
+                // Classic must behave exactly like the old dock.
+
                 HoverHandler {
-                    id: dockHoverHandler
+                    id: classicDockHoverHandler
                     onHoveredChanged: {
                         if (hovered) {
                             root.isDockHovered = true;
@@ -1942,6 +1963,121 @@ ShellRoot {
         }
 
         Process { id: dockLauncherProc }
+    }
+
+    // ============================================================
+    // LIQUID GLASS DOCK
+    // ============================================================
+    //
+    // Liquid Glass gets its own independent layer surface and namespace.
+    // This means enabling Liquid Glass never changes the Classic dock's
+    // namespace, blur region or compositor behaviour.
+    // ============================================================
+    PanelWindow {
+        id: liquidDockWindow
+        screen: root.primaryUiScreen
+        anchors { bottom: true }
+        margins { bottom: root.bottomGap }
+
+        WlrLayershell.layer: WlrLayershell.Overlay
+        WlrLayershell.namespace: "quickshell:dock"
+
+        exclusiveZone: 0
+        color: "transparent"
+
+        visible: GlassMode.liquid
+
+        implicitWidth: liquidDockLayout.implicitWidth + 34
+        implicitHeight: 66
+
+        mask: liquidDockVisual.showDock
+            ? liquidDockInputRegion
+            : emptyLiquidDockInputRegion
+
+        Region {
+            id: liquidDockInputRegion
+            item: liquidDockGlass
+            radius: liquidDockGlass.radius
+        }
+
+        Region {
+            id: emptyLiquidDockInputRegion
+        }
+
+        Item {
+            id: liquidDockVisual
+            anchors.fill: parent
+
+            property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
+
+            opacity: showDock ? 1 : 0
+            visible: opacity > 0
+
+            transform: Translate {
+                y: liquidDockVisual.showDock ? 0 : 25
+                Behavior on y {
+                    NumberAnimation { duration: 400; easing.type: Easing.OutQuint }
+                }
+            }
+
+            Behavior on opacity {
+                NumberAnimation { duration: 300; easing.type: Easing.OutQuint }
+            }
+
+            GlassSurface {
+                id: liquidDockGlass
+                anchors.fill: parent
+                glassRadius: 18
+
+                // QML only contributes the light tint/body in Liquid mode.
+                // HyprGlass renders the actual optical effect for this namespace.
+                glassOpacity: GlassMode.liquidQmlOpacity
+                showHighlight: false
+
+                HoverHandler {
+                    id: liquidDockHoverHandler
+                    onHoveredChanged: {
+                        if (hovered) {
+                            root.isDockHovered = true;
+                            dockHideTimer.stop();
+                        } else {
+                            dockHideTimer.start();
+                        }
+                    }
+                }
+
+                RowLayout {
+                    id: liquidDockLayout
+                    anchors.centerIn: parent
+                    spacing: 9
+
+                    Repeater {
+                        model: DockConfig.apps
+
+                        DockItem {
+                            required property var modelData
+                            app: modelData
+
+                            onActivated: function(app) {
+                                if (app.action === "launcher") {
+                                    mainLauncher.toggle()
+                                    return
+                                }
+
+                                if (app.command && app.command.length > 0) {
+                                    dockLauncherProc.command = [
+                                        "bash",
+                                        "-c",
+                                        app.command + " & disown"
+                                    ]
+                                    dockLauncherProc.running = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // --- COMPONENTE OVERLAY DE ALT+TAB ---
