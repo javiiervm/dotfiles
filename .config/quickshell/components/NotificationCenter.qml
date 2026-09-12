@@ -3235,10 +3235,22 @@ PanelWindow {
 
                         glassOpacity:
                             model.urgency === 2
-                            ? 0.24
+                            ? (
+                                GlassMode.liquid
+                                ? 0.18
+                                : 0.24
+                              )
                             : notificationMouse.containsMouse
-                              ? 0.46
-                              : 0.36
+                              ? (
+                                  GlassMode.liquid
+                                  ? 0.30
+                                  : 0.46
+                                )
+                              : (
+                                  GlassMode.liquid
+                                  ? 0.23
+                                  : 0.36
+                                )
 
                         MouseArea {
                             id: notificationMouse

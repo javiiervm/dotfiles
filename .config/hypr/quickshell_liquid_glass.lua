@@ -169,10 +169,12 @@ for _, surface in ipairs(surfaces) do
             -- Seguimos usando alpha en esta fase porque el QML actual
             -- desactiva BackgroundEffect.blurRegion en modo Liquid.
             mask_mode =
-                "alpha",
+                surface.mask_mode
+                or "alpha",
 
             mask_threshold =
-                0.01,
+                surface.mask_threshold
+                or 0.01,
 
 
             live_resample =

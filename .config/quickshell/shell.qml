@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQml.Models
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
@@ -526,6 +527,9 @@ ShellRoot {
         }
     }
 
+    // ============================================================
+    // NOTIFICATION CENTER — CLASSIC
+    // ============================================================
     NotificationCenter {
         id: notifCenterWindow
         screen: root.primaryUiScreen
@@ -542,7 +546,69 @@ ShellRoot {
             ? 10
             : 12
 
-        visible_state: root.isNotifOpen
+        visible_state: root.isNotifOpen && GlassMode.classic
+        dndState: root.dnd
+        modelData: sharedNotifModel
+        
+        wifiState: root.wifiSsid !== "" && root.wifiSsid !== "disconnected" && root.wifiSsid !== "Disconnected"
+        btState: root.btStat === "on"
+        airplaneState: root.airplaneMode
+        caffeineState: root.caffeineMode
+        powerSaverState: root.perfMode === "power-saver"
+        powerSaverAvailable: !root.onAcPower
+        nightLightState: root.nightLightMode
+        nightLightTemperature: root.nightLightTemperature
+        
+        onRequestClose: { root.isNotifOpen = false }
+        onToggleDndRequested: { root.toggleDnd() }
+        onClearRequested: { root.clearNotifications() }
+
+        onToggleWifiRequested: { wifiProc.running = true }
+        onToggleBtRequested: { btProc.running = true }
+        onToggleAirplaneRequested: {
+            airplaneProc.running = true
+            root.airplaneMode = !root.airplaneMode
+        }
+        onToggleCaffeineRequested: {
+            caffeineProc.running = true
+            root.caffeineMode = !root.caffeineMode
+        }
+        onTogglePowerSaverRequested: {
+            if (!root.onAcPower && !powerSaverProc.running)
+                powerSaverProc.running = true
+        }
+        onToggleNightLightRequested: {
+            if (!nightLightProc.running)
+                nightLightProc.running = true
+        }
+        onSetNightLightTemperatureRequested: function(temperature) {
+            root.setNightLightTemperature(temperature)
+        }
+        onPowerRequested: { console.log("Acción de power pulsada") }
+    }
+
+    // ============================================================
+    // NOTIFICATION CENTER — LIQUID GLASS
+    // ============================================================
+    NotificationCenter {
+        id: liquidNotifCenterWindow
+        screen: root.primaryUiScreen
+        WlrLayershell.namespace: "quickshell:notification-center"
+        BackgroundEffect.blurRegion: null
+
+        // Laptop keeps the original position. The HDMI value is used only
+        // when eDP-1 is disabled and HDMI-A-1 becomes primaryUiScreen.
+        panelTopMargin: root.primaryUiScreen
+            && root.primaryUiScreen.name === "HDMI-A-1"
+            ? 10
+            : 2
+
+        panelRightMargin: root.primaryUiScreen
+            && root.primaryUiScreen.name === "HDMI-A-1"
+            ? 10
+            : 12
+
+        visible_state: root.isNotifOpen && GlassMode.liquid
         dndState: root.dnd
         modelData: sharedNotifModel
         
@@ -870,6 +936,9 @@ ShellRoot {
         }
     }
 
+    // ============================================================
+    // POP-UP NOTIFICATIONS — CLASSIC
+    // ============================================================
     PanelWindow {
         id: osdWindow
         screen: root.primaryUiScreen
@@ -880,7 +949,7 @@ ShellRoot {
         exclusiveZone: 0
         color: "transparent"
         WlrLayershell.layer: WlrLayershell.Top
-        visible: popupModel.count > 0
+        visible: GlassMode.classic && popupModel.count > 0
 
         BackgroundEffect.blurRegion: Glass.blurEnabled ? osdBlurRegion : null
 
@@ -976,6 +1045,417 @@ ShellRoot {
                                     cmdProc.command = ["sh", "-c", "echo 'REMOVE|" + nId + "' > /tmp/qs_notif_cmd"]
                                     cmdProc.running = true
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // POP-UP NOTIFICATIONS — LIQUID GLASS
+    // ============================================================
+    // ============================================================
+    // POP-UP NOTIFICATIONS — LIQUID GLASS
+    // ============================================================
+    //
+    // IMPORTANT:
+    //
+    // Every notification is its OWN layer surface.
+    //
+    // HyprGlass operates on layer surfaces, so this is the only robust
+    // way to guarantee that the optical material belongs to each rounded
+    // notification card individually and never to a rectangular window
+    // containing the whole notification stack.
+    // ============================================================
+    Instantiator {
+        id: liquidPopupInstantiator
+
+        active:
+            GlassMode.liquid
+
+        model:
+            popupModel
+
+        delegate: PanelWindow {
+            id: liquidPopupWindow
+
+            screen:
+                root.primaryUiScreen
+
+            anchors {
+                top: true
+                right: true
+            }
+
+            margins {
+                top:
+                    50
+                    + index * 90
+
+                right:
+                    15
+            }
+
+            implicitWidth:
+                360
+
+            implicitHeight:
+                80
+
+            exclusiveZone:
+                0
+
+            color:
+                "transparent"
+
+            WlrLayershell.layer:
+                WlrLayershell.Overlay
+
+            WlrLayershell.namespace:
+                "quickshell:notification-popup"
+
+            /*
+             * The requested background-effect region is now exactly the
+             * individual notification card.
+             *
+             * With HyprGlass mask_mode="region", only this rounded 360x80
+             * surface receives the real Liquid Glass material.
+             */
+            BackgroundEffect.blurRegion:
+                GlassMode.liquid
+                ? liquidPopupRegion
+                : null
+
+            Region {
+                id: liquidPopupRegion
+
+                item:
+                    liquidPopupItem
+
+                radius:
+                    liquidPopupItem.glassRadius
+            }
+
+            GlassSurface {
+                id: liquidPopupItem
+
+                anchors.fill:
+                    parent
+
+                glassRadius:
+                    15
+
+                glassTint:
+                    pUrgency === 2
+                    ? Theme.red
+                    : Glass.tint
+
+                glassOpacity:
+                    pUrgency === 2
+                    ? 0.18
+                    : GlassMode.liquidQmlOpacity
+
+                showHighlight:
+                    false
+
+                border.color:
+                    pUrgency === 2
+                    ? Qt.alpha(
+                          Theme.red,
+                          0.62
+                      )
+                    : Glass.borderColor
+
+                border.width:
+                    pUrgency === 2
+                    ? 1
+                    : Glass.borderWidth
+
+
+                // --------------------------------------------------------
+                // ENTRY / EXIT
+                // --------------------------------------------------------
+
+                transform: Translate {
+                    id: liquidSlideTrans
+
+                    x:
+                        400
+                }
+
+                Component.onCompleted: {
+                    liquidSlideIn.start()
+                    liquidHideTimer.start()
+                }
+
+                NumberAnimation {
+                    id: liquidSlideIn
+
+                    target:
+                        liquidSlideTrans
+
+                    property:
+                        "x"
+
+                    to:
+                        0
+
+                    duration:
+                        400
+
+                    easing.type:
+                        Easing.OutBack
+                }
+
+                NumberAnimation {
+                    id: liquidSlideOut
+
+                    target:
+                        liquidSlideTrans
+
+                    property:
+                        "x"
+
+                    to:
+                        400
+
+                    duration:
+                        300
+
+                    easing.type:
+                        Easing.InBack
+
+                    onFinished:
+                        root.removePopup(
+                            nId
+                        )
+                }
+
+                Timer {
+                    id: liquidHideTimer
+
+                    interval:
+                        5000
+
+                    onTriggered:
+                        liquidSlideOut.start()
+                }
+
+
+                // --------------------------------------------------------
+                // INTERACTION
+                // --------------------------------------------------------
+
+                MouseArea {
+                    anchors.fill:
+                        parent
+
+                    onClicked:
+                        liquidSlideOut.start()
+                }
+
+
+                // --------------------------------------------------------
+                // CONTENT
+                // --------------------------------------------------------
+
+                RowLayout {
+                    anchors.fill:
+                        parent
+
+                    anchors.margins:
+                        12
+
+                    spacing:
+                        12
+
+
+                    Item {
+                        Layout.preferredWidth:
+                            35
+
+                        Layout.preferredHeight:
+                            35
+
+
+                        Image {
+                            id: liquidNotifImgPopup
+
+                            anchors.fill:
+                                parent
+
+                            source:
+                                pIcon.startsWith("/")
+                                ? "file://" + pIcon
+                                : "image://icon/" + pIcon
+
+                            fillMode:
+                                Image.PreserveAspectCrop
+
+                            visible:
+                                false
+                        }
+
+
+                        Rectangle {
+                            id: liquidMaskPopup
+
+                            anchors.fill:
+                                parent
+
+                            radius:
+                                width / 2
+
+                            visible:
+                                false
+                        }
+
+
+                        OpacityMask {
+                            anchors.fill:
+                                parent
+
+                            source:
+                                liquidNotifImgPopup
+
+                            maskSource:
+                                liquidMaskPopup
+
+                            layer.enabled:
+                                pUrgency === 2
+                        }
+                    }
+
+
+                    ColumnLayout {
+                        spacing:
+                            2
+
+
+                        Text {
+                            text:
+                                pApp
+                                + (
+                                    pUrgency === 2
+                                    ? " • CRITICAL"
+                                    : ""
+                                )
+
+                            color:
+                                pUrgency === 2
+                                ? Theme.red
+                                : Theme.blue
+
+                            font.pixelSize:
+                                10
+
+                            font.bold:
+                                true
+                        }
+
+
+                        Text {
+                            text:
+                                pTitle
+
+                            color:
+                                Theme.white
+
+                            font.pixelSize:
+                                12
+
+                            font.bold:
+                                true
+
+                            elide:
+                                Text.ElideRight
+
+                            Layout.fillWidth:
+                                true
+                        }
+
+
+                        Text {
+                            text:
+                                pBody
+
+                            color:
+                                Theme.grey1
+
+                            font.pixelSize:
+                                11
+
+                            elide:
+                                Text.ElideRight
+
+                            Layout.fillWidth:
+                                true
+
+                            maximumLineCount:
+                                1
+                        }
+                    }
+
+
+                    Item {
+                        Layout.alignment:
+                            Qt.AlignTop
+                            | Qt.AlignRight
+
+                        width:
+                            20
+
+                        height:
+                            20
+
+
+                        Text {
+                            anchors.centerIn:
+                                parent
+
+                            text:
+                                "󰅖"
+
+                            font.family:
+                                Theme.fontIcons
+
+                            color:
+                                liquidXMousePopup.containsMouse
+                                ? Theme.white
+                                : Theme.grey1
+
+                            font.pixelSize:
+                                14
+                        }
+
+
+                        MouseArea {
+                            id: liquidXMousePopup
+
+                            anchors.fill:
+                                parent
+
+                            hoverEnabled:
+                                true
+
+                            cursorShape:
+                                Qt.PointingHandCursor
+
+                            onClicked: {
+                                liquidSlideOut.start()
+
+                                cmdProc.command = [
+                                    "sh",
+                                    "-c",
+                                    "echo 'REMOVE|"
+                                    + nId
+                                    + "' > /tmp/qs_notif_cmd"
+                                ]
+
+                                cmdProc.running =
+                                    true
                             }
                         }
                     }

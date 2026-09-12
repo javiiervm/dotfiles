@@ -42,6 +42,22 @@ return {
     {
         namespace = "quickshell:clipboard",
         preset = "gnome_liquid_glass"
+    },
+
+    -- Notification / Control Center
+    {
+        namespace = "quickshell:notification-center",
+        preset = "gnome_liquid_glass"
+    },
+
+    -- Pop-up notifications
+    {
+        namespace = "quickshell:notification-popup",
+        preset = "gnome_liquid_glass",
+
+        -- Each pop-up notification is a separate PanelWindow and publishes
+        -- one rounded ext-background-effect-v1 region matching its card.
+        mask_mode = "region"
     }
 
 }
