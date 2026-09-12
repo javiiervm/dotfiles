@@ -482,6 +482,9 @@ hl.config({
 -- Quickshell Liquid Glass integration
 dofile("/home/javier/.config/hypr/quickshell_glass.lua")
 
+-- HyprGlass testing
+dofile("/home/javier/.config/hypr/quickshell_glass_test.lua")
+
 -- HyprMod managed settings
 -- CONVERSION NOTE: "hyprland-gui.conf" is still .conf (hyprlang), and
 -- hyprland.lua can't load it with "source"/require. If the tool that

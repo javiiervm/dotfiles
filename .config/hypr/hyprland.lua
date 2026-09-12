@@ -67,6 +67,7 @@ hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
 hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
 
 hl.on("hyprland.start", function ()
+	hl.exec_cmd("hyprpm reload && hyprctl reload")
     -- macOS mode is validated synchronously later in this file.
     -- Do not clear its state asynchronously here.
 
@@ -180,6 +181,9 @@ hl.config({
         }
     },
 })
+
+-- HyprGlass isolated testing
+dofile("/home/javier/.config/hypr/quickshell_glass_test.lua")
 
 -- https://wiki.hypr.land/Configuring/Variables/#animations
 
