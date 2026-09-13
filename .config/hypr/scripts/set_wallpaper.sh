@@ -44,7 +44,12 @@ LOG="/tmp/set_wallpaper.log"
     # Sincronizar Hyprlock
     mkdir -p "$HOME/.cache/hyprlock"
     cp "$WALLPAPER" "$HOME/.cache/hyprlock/current_wallpaper.png"
-
+    
+    # Sincronizar SDDM
+    if [[ -w /var/cache/sddm-wallpaper/current_wallpaper.png ]]; then
+        cat "$WALLPAPER" > /var/cache/sddm-wallpaper/current_wallpaper.png
+    fi
+    
     # Ruta usada por Quickshell
     printf '%s\n' "$WALLPAPER" > "$HOME/.cache/qs_wall_path"
 
