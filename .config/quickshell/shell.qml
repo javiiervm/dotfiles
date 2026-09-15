@@ -985,9 +985,104 @@ ShellRoot {
         }
 
         Item {
+            id: topBarContent
             anchors.fill: parent
             opacity: 0
             NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
+
+            // ============================================================
+            // XAVION IDLE ANIMATION
+            // ============================================================
+            // Event-driven only: one low-frequency QML timer schedules a very
+            // short sprite animation every 25-70 seconds. No polling, shell
+            // process, daemon or continuously running animation is involved.
+            function scheduleNextXavionAnimation() {
+                xavionIdleTimer.interval = 25000 + Math.floor(Math.random() * 45001)
+                xavionIdleTimer.restart()
+            }
+
+            function playRandomXavionAnimation() {
+                var animation = Math.floor(Math.random() * 3)
+
+                switch (animation) {
+                case 0:
+                    xavionBlinkAnimation.restart()
+                    break
+                case 1:
+                    xavionLookAroundAnimation.restart()
+                    break
+                case 2:
+                    xavionLookRightAnimation.restart()
+                    break
+                case 3:
+                    xavionLookLeftAnimation.restart()
+                    break
+                default:
+                    xavionHappyAnimation.restart()
+                    break
+                }
+            }
+
+            Component.onCompleted: scheduleNextXavionAnimation()
+
+            Timer {
+                id: xavionIdleTimer
+                repeat: false
+
+                onTriggered: {
+                    // Do not animate while a fullscreen application is active.
+                    if (root.isFullscreen) {
+                        topBarContent.scheduleNextXavionAnimation()
+                        return
+                    }
+
+                    topBarContent.playRandomXavionAnimation()
+                }
+            }
+
+            SequentialAnimation {
+                id: xavionBlinkAnimation
+                ScriptAction { script: xavionIcon.source = "assets/xavion/blink.png" }
+                PauseAnimation { duration: 110 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                onFinished: topBarContent.scheduleNextXavionAnimation()
+            }
+
+            SequentialAnimation {
+                id: xavionLookLeftAnimation
+                ScriptAction { script: xavionIcon.source = "assets/xavion/look-left.png" }
+                PauseAnimation { duration: 220 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                onFinished: topBarContent.scheduleNextXavionAnimation()
+            }
+
+            SequentialAnimation {
+                id: xavionLookRightAnimation
+                ScriptAction { script: xavionIcon.source = "assets/xavion/look-right.png" }
+                PauseAnimation { duration: 220 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                onFinished: topBarContent.scheduleNextXavionAnimation()
+            }
+
+            SequentialAnimation {
+                id: xavionLookAroundAnimation
+                ScriptAction { script: xavionIcon.source = "assets/xavion/look-left.png" }
+                PauseAnimation { duration: 150 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                PauseAnimation { duration: 90 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/look-right.png" }
+                PauseAnimation { duration: 150 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                onFinished: topBarContent.scheduleNextXavionAnimation()
+            }
+
+            SequentialAnimation {
+                id: xavionHappyAnimation
+                ScriptAction { script: xavionIcon.source = "assets/xavion/happy.png" }
+                PauseAnimation { duration: 300 }
+                ScriptAction { script: xavionIcon.source = "assets/xavion/idle.png" }
+                onFinished: topBarContent.scheduleNextXavionAnimation()
+            }
             
             // ============================================================
             // OLD ARCH LAUNCHER ICON
@@ -1009,13 +1104,14 @@ ShellRoot {
                 width: 30
                 height: 30
 
-                source: "assets/xavion.png"
+                source: "assets/xavion/idle.png"
                 sourceSize.width: 30
                 sourceSize.height: 30
 
                 fillMode: Image.PreserveAspectFit
                 smooth: true
                 mipmap: true
+                cache: true
             }
 
             GlassSurface {
