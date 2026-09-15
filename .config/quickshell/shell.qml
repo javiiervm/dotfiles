@@ -989,9 +989,38 @@ ShellRoot {
             opacity: 0
             NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic; running: true }
             
+            // ============================================================
+            // OLD ARCH LAUNCHER ICON
+            // ============================================================
+            /*Text {
+                text: ""; color: Theme.white; font.family: Theme.fontIcons; font.pixelSize: 22;
+                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { mainLauncher.toggle() } }
+            }*/
+
+            // ============================================================
+            // XAVION
+            // ============================================================
+            Image {
+                id: xavionIcon
+                anchors.left: parent.left
+                anchors.leftMargin: 16
+                anchors.verticalCenter: parent.verticalCenter
+
+                width: 30
+                height: 30
+
+                source: "assets/xavion.png"
+                sourceSize.width: 30
+                sourceSize.height: 30
+
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+            }
+
             GlassSurface {
                 id: leftBarGlass
-                anchors.left: parent.left
+                anchors.left: xavionIcon.right
                 anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
                 height: 34
@@ -1001,13 +1030,8 @@ ShellRoot {
                 RowLayout {
                     id: leftRow
                     anchors.centerIn: parent
-                    spacing: 25
-                    
-                    Text { 
-                        text: ""; color: Theme.white; font.family: Theme.fontIcons; font.pixelSize: 22; 
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { mainLauncher.toggle() } } 
-                    }
-                    Workspaces { showContainer: false } 
+
+                    Workspaces { showContainer: false }
                 }
             }
 
