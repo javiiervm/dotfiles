@@ -9,3 +9,12 @@ hl.on("hyprland.start", function ()
     hl.exec_cmd("hyprctl setcursor Bibata-Modern-Classic 24")
     hl.exec_cmd("/home/javier/.config/hypr/scripts/set_cursor.sh")
 end)
+
+-- Emoji picker -----------------------------------------------------
+-- XKB keycode 60 is the physical '.' key on the normal keyboard row.
+-- Use Quickshell's native Hyprland global-shortcut protocol instead of
+-- spawning `qs ipc`, which removes one process launch from every opening.
+hl.bind(
+    "SUPER + code:60",
+    hl.dsp.global("quickshell:emoji")
+)

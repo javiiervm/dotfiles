@@ -13,7 +13,12 @@ QtObject {
     //   command   : shell command for normal apps
     //   action    : special action handled by shell.qml (e.g. "launcher")
 
-    readonly property var apps: [
+    readonly property var apps: {
+        // This binding is evaluated by shell.qml's dock. Accessing the
+        // singleton here forces construction, so its IpcHandler is registered.
+        var keepEmojiServiceAlive = EmojiService.picker
+
+        return [
         {
             name: "Files",
             iconName: "org.kde.dolphin",
@@ -67,5 +72,6 @@ QtObject {
             iconName: "notion",
             command: "firefox --new-window https://www.notion.so"
         }
-    ]
+        ]
+    }
 }
