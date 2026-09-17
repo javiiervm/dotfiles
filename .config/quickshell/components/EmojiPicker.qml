@@ -39,51 +39,35 @@ PanelWindow {
 
     screen: targetScreen
 
-    // Keep one transparent layer surface alive at all times. Creating and
-    // destroying the layer surface on every SUPER+. press was a measurable
-    // part of the perceived opening delay.
-    //
-    // The window itself covers the screen, but `mask` makes every pixel
-    // outside the emoji card click-through.
+    implicitWidth: popupWidth
+    implicitHeight: popupHeight
+
+    // A PanelWindow is positioned in logical pixels relative to its current
+    // ShellScreen. The cursor from Hyprland is converted to screen-local
+    // coordinates before these margins are assigned.
     anchors {
         left: true
-        right: true
         top: true
-        bottom: true
     }
 
-    visible: true
-    color: "transparent"
-    exclusiveZone: 0
-    exclusionMode: ExclusionMode.Ignore
+    margins {
+        left: popupX
+        top: popupY
+    }
 
     property int popupX: edgePadding
     property int popupY: edgePadding
 
-    property bool isOpen: false
+    visible: false
 
-    // QUICK MODE (default): the picker accepts pointer input but does not
-    // take keyboard focus, so the original text field keeps the caret.
-    // SEARCH MODE: clicking the search box temporarily enables keyboard focus.
+    // While the picker is visible it owns keyboard focus, with Search focused
+    // automatically. The original Hyprland window is remembered and explicitly
+    // focused again before committing an emoji.
     property bool searchMode: false
-    focusable: searchMode
-
-    // When closed the fullscreen backing surface has an empty input region,
-    // so it behaves as though it were not there at all.
-    mask: Region {
-        x: Math.round(card.x)
-        y: Math.round(card.y)
-        width: pickerWindow.isOpen ? Math.round(card.width) : 0
-        height: pickerWindow.isOpen ? Math.round(card.height) : 0
-        radius: Math.round(card.radius)
-    }
-
-    // Keep rendering enabled. The backing surface is transparent and the card
-    // is hidden when closed, so there is virtually nothing to draw. More
-    // importantly, this guarantees that the "closed" frame is actually
-    // presented; disabling updates in the same state change could freeze the
-    // last visible card on screen and make SUPER+. appear unable to close it.
-    updatesEnabled: true
+    focusable: true
+    exclusiveZone: 0
+    exclusionMode: ExclusionMode.Ignore
+    color: "transparent"
 
     WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.namespace: "quickshell:emoji"
@@ -206,98 +190,65 @@ PanelWindow {
     }
 
 
-    // -----------------------------------------------------------------
-    // Fast cursor-position request
-    // -----------------------------------------------------------------
     Process {
         id: pointerProbe
 
-        // Proven reliable path: this is the same Hyprland cursor query that
-        // correctly followed the mouse in the earlier working version.
-        //
-        // We call hyprctl directly (no bash wrapper) and react to the first
-        // line immediately with SplitParser. The persistent backing surface
-        // means this process launch is now the only asynchronous step left in
-        // opening the picker.
-        command: ["hyprctl", "cursorpos"]
+        // Capture BOTH pieces of state before the picker can steal keyboard
+        // focus: the exact Hyprland client address and the mouse position.
+        command: [
+            "bash",
+            "-lc",
+            "addr=\"$(hyprctl -j activewindow 2>/dev/null | "
+                + "python3 -c 'import json,sys; "
+                + "d=json.load(sys.stdin); "
+                + "print(d.get(\"address\", \"\"))' 2>/dev/null)\"; "
+                + "pos=\"$(hyprctl cursorpos 2>/dev/null || true)\"; "
+                + "printf '%s\\n%s\\n' \"$addr\" \"$pos\""
+        ]
 
-        stdout: SplitParser {
-            onRead: function(data) {
-                if (!pickerWindow.pendingOpen
-                        || pickerWindow.pointerProbeSucceeded) {
+        stdout: StdioCollector {
+            onStreamFinished: {
+                if (!pickerWindow.pendingOpen)
                     return
-                }
 
-                var value = data.trim()
+                var lines = text.trim().split("\n")
+                var address = lines.length > 0 ? lines[0].trim() : ""
+                var value = lines.length > 1 ? lines[1].trim() : ""
+
+                if (/^0x[0-9a-fA-F]+$/.test(address))
+                    pickerWindow.previousWindowAddress = address
+                else
+                    pickerWindow.previousWindowAddress = ""
+
                 var parts = value.split(",")
 
-                if (parts.length !== 2)
-                    return
+                if (parts.length === 2) {
+                    var x = Number(parts[0].trim())
+                    var y = Number(parts[1].trim())
 
-                var x = Number(parts[0].trim())
-                var y = Number(parts[1].trim())
+                    if (Number.isFinite(x)
+                            && Number.isFinite(y)
+                            && pickerWindow.placeAtPointer(x, y)) {
+                        console.log(
+                            "EmojiPicker anchor: mouse",
+                            Math.round(x),
+                            Math.round(y),
+                            "target:",
+                            pickerWindow.previousWindowAddress
+                        )
+                        pickerWindow.finishOpen()
+                        return
+                    }
+                }
 
-                if (!Number.isFinite(x) || !Number.isFinite(y))
-                    return
-
-                if (!pickerWindow.placeAtPointer(x, y))
-                    return
-
-                pickerWindow.lastPointerX = x
-                pickerWindow.lastPointerY = y
-                pickerWindow.hasLastPointer = true
-                pickerWindow.pointerProbeSucceeded = true
-
-                pointerTimeout.stop()
-                pickerWindow.finishOpen()
-            }
-        }
-
-        onRunningChanged: {
-            if (running
-                    || !pickerWindow.pendingOpen
-                    || pickerWindow.pointerProbeSucceeded) {
-                return
-            }
-
-            // Process finished without a usable coordinate.
-            if (pickerWindow.hasLastPointer
-                    && pickerWindow.placeAtPointer(
-                        pickerWindow.lastPointerX,
-                        pickerWindow.lastPointerY
-                    )) {
-                pickerWindow.finishOpen()
-            } else {
+                console.warn(
+                    "EmojiPicker: could not read mouse position:",
+                    value
+                )
                 pickerWindow.openFallback()
             }
         }
     }
-
-    Timer {
-        id: pointerTimeout
-        interval: 120
-        repeat: false
-
-        onTriggered: {
-            if (!pickerWindow.pendingOpen
-                    || pickerWindow.pointerProbeSucceeded) {
-                return
-            }
-
-            // Safety net only. Under normal conditions hyprctl cursorpos
-            // returns in a few milliseconds.
-            if (pickerWindow.hasLastPointer
-                    && pickerWindow.placeAtPointer(
-                        pickerWindow.lastPointerX,
-                        pickerWindow.lastPointerY
-                    )) {
-                pickerWindow.finishOpen()
-            } else {
-                pickerWindow.openFallback()
-            }
-        }
-    }
-
 
     // ============================================================
     // Data / state
@@ -307,17 +258,12 @@ PanelWindow {
     property var filteredEmojis: []
     property var recentEmojis: []
     property var previousToplevel: null
+    property string previousWindowAddress: ""
 
     property bool pendingOpen: false
-    property bool openingVisual: false
-    property bool pointerProbeSucceeded: false
-
-    property bool hasLastPointer: false
-    property real lastPointerX: 0
-    property real lastPointerY: 0
-    property bool typeNeedsFocusRestore: false
     property bool typeNeedsFocusRestoreAfterTyping: false
     property bool followMouseOverridden: false
+    property bool restoringOriginalFocus: false
     property string selectedCategory: "smileys"
     property string query: ""
     property string pendingEmoji: ""
@@ -366,24 +312,6 @@ PanelWindow {
         }
     }
 
-    function categoryItems(categoryId) {
-        var result = []
-
-        if (categoryId === "recent") {
-            for (var r = 0; r < recentEmojis.length; ++r)
-                result.push(emojiObjectFor(recentEmojis[r]))
-
-            return result
-        }
-
-        for (var i = 0; i < allEmojis.length; ++i) {
-            if (allEmojis[i].category === categoryId)
-                result.push(allEmojis[i])
-        }
-
-        return result
-    }
-
     function updateFiltered() {
         var result = []
         var needle = normalized(query).trim()
@@ -401,85 +329,34 @@ PanelWindow {
                 if (haystack.indexOf(needle) !== -1)
                     result.push(item)
             }
+        } else if (selectedCategory === "recent") {
+            for (var r = 0; r < recentEmojis.length; ++r)
+                result.push(emojiObjectFor(recentEmojis[r]))
+        } else {
+            for (var j = 0; j < allEmojis.length; ++j) {
+                if (allEmojis[j].category === selectedCategory)
+                    result.push(allEmojis[j])
+            }
         }
 
         filteredEmojis = result
-        searchGrid.currentIndex = result.length > 0 ? 0 : -1
+        emojiGrid.currentIndex = result.length > 0 ? 0 : -1
 
         if (result.length > 0)
-            searchGrid.positionViewAtBeginning()
-    }
-
-    function leaveSearchModeForBrowsing() {
-        if (!searchMode)
-            return
-
-        searchMode = false
-        focusGrab.active = false
-
-        if (previousToplevel)
-            previousToplevel.activate()
-    }
-
-    function scrollToCategory(categoryId) {
-        selectedCategory = categoryId
-
-        Qt.callLater(function() {
-            for (var i = 0; i < sectionRepeater.count; ++i) {
-                var section = sectionRepeater.itemAt(i)
-
-                if (!section || section.sectionId !== categoryId)
-                    continue
-
-                var maximum = Math.max(
-                    0,
-                    emojiScroll.contentHeight - emojiScroll.height
-                )
-
-                var destination = Math.max(
-                    0,
-                    Math.min(maximum, section.y - 4)
-                )
-
-                categoryScrollAnimation.stop()
-                categoryScrollAnimation.from = emojiScroll.contentY
-                categoryScrollAnimation.to = destination
-                categoryScrollAnimation.start()
-                break
-            }
-        })
-    }
-
-    function updateCategoryFromScroll() {
-        if (query.length > 0)
-            return
-
-        var marker = emojiScroll.contentY + 28
-        var current = selectedCategory
-
-        for (var i = 0; i < sectionRepeater.count; ++i) {
-            var section = sectionRepeater.itemAt(i)
-
-            if (!section)
-                continue
-
-            if (section.y <= marker)
-                current = section.sectionId
-            else
-                break
-        }
-
-        selectedCategory = current
+            emojiGrid.positionViewAtBeginning()
     }
 
     function selectCategory(categoryId) {
+        selectedCategory = categoryId
+
         if (searchInput.text.length > 0)
             searchInput.text = ""
 
         query = ""
         updateFiltered()
-        leaveSearchModeForBrowsing()
-        scrollToCategory(categoryId)
+
+        if (searchMode)
+            searchInput.forceActiveFocus()
     }
 
     function rememberEmoji(character) {
@@ -516,9 +393,10 @@ PanelWindow {
 
     function prepareOpenState() {
         previousToplevel = Hyprland.activeToplevel
+        previousWindowAddress = ""
         pendingEmoji = ""
-        typeNeedsFocusRestore = false
         typeNeedsFocusRestoreAfterTyping = false
+        restoringOriginalFocus = false
         searchMode = false
         focusGrab.active = false
 
@@ -530,58 +408,27 @@ PanelWindow {
         updateFiltered()
     }
 
-    function requestPointerPosition() {
-        pointerProbeSucceeded = false
-        pointerTimeout.restart()
-
-        // Process is reusable. If a stale invocation is somehow still alive,
-        // wait one event-loop turn after stopping it before starting the fresh
-        // request for this opening.
-        if (pointerProbe.running) {
-            pointerProbe.running = false
-
-            Qt.callLater(function() {
-                if (pickerWindow.pendingOpen)
-                    pointerProbe.running = true
-            })
-        } else {
-            pointerProbe.running = true
-        }
-    }
-
-
     function openPicker() {
-        if (isOpen || pendingOpen)
+        if (visible || pendingOpen)
             return
 
         prepareOpenState()
         pendingOpen = true
-        openingVisual = false
 
-        requestPointerPosition()
+        // Position from the mouse pointer. This is deliberately independent
+        // of text accessibility APIs: it works the same way in Firefox,
+        // Kitty, VS Code and any other application.
+        pointerProbe.running = true
     }
 
     function finishOpen() {
         if (!pendingOpen)
             return
 
-        pointerTimeout.stop()
         pendingOpen = false
-        searchMode = false
-
-        freezeKeyboardFocusOnCurrentApp()
-
-        // The backing surface already exists. Showing the picker now is only
-        // a local QML state change, so there is no layer-surface creation
-        // round-trip here.
-        isOpen = true
-        openingVisual = false
-
-        Qt.callLater(function() {
-            pickerWindow.openingVisual = true
-            emojiScroll.contentY = 0
-            pickerWindow.updateCategoryFromScroll()
-        })
+        searchMode = true
+        visible = true
+        searchFocusTimer.restart()
     }
 
     function openFallback() {
@@ -599,11 +446,11 @@ PanelWindow {
             // in the lower-right corner rather than jumping to the center.
             popupX = Math.max(
                 edgePadding,
-                Math.round(s.width - popupWidth - edgePadding)
+                Math.round(s.width - card.width - edgePadding)
             )
             popupY = Math.max(
                 edgePadding,
-                Math.round(s.height - popupHeight - edgePadding)
+                Math.round(s.height - card.height - edgePadding)
             )
         }
 
@@ -612,35 +459,27 @@ PanelWindow {
 
     function closePicker(restorePreviousFocus) {
         pendingOpen = false
-        pointerTimeout.stop()
 
-        if (pointerProbe.running)
-            pointerProbe.running = false
-
-        if (!isOpen)
+        if (!visible)
             return
 
-        var hadSearchFocus = searchMode
-
-        isOpen = false
-        openingVisual = false
+        visible = false
         focusGrab.active = false
         searchMode = false
         pendingEmoji = ""
+        restoringOriginalFocus = false
+        focusCommitTimer.stop()
 
         restoreNormalFollowMouse()
 
-        // In quick mode the original application never lost keyboard focus.
-        // Only search mode needs an explicit focus handoff back.
-        if (hadSearchFocus
-                && restorePreviousFocus !== false
-                && previousToplevel) {
+        // For Escape / X, returning to the old app is convenient. For an
+        // outside click, false is passed so the clicked destination keeps focus.
+        if (restorePreviousFocus !== false && previousToplevel)
             previousToplevel.activate()
-        }
     }
 
     function enterSearchMode() {
-        if (!isOpen || searchMode)
+        if (!visible || searchMode)
             return
 
         searchMode = true
@@ -651,17 +490,12 @@ PanelWindow {
     }
 
     function togglePicker() {
-        if (isOpen) {
+        if (visible)
             closePicker(true)
-        } else if (pendingOpen) {
+        else if (pendingOpen)
             pendingOpen = false
-            pointerTimeout.stop()
-
-            if (pointerProbe.running)
-                pointerProbe.running = false
-        } else {
+        else
             openPicker()
-        }
     }
 
     function chooseEmoji(character) {
@@ -670,39 +504,57 @@ PanelWindow {
 
         pendingEmoji = character
         rememberEmoji(character)
-
-        var hadSearchFocus = searchMode
-        typeNeedsFocusRestore = hadSearchFocus
         typeNeedsFocusRestoreAfterTyping = true
+        restoringOriginalFocus = true
 
-        isOpen = false
-        openingVisual = false
+        // Only freeze hover-focus for the tiny handoff window. This prevents
+        // the pointer (which is currently over the picker) from causing some
+        // neighbouring tiled window to become the keyboard target as the
+        // layer surface disappears.
+        freezeKeyboardFocusOnCurrentApp()
+
+        visible = false
         focusGrab.active = false
         searchMode = false
 
-        if (hadSearchFocus && previousToplevel)
+        if (/^0x[0-9a-fA-F]+$/.test(previousWindowAddress)) {
+            var code =
+                'hl.dispatch(hl.dsp.focus({ window = "address:'
+                + previousWindowAddress
+                + '" }))'
+
+            focusOriginalProcess.command = [
+                "hyprctl",
+                "eval",
+                code
+            ]
+            focusOriginalProcess.running = true
+            return
+        }
+
+        // Fallback for the unlikely case in which activewindow could not be
+        // captured. Toplevel activation is less deterministic, so give it a
+        // slightly longer settle time.
+        if (previousToplevel)
             previousToplevel.activate()
 
-        // In quick mode the original field still owns focus, so only a tiny
-        // delay is needed to let the pointer click finish. Search mode needs
-        // time for the previous application to regain keyboard focus.
-        typeTimer.interval = hadSearchFocus ? 160 : 30
-        typeTimer.restart()
+        focusCommitTimer.interval = 170
+        focusCommitTimer.restart()
     }
 
     function moveGridSelection(delta) {
         if (filteredEmojis.length === 0)
             return
 
-        var next = searchGrid.currentIndex
+        var next = emojiGrid.currentIndex
 
         if (next < 0)
             next = 0
         else
             next = Math.max(0, Math.min(filteredEmojis.length - 1, next + delta))
 
-        searchGrid.currentIndex = next
-        searchGrid.positionViewAtIndex(next, GridView.Contain)
+        emojiGrid.currentIndex = next
+        emojiGrid.positionViewAtIndex(next, GridView.Contain)
     }
 
     // ============================================================
@@ -752,8 +604,9 @@ PanelWindow {
         windows: [ pickerWindow ]
 
         onCleared: {
-            // This is used only while search mode owns the keyboard.
-            if (pickerWindow.isOpen && pickerWindow.searchMode)
+            // The compositor clears the grab when the user clicks/touches
+            // outside this popup. Pointer movement by itself does not close it.
+            if (pickerWindow.visible)
                 pickerWindow.closePicker(false)
         }
     }
@@ -769,59 +622,68 @@ PanelWindow {
         }
     }
 
-    // Runtime Hyprland focus policy override. The user's configuration is
-    // Lua-based, so use `hyprctl eval` rather than `hyprctl keyword`. Mode 2
-    // keeps keyboard focus on the original editor while the pointer travels
-    // across other windows.
+    Process {
+        id: focusOriginalProcess
+
+        onRunningChanged: {
+            if (!running
+                    && pickerWindow.restoringOriginalFocus
+                    && pickerWindow.pendingEmoji) {
+                // hyprctl is synchronous; after the focus dispatcher returns,
+                // allow one short compositor/toolkit settle interval before
+                // sending Unicode input.
+                focusCommitTimer.interval = 90
+                focusCommitTimer.restart()
+            }
+        }
+    }
+
+    // Runtime Hyprland focus policy override. It is used only for the brief
+    // picker -> original application handoff.
     Process {
         id: followMouseFreezeProc
-        command: [
-            "hyprctl",
-            "eval",
-            "hl.config({ input = { follow_mouse = 2 } })"
-        ]
+        command: ["hyprctl", "keyword", "input:follow_mouse", "2"]
     }
 
     Process {
         id: followMouseRestoreProc
-        command: [
-            "hyprctl",
-            "eval",
-            "hl.config({ input = { follow_mouse = 1 } })"
-        ]
+        command: ["hyprctl", "keyword", "input:follow_mouse", "1"]
     }
 
     Timer {
         id: searchFocusTimer
-        interval: 35
-        repeat: false
-
-        onTriggered: {
-            if (!pickerWindow.isOpen || !pickerWindow.searchMode)
-                return
-
-            focusGrab.active = true
-            searchInput.forceActiveFocus()
-            searchInput.selectAll()
-        }
-    }
-
-    Timer {
-        id: typeTimer
         interval: 30
         repeat: false
 
         onTriggered: {
+            if (!pickerWindow.visible)
+                return
+
+            focusGrab.active = true
+            searchInput.forceActiveFocus()
+            searchInput.cursorPosition = searchInput.text.length
+        }
+    }
+
+    Timer {
+        id: focusCommitTimer
+        interval: 90
+        repeat: false
+
+        onTriggered: {
             if (!pickerWindow.pendingEmoji) {
+                pickerWindow.restoringOriginalFocus = false
                 pickerWindow.restoreNormalFollowMouse()
                 return
             }
 
-            // Direct Unicode typing: the clipboard is never touched.
+            // The picker is hidden and Hyprland has explicitly focused the
+            // saved client window before this timer fires.
             typeProcess.command = ["wtype", pickerWindow.pendingEmoji]
             typeProcess.running = true
+
             pickerWindow.pendingEmoji = ""
-            pickerWindow.typeNeedsFocusRestore = false
+            pickerWindow.restoringOriginalFocus = false
             focusRestoreSafetyTimer.restart()
         }
     }
@@ -847,150 +709,38 @@ PanelWindow {
 
     Region {
         id: pickerBlurRegion
-        x: Math.round(card.x)
-        y: Math.round(card.y)
-        width: pickerWindow.isOpen ? Math.round(card.width) : 0
-        height: pickerWindow.isOpen ? Math.round(card.height) : 0
+        x: 0
+        y: 0
+        width: Math.round(card.width)
+        height: Math.round(card.height)
         radius: Math.round(card.radius)
     }
 
     GlassSurface {
         id: card
 
-        x: pickerWindow.popupX
-        y: pickerWindow.popupY
-
         width: pickerWindow.popupWidth
         height: pickerWindow.popupHeight
-
-        visible: pickerWindow.isOpen
-
         glassRadius: 20
         showBorder: true
         showHighlight: true
         clip: true
 
-        opacity: pickerWindow.openingVisual ? 1.0 : 0.0
-        scale: pickerWindow.openingVisual ? 1.0 : 0.965
-
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 95
-                easing.type: Easing.OutCubic
-            }
-        }
-
-        Behavior on scale {
-            NumberAnimation {
-                duration: 120
-                easing.type: Easing.OutBack
-            }
-        }
-
         // --------------------------------------------------------
-        // Draggable handle
+        // Tiny header: handle + close, similar visual weight to Win11
         // --------------------------------------------------------
 
-        Item {
-            id: dragHandleArea
-
+        Rectangle {
             anchors {
                 horizontalCenter: parent.horizontalCenter
                 top: parent.top
+                topMargin: 12
             }
 
-            width: 100
-            height: 31
-
-            Rectangle {
-                anchors.centerIn: parent
-
-                width: 42
-                height: dragMouse.pressed ? 5 : 4
-                radius: 2.5
-
-                color: dragMouse.containsMouse || dragMouse.pressed
-                    ? Qt.alpha(Theme.white, 0.88)
-                    : Qt.alpha(Theme.white, 0.60)
-
-                Behavior on color {
-                    ColorAnimation { duration: 90 }
-                }
-
-                Behavior on height {
-                    NumberAnimation { duration: 90 }
-                }
-            }
-
-            MouseArea {
-                id: dragMouse
-
-                anchors.fill: parent
-                hoverEnabled: true
-                preventStealing: true
-                cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-
-                property real startPointerX: 0
-                property real startPointerY: 0
-                property real startPopupX: 0
-                property real startPopupY: 0
-
-                function pointInWindow(mouse) {
-                    // The fullscreen backing PanelWindow never moves, so this
-                    // coordinate system is stable for the whole drag gesture.
-                    return pickerWindow.mapFromItem(
-                        dragHandleArea,
-                        mouse.x,
-                        mouse.y
-                    )
-                }
-
-                onPressed: function(mouse) {
-                    var point = pointInWindow(mouse)
-
-                    startPointerX = point.x
-                    startPointerY = point.y
-                    startPopupX = pickerWindow.popupX
-                    startPopupY = pickerWindow.popupY
-                }
-
-                onPositionChanged: function(mouse) {
-                    if (!pressed || !pickerWindow.targetScreen)
-                        return
-
-                    var point = pointInWindow(mouse)
-
-                    var maxX = Math.max(
-                        pickerWindow.edgePadding,
-                        pickerWindow.width
-                            - pickerWindow.popupWidth
-                            - pickerWindow.edgePadding
-                    )
-
-                    var maxY = Math.max(
-                        pickerWindow.edgePadding,
-                        pickerWindow.height
-                            - pickerWindow.popupHeight
-                            - pickerWindow.edgePadding
-                    )
-
-                    pickerWindow.popupX = pickerWindow.clamp(
-                        Math.round(
-                            startPopupX + point.x - startPointerX
-                        ),
-                        pickerWindow.edgePadding,
-                        maxX
-                    )
-
-                    pickerWindow.popupY = pickerWindow.clamp(
-                        Math.round(
-                            startPopupY + point.y - startPointerY
-                        ),
-                        pickerWindow.edgePadding,
-                        maxY
-                    )
-                }
-            }
+            width: 38
+            height: 4
+            radius: 2
+            color: Qt.alpha(Theme.white, 0.60)
         }
 
         Rectangle {
@@ -1029,7 +779,7 @@ PanelWindow {
         }
 
         // --------------------------------------------------------
-        // Category shortcuts
+        // Category strip
         // --------------------------------------------------------
 
         Row {
@@ -1060,12 +810,6 @@ PanelWindow {
                     property bool selected:
                         pickerWindow.query.length === 0
                         && pickerWindow.selectedCategory === modelData.id
-
-                    property bool recentUnavailable:
-                        modelData.id === "recent"
-                        && pickerWindow.recentEmojis.length === 0
-
-                    opacity: recentUnavailable ? 0.42 : 1.0
 
                     color: selected
                         ? Qt.alpha(Theme.white, 0.12)
@@ -1102,14 +846,9 @@ PanelWindow {
 
                     MouseArea {
                         id: categoryMouse
-
                         anchors.fill: parent
                         hoverEnabled: true
-                        enabled: !parent.recentUnavailable
-                        cursorShape: enabled
-                            ? Qt.PointingHandCursor
-                            : Qt.ArrowCursor
-
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: pickerWindow.selectCategory(modelData.id)
                     }
                 }
@@ -1207,21 +946,17 @@ PanelWindow {
 
                     if (event.key === Qt.Key_Down
                             && pickerWindow.filteredEmojis.length > 0) {
-                        searchGrid.currentIndex = Math.max(
-                            0,
-                            searchGrid.currentIndex
-                        )
-                        searchGrid.forceActiveFocus()
-                        searchGrid.positionViewAtIndex(
-                            searchGrid.currentIndex,
+                        emojiGrid.currentIndex = Math.max(0, emojiGrid.currentIndex)
+                        emojiGrid.forceActiveFocus()
+                        emojiGrid.positionViewAtIndex(
+                            emojiGrid.currentIndex,
                             GridView.Contain
                         )
                         event.accepted = true
                         return
                     }
 
-                    if ((event.key === Qt.Key_Return
-                            || event.key === Qt.Key_Enter)
+                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                             && pickerWindow.filteredEmojis.length > 0) {
                         pickerWindow.chooseEmoji(
                             pickerWindow.filteredEmojis[0].emoji
@@ -1230,176 +965,14 @@ PanelWindow {
                     }
                 }
             }
-
-            // Quick mode normally leaves keyboard focus in the original app.
-            // Clicking Search explicitly switches the picker into focus mode.
-            MouseArea {
-                anchors.fill: parent
-                visible: !pickerWindow.searchMode
-                cursorShape: Qt.IBeamCursor
-                onClicked: pickerWindow.enterSearchMode()
-            }
         }
 
         // --------------------------------------------------------
-        // Continuous category list
-        // --------------------------------------------------------
-
-        Flickable {
-            id: emojiScroll
-
-            visible: pickerWindow.query.length === 0
-
-            anchors {
-                left: parent.left
-                right: parent.right
-                top: searchBox.bottom
-                bottom: parent.bottom
-                leftMargin: 15
-                rightMargin: 15
-                topMargin: 10
-                bottomMargin: 11
-            }
-
-            clip: true
-            contentWidth: width
-            contentHeight: sectionsColumn.height
-            boundsBehavior: Flickable.StopAtBounds
-            flickDeceleration: 2600
-
-            onContentYChanged: pickerWindow.updateCategoryFromScroll()
-
-            NumberAnimation {
-                id: categoryScrollAnimation
-                target: emojiScroll
-                property: "contentY"
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-
-            Column {
-                id: sectionsColumn
-
-                width: emojiScroll.width
-                spacing: 11
-
-                Repeater {
-                    id: sectionRepeater
-                    model: pickerWindow.categories
-
-                    Column {
-                        required property var modelData
-
-                        property string sectionId: modelData.id
-                        property var sectionItems:
-                            pickerWindow.categoryItems(sectionId)
-
-                        width: sectionsColumn.width
-                        spacing: 6
-
-                        Text {
-                            width: parent.width
-
-                            text: parent.modelData.label
-                            color: Qt.alpha(Theme.white, 0.93)
-                            font.family: Theme.fontMain
-                            font.pixelSize: 13
-                            font.bold: true
-                        }
-
-                        GridView {
-                            id: sectionGrid
-
-                            width: parent.width
-                            height: sectionItems.length > 0
-                                ? Math.ceil(
-                                    sectionItems.length
-                                        / pickerWindow.gridColumns
-                                  ) * 48
-                                : 0
-
-                            interactive: false
-                            clip: false
-
-                            cellWidth: width / pickerWindow.gridColumns
-                            cellHeight: 48
-                            model: sectionItems
-
-                            delegate: Item {
-                                required property var modelData
-
-                                width: sectionGrid.cellWidth
-                                height: sectionGrid.cellHeight
-
-                                Rectangle {
-                                    anchors.centerIn: parent
-                                    width: 43
-                                    height: 43
-                                    radius: 10
-
-                                    color: emojiMouse.containsMouse
-                                        ? Qt.alpha(Theme.white, 0.07)
-                                        : "transparent"
-
-                                    scale: emojiMouse.pressed ? 0.91 : 1.0
-
-                                    Behavior on scale {
-                                        NumberAnimation {
-                                            duration: 80
-                                            easing.type: Easing.OutCubic
-                                        }
-                                    }
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: modelData.emoji
-                                        font.family: "Noto Color Emoji"
-                                        font.pixelSize: 26
-                                    }
-
-                                    MouseArea {
-                                        id: emojiMouse
-
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-
-                                        onClicked:
-                                            pickerWindow.chooseEmoji(
-                                                modelData.emoji
-                                            )
-                                    }
-                                }
-                            }
-                        }
-
-                        Text {
-                            visible:
-                                parent.sectionId === "recent"
-                                && parent.sectionItems.length === 0
-
-                            width: parent.width
-                            height: visible ? 38 : 0
-
-                            text: "No recent emojis yet"
-                            color: Qt.alpha(Theme.fg, 0.60)
-                            font.family: Theme.fontMain
-                            font.pixelSize: 12
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                }
-            }
-        }
-
-        // --------------------------------------------------------
-        // Search results
+        // Section title
         // --------------------------------------------------------
 
         Text {
-            id: searchResultsTitle
-
-            visible: pickerWindow.query.length > 0
+            id: sectionTitle
 
             anchors {
                 left: parent.left
@@ -1408,22 +981,27 @@ PanelWindow {
                 topMargin: 12
             }
 
-            text: "Search results"
+            text: pickerWindow.query.length > 0
+                ? "Search results"
+                : pickerWindow.categoryLabel(pickerWindow.selectedCategory)
+
             color: Qt.alpha(Theme.white, 0.93)
             font.family: Theme.fontMain
             font.pixelSize: 13
             font.bold: true
         }
 
-        GridView {
-            id: searchGrid
+        // --------------------------------------------------------
+        // Emoji grid
+        // --------------------------------------------------------
 
-            visible: pickerWindow.query.length > 0
+        GridView {
+            id: emojiGrid
 
             anchors {
                 left: parent.left
                 right: parent.right
-                top: searchResultsTitle.bottom
+                top: sectionTitle.bottom
                 bottom: parent.bottom
                 leftMargin: 15
                 rightMargin: 15
@@ -1444,8 +1022,8 @@ PanelWindow {
                 required property var modelData
                 required property int index
 
-                width: searchGrid.cellWidth
-                height: searchGrid.cellHeight
+                width: emojiGrid.cellWidth
+                height: emojiGrid.cellHeight
 
                 Rectangle {
                     anchors.centerIn: parent
@@ -1453,7 +1031,7 @@ PanelWindow {
                     height: 43
                     radius: 10
 
-                    property bool selected: searchGrid.currentIndex === index
+                    property bool selected: emojiGrid.currentIndex === index
 
                     color: selected
                         ? Qt.alpha(Theme.white, 0.13)
@@ -1488,9 +1066,8 @@ PanelWindow {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
 
-                        onEntered: searchGrid.currentIndex = index
-                        onClicked:
-                            pickerWindow.chooseEmoji(modelData.emoji)
+                        onEntered: emojiGrid.currentIndex = index
+                        onClicked: pickerWindow.chooseEmoji(modelData.emoji)
                     }
                 }
             }
@@ -1504,8 +1081,12 @@ PanelWindow {
 
                 if ((event.modifiers & Qt.ControlModifier)
                         && event.key === Qt.Key_F) {
-                    searchInput.forceActiveFocus()
-                    searchInput.selectAll()
+                    if (!pickerWindow.searchMode)
+                        pickerWindow.enterSearchMode()
+                    else {
+                        searchInput.forceActiveFocus()
+                        searchInput.selectAll()
+                    }
                     event.accepted = true
                     return
                 }
@@ -1517,8 +1098,7 @@ PanelWindow {
                     pickerWindow.moveGridSelection(1)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Up) {
-                    if (searchGrid.currentIndex
-                            < pickerWindow.gridColumns) {
+                    if (emojiGrid.currentIndex < pickerWindow.gridColumns) {
                         searchInput.forceActiveFocus()
                     } else {
                         pickerWindow.moveGridSelection(
@@ -1528,18 +1108,16 @@ PanelWindow {
 
                     event.accepted = true
                 } else if (event.key === Qt.Key_Down) {
-                    pickerWindow.moveGridSelection(
-                        pickerWindow.gridColumns
-                    )
+                    pickerWindow.moveGridSelection(pickerWindow.gridColumns)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Return
                         || event.key === Qt.Key_Enter) {
-                    if (searchGrid.currentIndex >= 0
-                            && searchGrid.currentIndex
+                    if (emojiGrid.currentIndex >= 0
+                            && emojiGrid.currentIndex
                                 < pickerWindow.filteredEmojis.length) {
                         pickerWindow.chooseEmoji(
                             pickerWindow.filteredEmojis[
-                                searchGrid.currentIndex
+                                emojiGrid.currentIndex
                             ].emoji
                         )
                     }
@@ -1549,26 +1127,41 @@ PanelWindow {
             }
         }
 
-        // Search empty state.
-        Column {
-            anchors.centerIn: searchGrid
-            spacing: 6
+        // --------------------------------------------------------
+        // Empty state
+        // --------------------------------------------------------
 
-            visible:
-                pickerWindow.query.length > 0
-                && pickerWindow.filteredEmojis.length === 0
+        Column {
+            anchors.centerIn: emojiGrid
+            spacing: 6
+            visible: pickerWindow.filteredEmojis.length === 0
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "󰍉"
+
+                text: pickerWindow.selectedCategory === "recent"
+                    && pickerWindow.query.length === 0
+                    ? "◷"
+                    : "󰍉"
+
                 color: Qt.alpha(Theme.fg, 0.70)
-                font.family: Theme.fontIcons
+
+                font.family: pickerWindow.selectedCategory === "recent"
+                    && pickerWindow.query.length === 0
+                    ? Theme.fontMain
+                    : Theme.fontIcons
+
                 font.pixelSize: 26
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "No emojis found"
+
+                text: pickerWindow.selectedCategory === "recent"
+                    && pickerWindow.query.length === 0
+                    ? "No recent emojis"
+                    : "No emojis found"
+
                 color: Qt.alpha(Theme.fg, 0.70)
                 font.family: Theme.fontMain
                 font.pixelSize: 13
@@ -1576,20 +1169,13 @@ PanelWindow {
         }
 
         // --------------------------------------------------------
-        // Minimal scrollbar for whichever view is active
+        // Minimal scrollbar
         // --------------------------------------------------------
 
         Rectangle {
             id: scrollThumb
 
-            readonly property var activeView:
-                pickerWindow.query.length > 0
-                    ? searchGrid
-                    : emojiScroll
-
-            visible:
-                activeView.visible
-                && activeView.contentHeight > activeView.height + 1
+            visible: emojiGrid.contentHeight > emojiGrid.height + 1
 
             anchors.right: parent.right
             anchors.rightMargin: 5
@@ -1599,25 +1185,20 @@ PanelWindow {
             color: Qt.alpha(Theme.white, 0.48)
 
             readonly property real viewportRatio:
-                Math.min(
-                    1,
-                    activeView.height
-                        / Math.max(1, activeView.contentHeight)
-                )
+                Math.min(1, emojiGrid.height / Math.max(1, emojiGrid.contentHeight))
 
-            readonly property real trackHeight: activeView.height
-            readonly property real maxTravel:
-                Math.max(0, trackHeight - height)
+            readonly property real trackHeight: emojiGrid.height
+            readonly property real maxTravel: Math.max(0, trackHeight - height)
 
             readonly property real scrollRatio:
-                activeView.contentHeight <= activeView.height
-                    ? 0
-                    : activeView.contentY
-                        / (activeView.contentHeight - activeView.height)
+                emojiGrid.contentHeight <= emojiGrid.height
+                ? 0
+                : emojiGrid.contentY
+                    / (emojiGrid.contentHeight - emojiGrid.height)
 
             height: Math.max(30, trackHeight * viewportRatio)
 
-            y: activeView.y
+            y: emojiGrid.y
                 + Math.max(
                     0,
                     Math.min(maxTravel, maxTravel * scrollRatio)
