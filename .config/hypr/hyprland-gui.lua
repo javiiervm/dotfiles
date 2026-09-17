@@ -13,8 +13,62 @@ end)
 -- Emoji picker -----------------------------------------------------
 -- XKB keycode 60 is the physical '.' key on the normal keyboard row.
 -- Use Quickshell's native Hyprland global-shortcut protocol instead of
--- spawning `qs ipc`, which removes one process launch from every opening.
+-- spawning `qs ipc ...` every time SUPER + . is pressed.
 hl.bind(
     "SUPER + code:60",
     hl.dsp.global("quickshell:emoji")
+)
+
+-- Find My Mouse ----------------------------------------------------
+-- Modifier-only binds in Hyprland Lua require the target modifier mask plus
+-- the real XKB keysym (Control_L / Control_R) and a release bind.
+--
+-- We deliberately do NOT use hl.dsp.global() for Ctrl itself. Modifier-only
+-- global-shortcut dispatch has had edge cases in Hyprland, while a normal Lua
+-- callback is reliable. The first Ctrl release only arms a 420 ms timer; the
+-- second release inside that window launches the already-tested Quickshell IPC.
+-- Therefore normal Ctrl usage does not spawn a process on every key press.
+
+local findMouseTapPending = false
+local findMouseTapTimer = nil
+
+local function clearFindMouseTap()
+    findMouseTapPending = false
+    findMouseTapTimer = nil
+end
+
+local function registerFindMouseCtrlTap()
+    if findMouseTapPending then
+        findMouseTapPending = false
+
+        if findMouseTapTimer ~= nil then
+            findMouseTapTimer:set_enabled(false)
+            findMouseTapTimer = nil
+        end
+
+        -- hl.exec_cmd() is asynchronous, so this does not block Hyprland's
+        -- compositor/input event loop.
+        hl.exec_cmd("qs ipc call findMouse trigger")
+        return
+    end
+
+    findMouseTapPending = true
+    findMouseTapTimer = hl.timer(function()
+        clearFindMouseTap()
+    end, {
+        timeout = 420,
+        type = "oneshot"
+    })
+end
+
+hl.bind(
+    "CTRL + Control_L",
+    registerFindMouseCtrlTap,
+    { release = true, non_consuming = true }
+)
+
+hl.bind(
+    "CTRL + Control_R",
+    registerFindMouseCtrlTap,
+    { release = true, non_consuming = true }
 )

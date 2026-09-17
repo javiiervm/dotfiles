@@ -14,9 +14,12 @@ QtObject {
     //   action    : special action handled by shell.qml (e.g. "launcher")
 
     readonly property var apps: {
-        // This binding is evaluated by shell.qml's dock. Accessing the
-        // singleton here forces construction, so its IpcHandler is registered.
+        // These bindings are evaluated by shell.qml's dock. Accessing the
+        // singletons here forces their construction for the lifetime of the
+        // main Quickshell instance, so their shortcuts / IPC handlers remain
+        // registered even though they do not belong to a visible dock item.
         var keepEmojiServiceAlive = EmojiService.picker
+        var keepFindMouseServiceAlive = FindMouseService.active
 
         return [
         {
