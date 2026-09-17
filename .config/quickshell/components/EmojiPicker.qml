@@ -257,6 +257,18 @@ PanelWindow {
     property var allEmojis: []
     property var filteredEmojis: []
     property var recentEmojis: []
+
+    // Prebuilt browse model: section header rows + rows of up to 7 emojis.
+    // ListView virtualizes these rows, so all categories can live in one
+    // continuous scroll without instantiating ~1800 emoji delegates at once.
+    property var browseRows: []
+    property var browseEmojis: []
+    property var browseEmojiIndexToRow: []
+    property var displayRows: []
+    property var emojiIndexToRow: []
+    property var categoryStartRows: ({})
+    property var categoryStartY: ({})
+    property int currentEmojiIndex: -1
     property var previousToplevel: null
     property string previousWindowAddress: ""
 
@@ -312,51 +324,218 @@ PanelWindow {
         }
     }
 
-    function updateFiltered() {
-        var result = []
-        var needle = normalized(query).trim()
+    function appendEmojiRows(rows, flat, indexToRow, items, categoryId) {
+        for (var offset = 0; offset < items.length; offset += gridColumns) {
+            var chunk = items.slice(
+                offset,
+                Math.min(items.length, offset + gridColumns)
+            )
+            var rowIndex = rows.length
+            var startIndex = flat.length
 
-        if (needle.length > 0) {
-            for (var i = 0; i < allEmojis.length; ++i) {
-                var item = allEmojis[i]
-                var haystack = normalized(
-                    item.emoji + " "
-                    + item.name + " "
-                    + item.keywords + " "
-                    + item.subgroup
-                )
+            rows.push({
+                kind: "emojis",
+                category: categoryId,
+                startIndex: startIndex,
+                items: chunk
+            })
 
-                if (haystack.indexOf(needle) !== -1)
-                    result.push(item)
-            }
-        } else if (selectedCategory === "recent") {
-            for (var r = 0; r < recentEmojis.length; ++r)
-                result.push(emojiObjectFor(recentEmojis[r]))
-        } else {
-            for (var j = 0; j < allEmojis.length; ++j) {
-                if (allEmojis[j].category === selectedCategory)
-                    result.push(allEmojis[j])
+            for (var i = 0; i < chunk.length; ++i) {
+                flat.push(chunk[i])
+                indexToRow.push(rowIndex)
             }
         }
-
-        filteredEmojis = result
-        emojiGrid.currentIndex = result.length > 0 ? 0 : -1
-
-        if (result.length > 0)
-            emojiGrid.positionViewAtBeginning()
     }
 
-    function selectCategory(categoryId) {
-        selectedCategory = categoryId
+    function buildBrowseRows() {
+        var grouped = ({})
 
-        if (searchInput.text.length > 0)
+        for (var c = 0; c < categories.length; ++c)
+            grouped[categories[c].id] = []
+
+        for (var i = 0; i < allEmojis.length; ++i) {
+            var item = allEmojis[i]
+
+            if (grouped[item.category] !== undefined)
+                grouped[item.category].push(item)
+        }
+
+        var rows = []
+        var flat = []
+        var indexToRow = []
+        var starts = ({})
+        var startsY = ({})
+        var runningY = 0
+
+        // Keep the geometry constants in sync with the ListView delegate.
+        var headerHeight = 30
+        var emojiRowHeight = 48
+        var emptyRecentHeight = 34
+
+        for (var categoryIndex = 0;
+                categoryIndex < categories.length;
+                ++categoryIndex) {
+            var category = categories[categoryIndex]
+            var sectionItems = []
+
+            starts[category.id] = rows.length
+            startsY[category.id] = runningY
+
+            rows.push({
+                kind: "header",
+                category: category.id,
+                label: category.label
+            })
+            runningY += headerHeight
+
+            if (category.id === "recent") {
+                for (var r = 0; r < recentEmojis.length; ++r)
+                    sectionItems.push(emojiObjectFor(recentEmojis[r]))
+            } else {
+                sectionItems = grouped[category.id] || []
+            }
+
+            if (category.id === "recent" && sectionItems.length === 0) {
+                rows.push({
+                    kind: "emptyRecent",
+                    category: "recent",
+                    label: "No recent emojis"
+                })
+                runningY += emptyRecentHeight
+                continue
+            }
+
+            var rowsBefore = rows.length
+            appendEmojiRows(
+                rows,
+                flat,
+                indexToRow,
+                sectionItems,
+                category.id
+            )
+            runningY += (rows.length - rowsBefore) * emojiRowHeight
+        }
+
+        browseRows = rows
+        browseEmojis = flat
+        browseEmojiIndexToRow = indexToRow
+        categoryStartRows = starts
+        categoryStartY = startsY
+
+        if (query.trim().length === 0) {
+            displayRows = browseRows
+            filteredEmojis = browseEmojis
+            emojiIndexToRow = browseEmojiIndexToRow
+            currentEmojiIndex = filteredEmojis.length > 0 ? 0 : -1
+        }
+    }
+
+    function buildSearchRows(results) {
+        var rows = [{
+            kind: "header",
+            category: "search",
+            label: "Search results"
+        }]
+        var flat = []
+        var indexToRow = []
+
+        appendEmojiRows(
+            rows,
+            flat,
+            indexToRow,
+            results,
+            "search"
+        )
+
+        displayRows = rows
+        filteredEmojis = flat
+        emojiIndexToRow = indexToRow
+        currentEmojiIndex = flat.length > 0 ? 0 : -1
+    }
+
+    function updateFiltered() {
+        var needle = normalized(query).trim()
+
+        if (needle.length === 0) {
+            displayRows = browseRows
+            filteredEmojis = browseEmojis
+            emojiIndexToRow = browseEmojiIndexToRow
+            currentEmojiIndex = filteredEmojis.length > 0 ? 0 : -1
+            return
+        }
+
+        var result = []
+
+        for (var i = 0; i < allEmojis.length; ++i) {
+            var item = allEmojis[i]
+            var haystack = normalized(
+                item.emoji + " "
+                + item.name + " "
+                + item.keywords + " "
+                + item.subgroup
+            )
+
+            if (haystack.indexOf(needle) !== -1)
+                result.push(item)
+        }
+
+        buildSearchRows(result)
+
+        if (emojiList)
+            emojiList.positionViewAtBeginning()
+    }
+
+    function jumpToCategory(categoryId) {
+        if (query.length > 0 || searchInput.text.length > 0) {
             searchInput.text = ""
+            query = ""
+            updateFiltered()
+        }
 
-        query = ""
-        updateFiltered()
+        var rowIndex = categoryStartRows[categoryId]
+
+        if (rowIndex === undefined)
+            return
+
+        selectedCategory = categoryId
+        emojiList.positionViewAtIndex(rowIndex, ListView.Beginning)
 
         if (searchMode)
             searchInput.forceActiveFocus()
+    }
+
+    function selectCategory(categoryId) {
+        jumpToCategory(categoryId)
+    }
+
+    function syncCategoryFromScroll() {
+        if (query.length > 0 || displayRows.length === 0)
+            return
+
+        var probeY = emojiList.contentY + 8
+        var active = categories[0].id
+
+        for (var i = 0; i < categories.length; ++i) {
+            var id = categories[i].id
+            var startY = categoryStartY[id]
+
+            if (startY !== undefined && startY <= probeY)
+                active = id
+            else
+                break
+        }
+
+        selectedCategory = active
+    }
+
+    function positionEmojiIndex(index) {
+        if (index < 0 || index >= emojiIndexToRow.length)
+            return
+
+        var rowIndex = emojiIndexToRow[index]
+
+        if (rowIndex !== undefined)
+            emojiList.positionViewAtIndex(rowIndex, ListView.Contain)
     }
 
     function rememberEmoji(character) {
@@ -369,6 +548,7 @@ PanelWindow {
 
         recentEmojis = next
         recentFile.setText(JSON.stringify(next))
+        browseRebuildTimer.restart()
     }
 
     function freezeKeyboardFocusOnCurrentApp() {
@@ -405,7 +585,13 @@ PanelWindow {
 
         query = ""
         selectedCategory = recentEmojis.length > 0 ? "recent" : "smileys"
-        updateFiltered()
+
+        // Empty-query browsing is already precomputed. Opening only swaps
+        // references and picks the initial scroll position.
+        displayRows = browseRows
+        filteredEmojis = browseEmojis
+        emojiIndexToRow = browseEmojiIndexToRow
+        currentEmojiIndex = filteredEmojis.length > 0 ? 0 : -1
     }
 
     function openPicker() {
@@ -428,6 +614,11 @@ PanelWindow {
         pendingOpen = false
         searchMode = true
         visible = true
+
+        var initialRow = categoryStartRows[selectedCategory]
+        if (initialRow !== undefined)
+            emojiList.positionViewAtIndex(initialRow, ListView.Beginning)
+
         searchFocusTimer.restart()
     }
 
@@ -546,15 +737,18 @@ PanelWindow {
         if (filteredEmojis.length === 0)
             return
 
-        var next = emojiGrid.currentIndex
+        var next = currentEmojiIndex
 
         if (next < 0)
             next = 0
         else
-            next = Math.max(0, Math.min(filteredEmojis.length - 1, next + delta))
+            next = Math.max(
+                0,
+                Math.min(filteredEmojis.length - 1, next + delta)
+            )
 
-        emojiGrid.currentIndex = next
-        emojiGrid.positionViewAtIndex(next, GridView.Contain)
+        currentEmojiIndex = next
+        positionEmojiIndex(next)
     }
 
     // ============================================================
@@ -591,8 +785,24 @@ PanelWindow {
             recentEmojis = []
         }
 
+        buildBrowseRows()
         selectedCategory = recentEmojis.length > 0 ? "recent" : "smileys"
         updateFiltered()
+    }
+
+    Timer {
+        id: browseRebuildTimer
+        interval: 0
+        repeat: false
+
+        onTriggered: {
+            buildBrowseRows()
+
+            // The picker is normally already closing when recents change.
+            // If it is still visible for any reason, preserve the live view.
+            if (pickerWindow.visible && pickerWindow.query.length === 0)
+                pickerWindow.syncCategoryFromScroll()
+        }
     }
 
     // ============================================================
@@ -946,11 +1156,13 @@ PanelWindow {
 
                     if (event.key === Qt.Key_Down
                             && pickerWindow.filteredEmojis.length > 0) {
-                        emojiGrid.currentIndex = Math.max(0, emojiGrid.currentIndex)
-                        emojiGrid.forceActiveFocus()
-                        emojiGrid.positionViewAtIndex(
-                            emojiGrid.currentIndex,
-                            GridView.Contain
+                        pickerWindow.currentEmojiIndex = Math.max(
+                            0,
+                            pickerWindow.currentEmojiIndex
+                        )
+                        emojiList.forceActiveFocus()
+                        pickerWindow.positionEmojiIndex(
+                            pickerWindow.currentEmojiIndex
                         )
                         event.accepted = true
                         return
@@ -968,106 +1180,144 @@ PanelWindow {
         }
 
         // --------------------------------------------------------
-        // Section title
+        // Continuous category list
         // --------------------------------------------------------
 
-        Text {
-            id: sectionTitle
-
-            anchors {
-                left: parent.left
-                top: searchBox.bottom
-                leftMargin: 18
-                topMargin: 12
-            }
-
-            text: pickerWindow.query.length > 0
-                ? "Search results"
-                : pickerWindow.categoryLabel(pickerWindow.selectedCategory)
-
-            color: Qt.alpha(Theme.white, 0.93)
-            font.family: Theme.fontMain
-            font.pixelSize: 13
-            font.bold: true
-        }
-
-        // --------------------------------------------------------
-        // Emoji grid
-        // --------------------------------------------------------
-
-        GridView {
-            id: emojiGrid
+        ListView {
+            id: emojiList
 
             anchors {
                 left: parent.left
                 right: parent.right
-                top: sectionTitle.bottom
+                top: searchBox.bottom
                 bottom: parent.bottom
                 leftMargin: 15
                 rightMargin: 15
-                topMargin: 6
+                topMargin: 7
                 bottomMargin: 11
             }
 
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             flickDeceleration: 2600
+            spacing: 0
+            model: pickerWindow.displayRows
+            reuseItems: true
 
-            cellWidth: width / pickerWindow.gridColumns
-            cellHeight: 48
-            model: pickerWindow.filteredEmojis
-            currentIndex: model.length > 0 ? 0 : -1
+            onContentYChanged: pickerWindow.syncCategoryFromScroll()
 
             delegate: Item {
+                id: rowRoot
+
                 required property var modelData
                 required property int index
 
-                width: emojiGrid.cellWidth
-                height: emojiGrid.cellHeight
+                width: emojiList.width
+                height: modelData.kind === "header"
+                    ? 30
+                    : (modelData.kind === "emptyRecent" ? 34 : 48)
 
-                Rectangle {
-                    anchors.centerIn: parent
-                    width: 43
-                    height: 43
-                    radius: 10
+                Text {
+                    visible: rowRoot.modelData.kind === "header"
 
-                    property bool selected: emojiGrid.currentIndex === index
+                    anchors {
+                        left: parent.left
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: 3
+                    }
 
-                    color: selected
-                        ? Qt.alpha(Theme.white, 0.13)
-                        : (emojiMouse.containsMouse
-                            ? Qt.alpha(Theme.white, 0.07)
-                            : "transparent")
+                    text: rowRoot.modelData.label || ""
+                    color: Qt.alpha(Theme.white, 0.93)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 13
+                    font.bold: true
+                }
 
-                    border.width: selected ? 1 : 0
-                    border.color: selected
-                        ? Qt.alpha(Theme.blue, 0.82)
-                        : "transparent"
+                Text {
+                    visible: rowRoot.modelData.kind === "emptyRecent"
 
-                    scale: emojiMouse.pressed ? 0.91 : 1.0
+                    anchors {
+                        left: parent.left
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: 3
+                    }
 
-                    Behavior on scale {
-                        NumberAnimation {
-                            duration: 80
-                            easing.type: Easing.OutCubic
+                    text: "No recent emojis"
+                    color: Qt.alpha(Theme.fg, 0.55)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
+                }
+
+                Row {
+                    visible: rowRoot.modelData.kind === "emojis"
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Repeater {
+                        model: rowRoot.modelData.items || []
+
+                        Item {
+                            required property var modelData
+                            required property int index
+
+                            width: emojiList.width / pickerWindow.gridColumns
+                            height: 48
+
+                            readonly property int emojiIndex:
+                                rowRoot.modelData.startIndex + index
+
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 43
+                                height: 43
+                                radius: 10
+
+                                property bool selected:
+                                    pickerWindow.currentEmojiIndex
+                                    === parent.emojiIndex
+
+                                color: selected
+                                    ? Qt.alpha(Theme.white, 0.13)
+                                    : (emojiMouse.containsMouse
+                                        ? Qt.alpha(Theme.white, 0.07)
+                                        : "transparent")
+
+                                border.width: selected ? 1 : 0
+                                border.color: selected
+                                    ? Qt.alpha(Theme.blue, 0.82)
+                                    : "transparent"
+
+                                scale: emojiMouse.pressed ? 0.91 : 1.0
+
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: 80
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.emoji
+                                    font.family: "Noto Color Emoji"
+                                    font.pixelSize: 26
+                                }
+
+                                MouseArea {
+                                    id: emojiMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+
+                                    onEntered:
+                                        pickerWindow.currentEmojiIndex
+                                        = parent.parent.emojiIndex
+
+                                    onClicked:
+                                        pickerWindow.chooseEmoji(modelData.emoji)
+                                }
+                            }
                         }
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: modelData.emoji
-                        font.family: "Noto Color Emoji"
-                        font.pixelSize: 26
-                    }
-
-                    MouseArea {
-                        id: emojiMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-
-                        onEntered: emojiGrid.currentIndex = index
-                        onClicked: pickerWindow.chooseEmoji(modelData.emoji)
                     }
                 }
             }
@@ -1081,12 +1331,8 @@ PanelWindow {
 
                 if ((event.modifiers & Qt.ControlModifier)
                         && event.key === Qt.Key_F) {
-                    if (!pickerWindow.searchMode)
-                        pickerWindow.enterSearchMode()
-                    else {
-                        searchInput.forceActiveFocus()
-                        searchInput.selectAll()
-                    }
+                    searchInput.forceActiveFocus()
+                    searchInput.selectAll()
                     event.accepted = true
                     return
                 }
@@ -1098,7 +1344,8 @@ PanelWindow {
                     pickerWindow.moveGridSelection(1)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Up) {
-                    if (emojiGrid.currentIndex < pickerWindow.gridColumns) {
+                    if (pickerWindow.currentEmojiIndex
+                            < pickerWindow.gridColumns) {
                         searchInput.forceActiveFocus()
                     } else {
                         pickerWindow.moveGridSelection(
@@ -1112,12 +1359,12 @@ PanelWindow {
                     event.accepted = true
                 } else if (event.key === Qt.Key_Return
                         || event.key === Qt.Key_Enter) {
-                    if (emojiGrid.currentIndex >= 0
-                            && emojiGrid.currentIndex
+                    if (pickerWindow.currentEmojiIndex >= 0
+                            && pickerWindow.currentEmojiIndex
                                 < pickerWindow.filteredEmojis.length) {
                         pickerWindow.chooseEmoji(
                             pickerWindow.filteredEmojis[
-                                emojiGrid.currentIndex
+                                pickerWindow.currentEmojiIndex
                             ].emoji
                         )
                     }
@@ -1127,41 +1374,24 @@ PanelWindow {
             }
         }
 
-        // --------------------------------------------------------
-        // Empty state
-        // --------------------------------------------------------
-
+        // Search-only empty state. Normal browsing always has category headers.
         Column {
-            anchors.centerIn: emojiGrid
+            anchors.centerIn: emojiList
             spacing: 6
-            visible: pickerWindow.filteredEmojis.length === 0
+            visible: pickerWindow.query.length > 0
+                && pickerWindow.filteredEmojis.length === 0
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-
-                text: pickerWindow.selectedCategory === "recent"
-                    && pickerWindow.query.length === 0
-                    ? "◷"
-                    : "󰍉"
-
+                text: "󰍉"
                 color: Qt.alpha(Theme.fg, 0.70)
-
-                font.family: pickerWindow.selectedCategory === "recent"
-                    && pickerWindow.query.length === 0
-                    ? Theme.fontMain
-                    : Theme.fontIcons
-
+                font.family: Theme.fontIcons
                 font.pixelSize: 26
             }
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-
-                text: pickerWindow.selectedCategory === "recent"
-                    && pickerWindow.query.length === 0
-                    ? "No recent emojis"
-                    : "No emojis found"
-
+                text: "No emojis found"
                 color: Qt.alpha(Theme.fg, 0.70)
                 font.family: Theme.fontMain
                 font.pixelSize: 13
@@ -1175,7 +1405,7 @@ PanelWindow {
         Rectangle {
             id: scrollThumb
 
-            visible: emojiGrid.contentHeight > emojiGrid.height + 1
+            visible: emojiList.contentHeight > emojiList.height + 1
 
             anchors.right: parent.right
             anchors.rightMargin: 5
@@ -1185,20 +1415,20 @@ PanelWindow {
             color: Qt.alpha(Theme.white, 0.48)
 
             readonly property real viewportRatio:
-                Math.min(1, emojiGrid.height / Math.max(1, emojiGrid.contentHeight))
+                Math.min(1, emojiList.height / Math.max(1, emojiList.contentHeight))
 
-            readonly property real trackHeight: emojiGrid.height
+            readonly property real trackHeight: emojiList.height
             readonly property real maxTravel: Math.max(0, trackHeight - height)
 
             readonly property real scrollRatio:
-                emojiGrid.contentHeight <= emojiGrid.height
+                emojiList.contentHeight <= emojiList.height
                 ? 0
-                : emojiGrid.contentY
-                    / (emojiGrid.contentHeight - emojiGrid.height)
+                : emojiList.contentY
+                    / (emojiList.contentHeight - emojiList.height)
 
             height: Math.max(30, trackHeight * viewportRatio)
 
-            y: emojiGrid.y
+            y: emojiList.y
                 + Math.max(
                     0,
                     Math.min(maxTravel, maxTravel * scrollRatio)
