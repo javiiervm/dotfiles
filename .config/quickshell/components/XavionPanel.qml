@@ -175,65 +175,100 @@ PanelWindow {
                             role === "user"
 
                         width: messageList.width
-                        height: bubble.height + 6
+
+                        height:
+                            fromUser
+                            ? userBubble.height + 8
+                            : assistantText.implicitHeight + 12
+
+                        // ============================================================
+                        // USER MESSAGE
+                        // ============================================================
 
                         Rectangle {
-                            id: bubble
+                            id: userBubble
 
-                            anchors.right:
-                                messageDelegate.fromUser
-                                ? parent.right
-                                : undefined
+                            visible: messageDelegate.fromUser
 
-                            anchors.left:
-                                messageDelegate.fromUser
-                                ? undefined
-                                : parent.left
+                            anchors.right: parent.right
 
-                            width:
-                                messageDelegate.fromUser
-                                ? messageList.width * 0.72
-                                : messageList.width * 0.88
+                            width: Math.min(
+                                messageList.width * 0.78,
+                                userText.implicitWidth + 24
+                            )
 
-                            height: messageText.implicitHeight + 18
+                            height: userText.implicitHeight + 18
+
                             radius: 14
 
-                            color:
-                                messageDelegate.fromUser
-                                ? Qt.alpha(Theme.blue, 0.15)
-                                : Qt.alpha(Theme.white, 0.055)
+                            color: Qt.alpha(
+                                Theme.blue,
+                                0.15
+                            )
 
                             border.width: 1
-
-                            border.color:
-                                messageDelegate.fromUser
-                                ? Qt.alpha(Theme.blue, 0.26)
-                                : Qt.alpha(Theme.white, 0.08)
+                            border.color: Qt.alpha(
+                                Theme.blue,
+                                0.26
+                            )
 
                             Text {
-                                id: messageText
+                                id: userText
 
                                 anchors {
                                     left: parent.left
                                     right: parent.right
                                     top: parent.top
-                                    margins: 9
+
+                                    leftMargin: 12
+                                    rightMargin: 12
+                                    topMargin: 9
                                 }
 
-                                text:
-                                    messageDelegate.text
-                                    + (
-                                        messageDelegate.streaming
-                                        ? " ▌"
-                                        : ""
-                                    )
+                                text: messageDelegate.text
 
                                 color: Theme.white
+
                                 font.family: Theme.fontMain
                                 font.pixelSize: 12
+
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
                             }
+                        }
+
+                        // ============================================================
+                        // XAVION MESSAGE
+                        // ============================================================
+
+                        Text {
+                            id: assistantText
+
+                            visible: !messageDelegate.fromUser
+
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+
+                                leftMargin: 10
+                                rightMargin: 20
+                            }
+
+                            text:
+                                messageDelegate.text
+                                + (
+                                    messageDelegate.streaming
+                                    ? " ▌"
+                                    : ""
+                                )
+
+                            color: Theme.white
+
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+
+                            wrapMode: Text.Wrap
+                            textFormat: Text.PlainText
                         }
                     }
 
