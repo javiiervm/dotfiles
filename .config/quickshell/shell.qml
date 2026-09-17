@@ -503,6 +503,21 @@ ShellRoot {
         }
     }
 
+    // --- XAVION CHAT ---
+    XavionService {
+        id: xavionService
+    }
+
+    LazyLoader {
+        id: xavionPanelLoader
+        active: xavionService.panelOpen
+
+        XavionPanel {
+            screen: root.primaryUiScreen
+            service: xavionService
+        }
+    }
+
     NotificationCenter {
         id: notifCenterWindow
         screen: root.primaryUiScreen
@@ -1112,6 +1127,16 @@ ShellRoot {
                 smooth: true
                 mipmap: true
                 cache: true
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+
+                    onClicked: {
+                        xavionService.togglePanel()
+                    }
+                }
             }
 
             GlassSurface {
