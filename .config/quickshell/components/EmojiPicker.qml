@@ -39,35 +39,54 @@ PanelWindow {
 
     screen: targetScreen
 
-    implicitWidth: popupWidth
-    implicitHeight: popupHeight
-
-    // A PanelWindow is positioned in logical pixels relative to its current
-    // ShellScreen. The cursor from Hyprland is converted to screen-local
-    // coordinates before these margins are assigned.
+    // Keep the layer-shell surface stationary and fullscreen. The emoji card
+    // itself moves inside this surface. This is crucial for smooth dragging:
+    // changing layer-shell margins every pointer event makes the compositor
+    // reposition the Wayland surface asynchronously, which lags behind the
+    // physical mouse.
     anchors {
         left: true
+        right: true
         top: true
-    }
-
-    margins {
-        left: popupX
-        top: popupY
+        bottom: true
     }
 
     property int popupX: edgePadding
     property int popupY: edgePadding
+    property bool isOpen: false
 
-    visible: false
+    // During a drag, freeze the compositor input region at the press position.
+    // The implicit pointer grab keeps delivering motion events anyway. On
+    // release the mask jumps once to the final card position instead of being
+    // recommitted to Wayland for every single mouse event.
+    property bool draggingCard: false
+    property int dragMaskX: popupX
+    property int dragMaskY: popupY
 
-    // While the picker is visible it owns keyboard focus, with Search focused
-    // automatically. The original Hyprland window is remembered and explicitly
-    // focused again before committing an emoji.
+    visible: true
+    color: "transparent"
+
+    // Search owns keyboard focus only while the picker is actually open.
     property bool searchMode: false
-    focusable: true
+    focusable: searchMode
+
     exclusiveZone: 0
     exclusionMode: ExclusionMode.Ignore
-    color: "transparent"
+
+    // Everything outside the card is click-through. This preserves the current
+    // outside-click dismissal behavior even though the backing surface fills
+    // the monitor.
+    mask: Region {
+        x: pickerWindow.draggingCard
+            ? pickerWindow.dragMaskX
+            : pickerWindow.popupX
+        y: pickerWindow.draggingCard
+            ? pickerWindow.dragMaskY
+            : pickerWindow.popupY
+        width: pickerWindow.isOpen ? pickerWindow.popupWidth : 0
+        height: pickerWindow.isOpen ? pickerWindow.popupHeight : 0
+        radius: 20
+    }
 
     WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.namespace: "quickshell:emoji"
@@ -595,7 +614,7 @@ PanelWindow {
     }
 
     function openPicker() {
-        if (visible || pendingOpen)
+        if (isOpen || pendingOpen)
             return
 
         prepareOpenState()
@@ -613,7 +632,7 @@ PanelWindow {
 
         pendingOpen = false
         searchMode = true
-        visible = true
+        isOpen = true
 
         var initialRow = categoryStartRows[selectedCategory]
         if (initialRow !== undefined)
@@ -651,10 +670,11 @@ PanelWindow {
     function closePicker(restorePreviousFocus) {
         pendingOpen = false
 
-        if (!visible)
+        if (!isOpen)
             return
 
-        visible = false
+        isOpen = false
+        draggingCard = false
         focusGrab.active = false
         searchMode = false
         pendingEmoji = ""
@@ -670,7 +690,7 @@ PanelWindow {
     }
 
     function enterSearchMode() {
-        if (!visible || searchMode)
+        if (!isOpen || searchMode)
             return
 
         searchMode = true
@@ -681,7 +701,7 @@ PanelWindow {
     }
 
     function togglePicker() {
-        if (visible)
+        if (isOpen)
             closePicker(true)
         else if (pendingOpen)
             pendingOpen = false
@@ -704,7 +724,8 @@ PanelWindow {
         // layer surface disappears.
         freezeKeyboardFocusOnCurrentApp()
 
-        visible = false
+        isOpen = false
+        draggingCard = false
         focusGrab.active = false
         searchMode = false
 
@@ -800,7 +821,7 @@ PanelWindow {
 
             // The picker is normally already closing when recents change.
             // If it is still visible for any reason, preserve the live view.
-            if (pickerWindow.visible && pickerWindow.query.length === 0)
+            if (pickerWindow.isOpen && pickerWindow.query.length === 0)
                 pickerWindow.syncCategoryFromScroll()
         }
     }
@@ -816,7 +837,7 @@ PanelWindow {
         onCleared: {
             // The compositor clears the grab when the user clicks/touches
             // outside this popup. Pointer movement by itself does not close it.
-            if (pickerWindow.visible)
+            if (pickerWindow.isOpen)
                 pickerWindow.closePicker(false)
         }
     }
@@ -866,7 +887,7 @@ PanelWindow {
         repeat: false
 
         onTriggered: {
-            if (!pickerWindow.visible)
+            if (!pickerWindow.isOpen)
                 return
 
             focusGrab.active = true
@@ -915,12 +936,22 @@ PanelWindow {
     // Compact Windows-like panel
     // ============================================================
 
-    BackgroundEffect.blurRegion: Glass.blurEnabled ? pickerBlurRegion : null
+    // The backing PanelWindow now fills the monitor, so the blur region must
+    // follow the card's actual position inside that window. Keeping it at (0,0)
+    // would leave a permanent blurred rectangle in the top-left and would make
+    // the moved card itself look transparent.
+    //
+    // Disable the compositor blur region completely while the picker is closed,
+    // so the always-alive transparent backing surface has zero visual cost.
+    BackgroundEffect.blurRegion:
+        Glass.blurEnabled && pickerWindow.isOpen
+            ? pickerBlurRegion
+            : null
 
     Region {
         id: pickerBlurRegion
-        x: 0
-        y: 0
+        x: Math.round(card.x)
+        y: Math.round(card.y)
         width: Math.round(card.width)
         height: Math.round(card.height)
         radius: Math.round(card.radius)
@@ -929,8 +960,13 @@ PanelWindow {
     GlassSurface {
         id: card
 
+        x: pickerWindow.popupX
+        y: pickerWindow.popupY
+
         width: pickerWindow.popupWidth
         height: pickerWindow.popupHeight
+        visible: pickerWindow.isOpen
+
         glassRadius: 20
         showBorder: true
         showHighlight: true
@@ -940,17 +976,126 @@ PanelWindow {
         // Tiny header: handle + close, similar visual weight to Win11
         // --------------------------------------------------------
 
-        Rectangle {
+        Item {
+            id: dragHandleArea
+
             anchors {
                 horizontalCenter: parent.horizontalCenter
                 top: parent.top
-                topMargin: 12
             }
 
-            width: 38
-            height: 4
-            radius: 2
-            color: Qt.alpha(Theme.white, 0.60)
+            width: 100
+            height: 31
+
+            Rectangle {
+                anchors.centerIn: parent
+
+                width: 38
+                height: dragMouse.pressed ? 5 : 4
+                radius: 2.5
+
+                color: dragMouse.containsMouse || dragMouse.pressed
+                    ? Qt.alpha(Theme.white, 0.88)
+                    : Qt.alpha(Theme.white, 0.60)
+
+                Behavior on color {
+                    ColorAnimation { duration: 90 }
+                }
+
+                Behavior on height {
+                    NumberAnimation { duration: 90 }
+                }
+            }
+
+            MouseArea {
+                id: dragMouse
+
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                preventStealing: true
+                cursorShape: pressed
+                    ? Qt.ClosedHandCursor
+                    : Qt.OpenHandCursor
+
+                property real pressPointerX: 0
+                property real pressPointerY: 0
+                property real pressPopupX: 0
+                property real pressPopupY: 0
+
+                function pointInBackingWindow(mouse) {
+                    // The fullscreen PanelWindow never moves, so these are
+                    // stable logical-pixel coordinates for the entire gesture.
+                    // No physical/logical scaling conversion is necessary.
+                    return pickerWindow.mapFromItem(
+                        dragHandleArea,
+                        mouse.x,
+                        mouse.y
+                    )
+                }
+
+                onPressed: function(mouse) {
+                    var point = pointInBackingWindow(mouse)
+
+                    pressPointerX = point.x
+                    pressPointerY = point.y
+                    pressPopupX = pickerWindow.popupX
+                    pressPopupY = pickerWindow.popupY
+
+                    pickerWindow.dragMaskX = pickerWindow.popupX
+                    pickerWindow.dragMaskY = pickerWindow.popupY
+                    pickerWindow.draggingCard = true
+
+                    mouse.accepted = true
+                }
+
+                onPositionChanged: function(mouse) {
+                    if (!pressed || !pickerWindow.targetScreen)
+                        return
+
+                    var point = pointInBackingWindow(mouse)
+
+                    var maxX = Math.max(
+                        pickerWindow.edgePadding,
+                        pickerWindow.width
+                            - pickerWindow.popupWidth
+                            - pickerWindow.edgePadding
+                    )
+
+                    var maxY = Math.max(
+                        pickerWindow.edgePadding,
+                        pickerWindow.height
+                            - pickerWindow.popupHeight
+                            - pickerWindow.edgePadding
+                    )
+
+                    // Pure QML item movement: no hyprctl, no timer and no
+                    // layer-shell surface repositioning in the hot path.
+                    pickerWindow.popupX = pickerWindow.clamp(
+                        Math.round(
+                            pressPopupX + point.x - pressPointerX
+                        ),
+                        pickerWindow.edgePadding,
+                        maxX
+                    )
+
+                    pickerWindow.popupY = pickerWindow.clamp(
+                        Math.round(
+                            pressPopupY + point.y - pressPointerY
+                        ),
+                        pickerWindow.edgePadding,
+                        maxY
+                    )
+                }
+
+                onReleased: {
+                    pickerWindow.draggingCard = false
+                }
+
+                onCanceled: {
+                    pickerWindow.draggingCard = false
+                }
+            }
         }
 
         Rectangle {
