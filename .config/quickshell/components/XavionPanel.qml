@@ -257,6 +257,19 @@ PanelWindow {
 
                             radius: 16
 
+                            // Message-sent entrance animation:
+                            // the bubble grows out from the right side of the chat,
+                            // similar to modern messaging apps.
+                            opacity: messageDelegate.fromUser ? 0 : 1
+                            scale: messageDelegate.fromUser ? 0.72 : 1
+                            transformOrigin: Item.BottomRight
+
+                            property real entranceOffset: 18
+
+                            transform: Translate {
+                                x: userBubble.entranceOffset
+                            }
+
                             gradient: Gradient {
                                 orientation: Gradient.Horizontal
 
@@ -298,6 +311,51 @@ PanelWindow {
 
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
+                            }
+                        }
+
+                        ParallelAnimation {
+                            id: userBubbleAppear
+
+                            NumberAnimation {
+                                target: userBubble
+                                property: "opacity"
+
+                                from: 0
+                                to: 1
+
+                                duration: 170
+                                easing.type: Easing.OutCubic
+                            }
+
+                            NumberAnimation {
+                                target: userBubble
+                                property: "scale"
+
+                                from: 0.72
+                                to: 1
+
+                                duration: 220
+                                easing.type: Easing.OutBack
+                            }
+
+                            NumberAnimation {
+                                target: userBubble
+                                property: "entranceOffset"
+
+                                from: 18
+                                to: 0
+
+                                duration: 210
+                                easing.type: Easing.OutCubic
+                            }
+                        }
+
+                        Component.onCompleted: {
+                            if (messageDelegate.fromUser) {
+                                Qt.callLater(function() {
+                                    userBubbleAppear.start()
+                                })
                             }
                         }
 
