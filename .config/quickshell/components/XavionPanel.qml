@@ -74,47 +74,102 @@ PanelWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 36
-                spacing: 10
 
-                Image {
-                    Layout.preferredWidth: 30
-                    Layout.preferredHeight: 30
+                spacing: 8
 
-                    source: "../assets/xavion/idle.png"
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true
-                    mipmap: true
-                }
+                // ============================================================
+                // NEW CHAT — visual only for now
+                // ============================================================
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 0
+                Rectangle {
+                    Layout.preferredWidth: 32
+                    Layout.preferredHeight: 32
+
+                    radius: 9
+
+                    color:
+                        newChatMouse.containsMouse
+                        ? Qt.alpha(Theme.white, 0.10)
+                        : "transparent"
+
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.white, 0.10)
 
                     Text {
-                        text: "Xavion"
-                        color: Theme.white
-                        font.family: Theme.fontMain
-                        font.pixelSize: 14
-                        font.bold: true
+                        anchors.centerIn: parent
+
+                        text: "󰐕"
+
+                        color:
+                            newChatMouse.containsMouse
+                            ? Theme.white
+                            : Theme.grey1
+
+                        font.family: Theme.fontIcons
+                        font.pixelSize: 15
                     }
 
+                    MouseArea {
+                        id: newChatMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+
+                        // Deliberadamente no clicable todavía.
+                        cursorShape: Qt.ArrowCursor
+                    }
+                }
+
+                // ============================================================
+                // SETTINGS — visual only for now
+                // ============================================================
+
+                Rectangle {
+                    Layout.preferredWidth: 32
+                    Layout.preferredHeight: 32
+
+                    radius: 9
+
+                    color:
+                        settingsMouse.containsMouse
+                        ? Qt.alpha(Theme.white, 0.10)
+                        : "transparent"
+
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.white, 0.10)
+
                     Text {
-                        text: service.statusText
+                        anchors.centerIn: parent
 
-                        color: service.busy
-                            ? Theme.orange
-                            : service.backendReady
-                                ? Theme.green
-                                : Theme.grey1
+                        text: "󰒓"
 
-                        font.family: Theme.fontMain
-                        font.pixelSize: 10
+                        color:
+                            settingsMouse.containsMouse
+                            ? Theme.white
+                            : Theme.grey1
+
+                        font.family: Theme.fontIcons
+                        font.pixelSize: 15
+                    }
+
+                    MouseArea {
+                        id: settingsMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+
+                        // Deliberadamente no clicable todavía.
+                        cursorShape: Qt.ArrowCursor
                     }
                 }
 
                 Item {
                     Layout.fillWidth: true
                 }
+
+                // ============================================================
+                // CLOSE
+                // ============================================================
 
                 Item {
                     Layout.preferredWidth: 28
@@ -122,9 +177,11 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
+
                         text: "󰅖"
 
-                        color: closeMouse.containsMouse
+                        color:
+                            closeMouse.containsMouse
                             ? Theme.white
                             : Theme.grey1
 
@@ -134,10 +191,13 @@ PanelWindow {
 
                     MouseArea {
                         id: closeMouse
+
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: service.closePanel()
+
+                        onClicked:
+                            service.closePanel()
                     }
                 }
             }
@@ -293,7 +353,7 @@ PanelWindow {
                         width: 54
                         height: 54
 
-                        source: "../assets/xavion/idle.png"
+                        source: "../assets/xavion/chat.png"
                         fillMode: Image.PreserveAspectFit
                         smooth: true
                     }
