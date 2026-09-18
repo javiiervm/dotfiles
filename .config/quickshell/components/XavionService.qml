@@ -8,6 +8,7 @@ Scope {
     property bool panelOpen: false
     property bool backendReady: false
     property bool busy: false
+    property bool awaitingFirstChunk: false
 
     property string activeModel: ""
     property string lastError: ""
@@ -99,13 +100,10 @@ Scope {
             streaming: false
         })
 
-        messageModel.append({
-            role: "assistant",
-            text: "",
-            streaming: true
-        })
-
-        currentAssistantIndex = messageModel.count - 1
+        // Do not create Xavion's message yet. While the backend is preparing
+        // the first token, the panel shows the animated typing indicator.
+        currentAssistantIndex = -1
+        awaitingFirstChunk = true
         busy = true
 
         if (!sendCommand({
@@ -114,6 +112,7 @@ Scope {
             intent_mode: "auto",
             tone_mode: "casual"
         })) {
+            awaitingFirstChunk = false
             busy = false
             return false
         }
@@ -153,6 +152,7 @@ Scope {
         case "ready":
             backendReady = true
             busy = false
+            awaitingFirstChunk = false
             lastError = ""
 
             if (event.model !== undefined)
@@ -162,20 +162,37 @@ Scope {
 
         case "start":
             busy = true
+            awaitingFirstChunk = true
             break
 
         case "chunk":
+            var chunk =
+                event.text !== undefined
+                ? String(event.text)
+                : ""
+
+            if (chunk.length === 0)
+                break
+
+            // First streamed token: remove the typing indicator and only now
+            // create Xavion's visible response (with the streaming cursor).
+            if (currentAssistantIndex < 0) {
+                messageModel.append({
+                    role: "assistant",
+                    text: "",
+                    streaming: true
+                })
+
+                currentAssistantIndex = messageModel.count - 1
+                awaitingFirstChunk = false
+            }
+
             if (
                 currentAssistantIndex >= 0
                 && currentAssistantIndex < messageModel.count
             ) {
                 var currentText =
                     messageModel.get(currentAssistantIndex).text
-
-                var chunk =
-                    event.text !== undefined
-                    ? String(event.text)
-                    : ""
 
                 messageModel.setProperty(
                     currentAssistantIndex,
@@ -201,6 +218,7 @@ Scope {
             }
 
             currentAssistantIndex = -1
+            awaitingFirstChunk = false
             busy = false
 
             streamUpdated()
@@ -235,7 +253,16 @@ Scope {
                 )
             }
 
+            if (currentAssistantIndex < 0) {
+                messageModel.append({
+                    role: "assistant",
+                    text: "Error: " + lastError,
+                    streaming: false
+                })
+            }
+
             currentAssistantIndex = -1
+            awaitingFirstChunk = false
             busy = false
             streamUpdated()
             break
@@ -243,6 +270,7 @@ Scope {
         case "new_done":
             messageModel.clear()
             currentAssistantIndex = -1
+            awaitingFirstChunk = false
             busy = false
             lastError = ""
             streamUpdated()
@@ -251,6 +279,7 @@ Scope {
         case "reset_done":
             messageModel.clear()
             currentAssistantIndex = -1
+            awaitingFirstChunk = false
             busy = false
             streamUpdated()
             break
@@ -289,6 +318,7 @@ Scope {
 
         onExited: function(exitCode, exitStatus) {
             service.backendReady = false
+            service.awaitingFirstChunk = false
             service.busy = false
 
             if (service.panelOpen) {

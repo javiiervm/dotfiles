@@ -3,6 +3,7 @@ import QtQuick.Layouts
 
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 
 import ".."
 
@@ -10,6 +11,19 @@ PanelWindow {
     id: panel
 
     required property var service
+
+    property bool settingsOpen: false
+
+    function closePanel(): void {
+        settingsOpen = false
+        focusGrab.active = false
+        service.closePanel()
+    }
+
+    // Xavion accent gradient used by user messages and the send button.
+    readonly property color xavionPink: "#F52765"
+    readonly property color xavionRed: "#FF4A3D"
+    readonly property color xavionOrange: "#FF8A18"
 
     implicitWidth: 390
     implicitHeight: 460
@@ -45,7 +59,19 @@ PanelWindow {
 
         Qt.callLater(function() {
             input.forceActiveFocus()
+            focusGrab.active = true
         })
+    }
+
+    HyprlandFocusGrab {
+        id: focusGrab
+
+        windows: [ panel ]
+
+        onCleared: {
+            if (service.panelOpen)
+                panel.closePanel()
+        }
     }
 
     BackgroundEffect.blurRegion:
@@ -63,6 +89,7 @@ PanelWindow {
         id: panelGlass
 
         anchors.fill: parent
+
         glassRadius: 18
         clip: true
 
@@ -71,21 +98,21 @@ PanelWindow {
             anchors.margins: 12
             spacing: 10
 
+            // ============================================================
+            // HEADER
+            // ============================================================
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 36
-
                 spacing: 8
 
-                // ============================================================
-                // NEW CHAT — visual only for now
-                // ============================================================
-
+                // New chat / Back.
                 Rectangle {
                     Layout.preferredWidth: 32
                     Layout.preferredHeight: 32
 
-                    radius: 9
+                    radius: width / 2
 
                     color:
                         newChatMouse.containsMouse
@@ -98,7 +125,8 @@ PanelWindow {
                     Text {
                         anchors.centerIn: parent
 
-                        text: "󰐕"
+                        // Pencil in chat view, back arrow in settings view.
+                        text: panel.settingsOpen ? "󰁍" : "󰏫"
 
                         color:
                             newChatMouse.containsMouse
@@ -106,7 +134,7 @@ PanelWindow {
                             : Theme.grey1
 
                         font.family: Theme.fontIcons
-                        font.pixelSize: 15
+                        font.pixelSize: panel.settingsOpen ? 15 : 14
                     }
 
                     MouseArea {
@@ -114,21 +142,26 @@ PanelWindow {
 
                         anchors.fill: parent
                         hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
 
-                        // Deliberadamente no clicable todavía.
-                        cursorShape: Qt.ArrowCursor
+                        onClicked: {
+                            if (panel.settingsOpen) {
+                                panel.settingsOpen = false
+                            } else {
+                                service.newConversation()
+                            }
+                        }
                     }
                 }
 
-                // ============================================================
-                // SETTINGS — visual only for now
-                // ============================================================
-
+                // Settings.
                 Rectangle {
-                    Layout.preferredWidth: 32
+                    visible: !panel.settingsOpen
+
+                    Layout.preferredWidth: visible ? 32 : 0
                     Layout.preferredHeight: 32
 
-                    radius: 9
+                    radius: width / 2
 
                     color:
                         settingsMouse.containsMouse
@@ -157,9 +190,10 @@ PanelWindow {
 
                         anchors.fill: parent
                         hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
 
-                        // Deliberadamente no clicable todavía.
-                        cursorShape: Qt.ArrowCursor
+                        onClicked:
+                            panel.settingsOpen = true
                     }
                 }
 
@@ -167,48 +201,15 @@ PanelWindow {
                     Layout.fillWidth: true
                 }
 
-                // ============================================================
-                // CLOSE
-                // ============================================================
-
-                Item {
-                    Layout.preferredWidth: 28
-                    Layout.preferredHeight: 28
-
-                    Text {
-                        anchors.centerIn: parent
-
-                        text: "󰅖"
-
-                        color:
-                            closeMouse.containsMouse
-                            ? Theme.white
-                            : Theme.grey1
-
-                        font.family: Theme.fontIcons
-                        font.pixelSize: 14
-                    }
-
-                    MouseArea {
-                        id: closeMouse
-
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-
-                        onClicked:
-                            service.closePanel()
-                    }
-                }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 1
-                color: Qt.alpha(Theme.white, 0.08)
-            }
+            // ============================================================
+            // CHAT
+            // ============================================================
 
             Item {
+                visible: !panel.settingsOpen
+
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
@@ -220,8 +221,8 @@ PanelWindow {
 
                     clip: true
                     spacing: 6
-                    model: service.messages
 
+                    model: service.messages
                     boundsBehavior: Flickable.StopAtBounds
 
                     delegate: Item {
@@ -241,9 +242,9 @@ PanelWindow {
                             ? userBubble.height + 8
                             : assistantText.implicitHeight + 12
 
-                        // ============================================================
+                        // ====================================================
                         // USER MESSAGE
-                        // ============================================================
+                        // ====================================================
 
                         Rectangle {
                             id: userBubble
@@ -259,18 +260,26 @@ PanelWindow {
 
                             height: userText.implicitHeight + 18
 
-                            radius: 14
+                            radius: 16
 
-                            color: Qt.alpha(
-                                Theme.blue,
-                                0.15
-                            )
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
 
-                            border.width: 1
-                            border.color: Qt.alpha(
-                                Theme.blue,
-                                0.26
-                            )
+                                GradientStop {
+                                    position: 0.0
+                                    color: panel.xavionPink
+                                }
+
+                                GradientStop {
+                                    position: 0.52
+                                    color: panel.xavionRed
+                                }
+
+                                GradientStop {
+                                    position: 1.0
+                                    color: panel.xavionOrange
+                                }
+                            }
 
                             Text {
                                 id: userText
@@ -297,9 +306,9 @@ PanelWindow {
                             }
                         }
 
-                        // ============================================================
+                        // ====================================================
                         // XAVION MESSAGE
-                        // ============================================================
+                        // ====================================================
 
                         Text {
                             id: assistantText
@@ -333,6 +342,88 @@ PanelWindow {
                         }
                     }
 
+                    footer: Item {
+                        width: messageList.width
+                        height: service.awaitingFirstChunk ? 34 : 0
+                        visible: service.awaitingFirstChunk
+
+                        Row {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 5
+
+                            Repeater {
+                                model: 3
+
+                                Rectangle {
+                                    required property int index
+
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+
+                                    color: Theme.grey1
+                                    opacity: 0.35
+
+                                    SequentialAnimation on opacity {
+                                        running: service.awaitingFirstChunk
+                                        loops: Animation.Infinite
+
+                                        PauseAnimation {
+                                            duration: index * 140
+                                        }
+
+                                        NumberAnimation {
+                                            from: 0.35
+                                            to: 1.0
+                                            duration: 220
+                                            easing.type: Easing.InOutQuad
+                                        }
+
+                                        NumberAnimation {
+                                            from: 1.0
+                                            to: 0.35
+                                            duration: 220
+                                            easing.type: Easing.InOutQuad
+                                        }
+
+                                        PauseAnimation {
+                                            duration: (2 - index) * 140
+                                        }
+                                    }
+
+                                    SequentialAnimation on y {
+                                        running: service.awaitingFirstChunk
+                                        loops: Animation.Infinite
+
+                                        PauseAnimation {
+                                            duration: index * 140
+                                        }
+
+                                        NumberAnimation {
+                                            from: 0
+                                            to: -3
+                                            duration: 180
+                                            easing.type: Easing.OutQuad
+                                        }
+
+                                        NumberAnimation {
+                                            from: -3
+                                            to: 0
+                                            duration: 180
+                                            easing.type: Easing.InQuad
+                                        }
+
+                                        PauseAnimation {
+                                            duration: (2 - index) * 140
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     onCountChanged: {
                         Qt.callLater(function() {
                             messageList.positionViewAtEnd()
@@ -340,34 +431,35 @@ PanelWindow {
                     }
                 }
 
+                // ============================================================
+                // EMPTY STATE
+                // ============================================================
+
                 Column {
                     anchors.centerIn: parent
-                    spacing: 10
+                    spacing: 6
 
-                    visible:
-                        service.messages.count === 0
+                    visible: service.messages.count === 0
 
                     Image {
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.horizontalCenter:
+                            parent.horizontalCenter
 
                         width: 54
                         height: 54
 
                         source: "../assets/xavion/chat.png"
+
                         fillMode: Image.PreserveAspectFit
                         smooth: true
+                        mipmap: true
                     }
 
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.horizontalCenter:
+                            parent.horizontalCenter
 
-                        text: service.backendRunning
-                            ? (
-                                service.backendReady
-                                ? "Ask Xavion anything"
-                                : "Starting Xavion…"
-                            )
-                            : "Ask Xavion anything"
+                        text: "Ask Xavion anything"
 
                         color: Theme.grey1
                         font.family: Theme.fontMain
@@ -375,70 +467,107 @@ PanelWindow {
                     }
 
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.horizontalCenter:
+                            parent.horizontalCenter
+
+                        text: service.statusText
+
+                        color:
+                            service.busy
+                            ? Theme.orange
+                            : service.backendReady
+                                ? Theme.green
+                                : Theme.grey1
+
+                        font.family: Theme.fontMain
+                        font.pixelSize: 10
+                    }
+
+                    Text {
+                        anchors.horizontalCenter:
+                            parent.horizontalCenter
 
                         visible: service.lastError.length > 0
-                        width: Math.min(320, implicitWidth)
+
+                        width: 320
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.Wrap
 
                         text: service.lastError
+
                         color: Theme.red
                         font.family: Theme.fontMain
                         font.pixelSize: 10
                     }
                 }
 
-                Rectangle {
-                    anchors.right: parent.right
+            }
 
-                    width: 3
+            // ============================================================
+            // SETTINGS
+            // ============================================================
 
-                    height: Math.max(
-                        24,
-                        messageList.height
-                        * messageList.visibleArea.heightRatio
-                    )
+            Item {
+                visible: panel.settingsOpen
 
-                    y:
-                        messageList.visibleArea.yPosition
-                        * (parent.height - height)
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-                    radius: width / 2
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 8
 
-                    visible:
-                        messageList.contentHeight
-                        > messageList.height
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
 
-                    color: Qt.alpha(Theme.white, 0.22)
+                        text: "Settings"
+
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+
+                        text: "Xavion settings will appear here."
+
+                        color: Theme.grey1
+                        font.family: Theme.fontMain
+                        font.pixelSize: 11
+                    }
                 }
             }
 
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 1
-                color: Qt.alpha(Theme.white, 0.08)
-            }
+            // ============================================================
+            // INPUT
+            // ============================================================
 
             Rectangle {
+                visible: !panel.settingsOpen
                 Layout.fillWidth: true
-                Layout.preferredHeight: 42
+                Layout.preferredHeight: 36
 
-                radius: 13
-                color: Qt.alpha(Theme.bg1, 0.72)
+                radius: height / 2
+
+                color: Qt.alpha(
+                    Theme.bg1,
+                    0.72
+                )
 
                 border.width: 1
 
                 border.color:
                     input.activeFocus
-                    ? Qt.alpha(Theme.orange, 0.55)
+                    ? Qt.alpha(Theme.white, 0.18)
                     : Qt.alpha(Theme.white, 0.10)
 
                 Text {
                     anchors {
                         left: parent.left
                         verticalCenter: parent.verticalCenter
-                        leftMargin: 13
+                        leftMargin: 14
                     }
 
                     visible: input.text.length === 0
@@ -453,6 +582,7 @@ PanelWindow {
                         : "Starting Xavion…"
 
                     color: Theme.grey1
+
                     font.family: Theme.fontMain
                     font.pixelSize: 12
                 }
@@ -463,9 +593,11 @@ PanelWindow {
                     anchors {
                         left: parent.left
                         right: sendButton.left
+
                         top: parent.top
                         bottom: parent.bottom
-                        leftMargin: 13
+
+                        leftMargin: 14
                         rightMargin: 8
                     }
 
@@ -474,19 +606,29 @@ PanelWindow {
                         && !service.busy
 
                     color: Theme.white
-                    selectionColor: Qt.alpha(Theme.blue, 0.45)
-                    selectedTextColor: Theme.white
+
+                    selectionColor:
+                        Qt.alpha(
+                            Theme.blue,
+                            0.45
+                        )
+
+                    selectedTextColor:
+                        Theme.white
 
                     font.family: Theme.fontMain
                     font.pixelSize: 12
 
-                    verticalAlignment: TextInput.AlignVCenter
+                    verticalAlignment:
+                        TextInput.AlignVCenter
+
                     clip: true
 
-                    onAccepted: panel.submitMessage()
+                    onAccepted:
+                        panel.submitMessage()
 
                     Keys.onEscapePressed: function(event) {
-                        service.closePanel()
+                        panel.closePanel()
                         event.accepted = true
                     }
                 }
@@ -497,38 +639,51 @@ PanelWindow {
                     anchors {
                         right: parent.right
                         verticalCenter: parent.verticalCenter
-                        rightMargin: 6
+                        rightMargin: 4
                     }
 
-                    width: 30
-                    height: 30
+                    width: 28
+                    height: 28
 
                     Rectangle {
                         anchors.fill: parent
+
                         radius: width / 2
 
-                        color:
-                            sendMouse.containsMouse
-                            && input.text.trim().length > 0
-                            && service.backendReady
+                        opacity:
+                            service.backendReady
                             && !service.busy
-                            ? Qt.alpha(Theme.orange, 0.25)
-                            : Qt.alpha(Theme.white, 0.06)
+                            && input.text.trim().length > 0
+                            ? 1.0
+                            : 0.34
 
-                        border.width: 1
-                        border.color: Qt.alpha(Theme.white, 0.10)
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+
+                            GradientStop {
+                                position: 0.0
+                                color: panel.xavionPink
+                            }
+
+                            GradientStop {
+                                position: 0.52
+                                color: panel.xavionRed
+                            }
+
+                            GradientStop {
+                                position: 1.0
+                                color: panel.xavionOrange
+                            }
+                        }
                     }
 
                     Text {
                         anchors.centerIn: parent
-                        text: "󰒊"
+                        anchors.verticalCenterOffset: 1
 
-                        color:
-                            input.text.trim().length > 0
-                            && service.backendReady
-                            && !service.busy
-                            ? Theme.white
-                            : Theme.grey1
+                        text: "󰁝"
+
+                        color: Theme.white
 
                         font.family: Theme.fontIcons
                         font.pixelSize: 15
@@ -536,16 +691,19 @@ PanelWindow {
 
                     MouseArea {
                         id: sendMouse
+
                         anchors.fill: parent
                         hoverEnabled: true
 
                         cursorShape:
                             service.backendReady
                             && !service.busy
+                            && input.text.trim().length > 0
                             ? Qt.PointingHandCursor
                             : Qt.ArrowCursor
 
-                        onClicked: panel.submitMessage()
+                        onClicked:
+                            panel.submitMessage()
                     }
                 }
             }
@@ -553,7 +711,7 @@ PanelWindow {
     }
 
     Connections {
-        target: XavionService
+        target: service
 
         function onStreamUpdated() {
             Qt.callLater(function() {
@@ -562,12 +720,17 @@ PanelWindow {
         }
 
         function onBackendReadyChanged() {
-            if (
-                panel.visible
-                && service.backendReady
-            ) {
+            if (service.backendReady) {
                 Qt.callLater(function() {
                     input.forceActiveFocus()
+                })
+            }
+        }
+
+        function onAwaitingFirstChunkChanged() {
+            if (service.awaitingFirstChunk) {
+                Qt.callLater(function() {
+                    messageList.positionViewAtEnd()
                 })
             }
         }
