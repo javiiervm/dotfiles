@@ -20,11 +20,6 @@ PanelWindow {
         service.closePanel()
     }
 
-    // Xavion accent gradient used by user messages and the send button.
-    readonly property color xavionPink: "#F52765"
-    readonly property color xavionRed: "#FF4A3D"
-    readonly property color xavionOrange: "#FF8A18"
-
     implicitWidth: 390
     implicitHeight: 460
 
@@ -267,17 +262,17 @@ PanelWindow {
 
                                 GradientStop {
                                     position: 0.0
-                                    color: panel.xavionPink
+                                    color: service.gradientStart
                                 }
 
                                 GradientStop {
                                     position: 0.52
-                                    color: panel.xavionRed
+                                    color: service.gradientMid
                                 }
 
                                 GradientStop {
                                     position: 1.0
-                                    color: panel.xavionOrange
+                                    color: service.gradientEnd
                                 }
                             }
 
@@ -514,12 +509,19 @@ PanelWindow {
                 Layout.fillHeight: true
 
                 Column {
-                    anchors.centerIn: parent
-                    spacing: 8
+                    anchors {
+                        top: parent.top
+                        left: parent.left
+                        right: parent.right
+
+                        topMargin: 10
+                        leftMargin: 8
+                        rightMargin: 8
+                    }
+
+                    spacing: 14
 
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-
                         text: "Settings"
 
                         color: Theme.white
@@ -528,14 +530,133 @@ PanelWindow {
                         font.bold: true
                     }
 
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
+                    Column {
+                        width: parent.width
+                        spacing: 10
 
-                        text: "Xavion settings will appear here."
+                        Text {
+                            text: "Message theme"
 
-                        color: Theme.grey1
-                        font.family: Theme.fontMain
-                        font.pixelSize: 11
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        Text {
+                            text: "Choose the gradient used for your messages and send button."
+
+                            color: Theme.grey1
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                        }
+
+                        Row {
+                            anchors.horizontalCenter: parent.horizontalCenter
+
+                            spacing: 12
+
+                            Repeater {
+                                model: service.gradientPresets.length
+
+                                Item {
+                                    required property int index
+
+                                    width: 44
+                                    height: 44
+
+                                    Rectangle {
+                                        anchors.centerIn: parent
+
+                                        width: 40
+                                        height: 40
+                                        radius: width / 2
+
+                                        gradient: Gradient {
+                                            orientation: Gradient.Horizontal
+
+                                            GradientStop {
+                                                position: 0.0
+                                                color:
+                                                    service.gradientPresets[
+                                                        index
+                                                    ].start
+                                            }
+
+                                            GradientStop {
+                                                position: 0.52
+                                                color:
+                                                    service.gradientPresets[
+                                                        index
+                                                    ].mid
+                                            }
+
+                                            GradientStop {
+                                                position: 1.0
+                                                color:
+                                                    service.gradientPresets[
+                                                        index
+                                                    ].end
+                                            }
+                                        }
+
+                                        border.width:
+                                            service.gradientIndex === index
+                                            ? 2
+                                            : 1
+
+                                        border.color:
+                                            service.gradientIndex === index
+                                            ? Theme.white
+                                            : Qt.alpha(Theme.white, 0.18)
+                                    }
+
+                                    Rectangle {
+                                        anchors.centerIn: parent
+
+                                        width: 44
+                                        height: 44
+                                        radius: width / 2
+
+                                        color: "transparent"
+
+                                        border.width:
+                                            service.gradientIndex === index
+                                            ? 1
+                                            : 0
+
+                                        border.color:
+                                            Qt.alpha(
+                                                Theme.white,
+                                                0.30
+                                            )
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+
+                                        onClicked:
+                                            service.setGradient(index)
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+
+                            text:
+                                service.gradientPresets[
+                                    service.gradientIndex
+                                ].name
+
+                            color: Theme.grey1
+                            font.family: Theme.fontMain
+                            font.pixelSize: 10
+                        }
                     }
                 }
             }
@@ -662,17 +783,17 @@ PanelWindow {
 
                             GradientStop {
                                 position: 0.0
-                                color: panel.xavionPink
+                                color: service.gradientStart
                             }
 
                             GradientStop {
                                 position: 0.52
-                                color: panel.xavionRed
+                                color: service.gradientMid
                             }
 
                             GradientStop {
                                 position: 1.0
-                                color: panel.xavionOrange
+                                color: service.gradientEnd
                             }
                         }
                     }

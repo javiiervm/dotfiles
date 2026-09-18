@@ -14,6 +14,62 @@ Scope {
     property string lastError: ""
     property int currentAssistantIndex: -1
 
+    // Persisted visual theme for user bubbles + send button.
+    property int gradientIndex: 0
+    property int pendingGradientSave: -1
+
+    readonly property var gradientPresets: [
+        {
+            name: "Xavion",
+            start: "#F52765",
+            mid: "#FF4A3D",
+            end: "#FF8A18"
+        },
+        {
+            name: "Sunset",
+            start: "#FF5F6D",
+            mid: "#FF8A5B",
+            end: "#FFC371"
+        },
+        {
+            name: "Violet",
+            start: "#7C3AED",
+            mid: "#A855F7",
+            end: "#EC4899"
+        },
+        {
+            name: "Ocean",
+            start: "#2563EB",
+            mid: "#0EA5E9",
+            end: "#22D3EE"
+        },
+        {
+            name: "Emerald",
+            start: "#059669",
+            mid: "#10B981",
+            end: "#84CC16"
+        },
+        {
+            name: "Midnight",
+            start: "#4338CA",
+            mid: "#6366F1",
+            end: "#8B5CF6"
+        }
+    ]
+
+    readonly property color gradientStart:
+        gradientPresets[gradientIndex].start
+
+    readonly property color gradientMid:
+        gradientPresets[gradientIndex].mid
+
+    readonly property color gradientEnd:
+        gradientPresets[gradientIndex].end
+
+    readonly property string gradientStatePath:
+        Quickshell.env("HOME")
+        + "/.config/quickshell/state/xavion-gradient"
+
     property alias messages: messageModel
 
     readonly property string configuredRoot:
@@ -52,6 +108,52 @@ Scope {
 
     ListModel {
         id: messageModel
+    }
+
+    function setGradient(index): void {
+        var value = Math.max(
+            0,
+            Math.min(
+                gradientPresets.length - 1,
+                Number(index)
+            )
+        )
+
+        if (isNaN(value))
+            return
+
+        value = Math.round(value)
+
+        if (gradientIndex === value)
+            return
+
+        gradientIndex = value
+        persistGradient()
+    }
+
+    function persistGradient(): void {
+        pendingGradientSave = gradientIndex
+
+        if (!gradientSave.running)
+            flushGradientSave()
+    }
+
+    function flushGradientSave(): void {
+        if (pendingGradientSave < 0)
+            return
+
+        var value = pendingGradientSave
+        pendingGradientSave = -1
+
+        gradientSave.command = [
+            "bash",
+            "-c",
+            "mkdir -p \"$HOME/.config/quickshell/state\" && "
+            + "printf '%s\\n' '" + value + "' "
+            + "> \"$HOME/.config/quickshell/state/xavion-gradient\""
+        ]
+
+        gradientSave.running = true
     }
 
     function ensureBackend(): void {
@@ -283,6 +385,42 @@ Scope {
             busy = false
             streamUpdated()
             break
+        }
+    }
+
+    Process {
+        id: gradientLoad
+
+        running: true
+
+        command: [
+            "bash",
+            "-c",
+            "file=\"$HOME/.config/quickshell/state/xavion-gradient\"; "
+            + "if [ -r \"$file\" ]; then cat \"$file\"; else echo 0; fi"
+        ]
+
+        stdout: SplitParser {
+            onRead: function(data) {
+                var value = parseInt(String(data).trim())
+
+                if (
+                    !isNaN(value)
+                    && value >= 0
+                    && value < service.gradientPresets.length
+                ) {
+                    service.gradientIndex = value
+                }
+            }
+        }
+    }
+
+    Process {
+        id: gradientSave
+
+        onRunningChanged: {
+            if (!running && service.pendingGradientSave >= 0)
+                service.flushGradientSave()
         }
     }
 
