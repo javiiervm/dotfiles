@@ -9,14 +9,42 @@ Scope {
     property bool backendReady: false
     property bool busy: false
     property bool awaitingFirstChunk: false
+    property bool settingsLoaded: false
 
     property string activeModel: ""
     property string lastError: ""
     property int currentAssistantIndex: -1
 
-    // Persisted visual theme for user bubbles + send button.
+    // ============================================================
+    // PERSISTED SETTINGS
+    // ============================================================
+
     property int gradientIndex: 0
-    property int pendingGradientSave: -1
+
+    // These values mirror the options exposed by Xavion dev.
+    property string toneMode: "adaptive"
+    property string intentMode: "auto"
+
+    // Empty means "use the backend default" until settings are loaded.
+    property string selectedModel: ""
+
+    property var availableModels: []
+
+    readonly property var toneOptions: [
+        { value: "adaptive", label: "Adaptive" },
+        { value: "casual", label: "Casual" },
+        { value: "formal", label: "Formal" },
+        { value: "sarcastic", label: "Sarcastic" },
+        { value: "concise", label: "Concise" }
+    ]
+
+    readonly property var intentOptions: [
+        { value: "auto", label: "Auto" },
+        { value: "default", label: "General" },
+        { value: "math", label: "Math" },
+        { value: "code", label: "Code" },
+        { value: "translate", label: "Translate" }
+    ]
 
     readonly property var gradientPresets: [
         {
@@ -66,10 +94,6 @@ Scope {
     readonly property color gradientEnd:
         gradientPresets[gradientIndex].end
 
-    readonly property string gradientStatePath:
-        Quickshell.env("HOME")
-        + "/.config/quickshell/state/xavion-gradient"
-
     property alias messages: messageModel
 
     readonly property string configuredRoot:
@@ -110,51 +134,157 @@ Scope {
         id: messageModel
     }
 
-    function setGradient(index): void {
-        var value = Math.max(
-            0,
-            Math.min(
-                gradientPresets.length - 1,
-                Number(index)
-            )
-        )
+    // ============================================================
+    // SETTINGS HELPERS
+    // ============================================================
 
-        if (isNaN(value))
-            return
+    function _hasModel(model): bool {
+        for (var i = 0; i < availableModels.length; ++i) {
+            if (String(availableModels[i]) === String(model))
+                return true
+        }
 
-        value = Math.round(value)
-
-        if (gradientIndex === value)
-            return
-
-        gradientIndex = value
-        persistGradient()
+        return false
     }
 
-    function persistGradient(): void {
-        pendingGradientSave = gradientIndex
+    function _writeSetting(process, fileName, value): void {
+        // Values are passed as $1 rather than interpolated into the shell
+        // command, so model names and future values remain safely quoted.
+        process.running = false
 
-        if (!gradientSave.running)
-            flushGradientSave()
-    }
-
-    function flushGradientSave(): void {
-        if (pendingGradientSave < 0)
-            return
-
-        var value = pendingGradientSave
-        pendingGradientSave = -1
-
-        gradientSave.command = [
+        process.command = [
             "bash",
             "-c",
-            "mkdir -p \"$HOME/.config/quickshell/state\" && "
-            + "printf '%s\\n' '" + value + "' "
-            + "> \"$HOME/.config/quickshell/state/xavion-gradient\""
+            "mkdir -p \"$HOME/.config/quickshell/state\"; "
+            + "printf '%s\\n' \"$1\" "
+            + "> \"$HOME/.config/quickshell/state/" + fileName + "\"",
+            "_",
+            String(value)
         ]
 
-        gradientSave.running = true
+        process.running = true
     }
+
+    function setGradient(index): void {
+        var value = Math.round(Number(index))
+
+        if (
+            isNaN(value)
+            || value < 0
+            || value >= gradientPresets.length
+        ) {
+            return
+        }
+
+        gradientIndex = value
+
+        _writeSetting(
+            gradientSave,
+            "xavion-gradient",
+            gradientIndex
+        )
+    }
+
+    function setTone(value): void {
+        var target = String(value)
+
+        for (var i = 0; i < toneOptions.length; ++i) {
+            if (toneOptions[i].value === target) {
+                toneMode = target
+
+                _writeSetting(
+                    toneSave,
+                    "xavion-tone",
+                    toneMode
+                )
+
+                return
+            }
+        }
+    }
+
+    function setIntentMode(value): void {
+        var target = String(value)
+
+        for (var i = 0; i < intentOptions.length; ++i) {
+            if (intentOptions[i].value === target) {
+                intentMode = target
+
+                _writeSetting(
+                    intentSave,
+                    "xavion-mode",
+                    intentMode
+                )
+
+                return
+            }
+        }
+    }
+
+    function setModel(value): void {
+        var target = String(value)
+
+        if (!_hasModel(target))
+            return
+
+        selectedModel = target
+
+        _writeSetting(
+            modelSave,
+            "xavion-model",
+            selectedModel
+        )
+
+        if (backendReady) {
+            sendCommand({
+                type: "set_model",
+                model: selectedModel
+            })
+        }
+    }
+
+    function refreshModels(): void {
+        if (backendReady) {
+            sendCommand({
+                type: "list_models"
+            })
+        }
+    }
+
+    function applyModelPreference(): void {
+        if (!backendReady || !settingsLoaded)
+            return
+
+        if (selectedModel.length === 0) {
+            selectedModel = activeModel
+            return
+        }
+
+        if (_hasModel(selectedModel)) {
+            if (selectedModel !== activeModel) {
+                sendCommand({
+                    type: "set_model",
+                    model: selectedModel
+                })
+            }
+
+            return
+        }
+
+        // A saved model disappeared from Ollama. Fall back to the current
+        // backend model and persist that valid choice.
+        selectedModel = activeModel
+
+        _writeSetting(
+            modelSave,
+            "xavion-model",
+            selectedModel
+        )
+    }
+
+    // ============================================================
+    // BACKEND / PANEL
+    // ============================================================
 
     function ensureBackend(): void {
         if (!bridge.running)
@@ -202,8 +332,6 @@ Scope {
             streaming: false
         })
 
-        // Do not create Xavion's message yet. While the backend is preparing
-        // the first token, the panel shows the animated typing indicator.
         currentAssistantIndex = -1
         awaitingFirstChunk = true
         busy = true
@@ -211,8 +339,8 @@ Scope {
         if (!sendCommand({
             type: "chat",
             message: content,
-            intent_mode: "auto",
-            tone_mode: "casual"
+            intent_mode: intentMode,
+            tone_mode: toneMode
         })) {
             awaitingFirstChunk = false
             busy = false
@@ -260,6 +388,31 @@ Scope {
             if (event.model !== undefined)
                 activeModel = String(event.model)
 
+            if (event.models !== undefined)
+                availableModels = event.models
+
+            applyModelPreference()
+            break
+
+        case "models":
+            if (event.models !== undefined)
+                availableModels = event.models
+
+            if (event.active_model !== undefined)
+                activeModel = String(event.active_model)
+
+            applyModelPreference()
+            break
+
+        case "model_changed":
+            if (event.model !== undefined) {
+                activeModel = String(event.model)
+                selectedModel = activeModel
+            }
+
+            if (event.models !== undefined)
+                availableModels = event.models
+
             break
 
         case "start":
@@ -276,8 +429,6 @@ Scope {
             if (chunk.length === 0)
                 break
 
-            // First streamed token: remove the typing indicator and only now
-            // create Xavion's visible response (with the streaming cursor).
             if (currentAssistantIndex < 0) {
                 messageModel.append({
                     role: "assistant",
@@ -353,9 +504,7 @@ Scope {
                     "streaming",
                     false
                 )
-            }
-
-            if (currentAssistantIndex < 0) {
+            } else if (busy) {
                 messageModel.append({
                     role: "assistant",
                     text: "Error: " + lastError,
@@ -388,41 +537,88 @@ Scope {
         }
     }
 
+    // ============================================================
+    // SETTINGS PERSISTENCE
+    // ============================================================
+
     Process {
-        id: gradientLoad
+        id: settingsLoad
 
         running: true
 
         command: [
             "bash",
             "-c",
-            "file=\"$HOME/.config/quickshell/state/xavion-gradient\"; "
-            + "if [ -r \"$file\" ]; then cat \"$file\"; else echo 0; fi"
+            "dir=\"$HOME/.config/quickshell/state\"; "
+            + "readv() { "
+            + "  file=\"$dir/$1\"; "
+            + "  fallback=\"$2\"; "
+            + "  if [ -r \"$file\" ]; then cat \"$file\"; else printf '%s' \"$fallback\"; fi; "
+            + "}; "
+            + "printf 'gradient|%s\\n' \"$(readv xavion-gradient 0)\"; "
+            + "printf 'tone|%s\\n' \"$(readv xavion-tone adaptive)\"; "
+            + "printf 'mode|%s\\n' \"$(readv xavion-mode auto)\"; "
+            + "printf 'model|%s\\n' \"$(readv xavion-model '')\""
         ]
 
         stdout: SplitParser {
             onRead: function(data) {
-                var value = parseInt(String(data).trim())
+                var line = String(data).trim()
+                var separator = line.indexOf("|")
 
-                if (
-                    !isNaN(value)
-                    && value >= 0
-                    && value < service.gradientPresets.length
-                ) {
-                    service.gradientIndex = value
+                if (separator < 0)
+                    return
+
+                var key = line.substring(0, separator)
+                var value = line.substring(separator + 1)
+
+                if (key === "gradient") {
+                    var index = parseInt(value)
+
+                    if (
+                        !isNaN(index)
+                        && index >= 0
+                        && index < service.gradientPresets.length
+                    ) {
+                        service.gradientIndex = index
+                    }
+                } else if (key === "tone") {
+                    service.toneMode = value
+                } else if (key === "mode") {
+                    service.intentMode = value
+                } else if (key === "model") {
+                    service.selectedModel = value
                 }
+            }
+        }
+
+        onRunningChanged: {
+            if (!running) {
+                service.settingsLoaded = true
+                service.applyModelPreference()
             }
         }
     }
 
     Process {
         id: gradientSave
-
-        onRunningChanged: {
-            if (!running && service.pendingGradientSave >= 0)
-                service.flushGradientSave()
-        }
     }
+
+    Process {
+        id: toneSave
+    }
+
+    Process {
+        id: intentSave
+    }
+
+    Process {
+        id: modelSave
+    }
+
+    // ============================================================
+    // XAVION BRIDGE
+    // ============================================================
 
     Process {
         id: bridge
@@ -450,11 +646,14 @@ Scope {
                 var message = String(data).trim()
 
                 if (message.length > 0)
-                    console.warn("Xavion backend:", message)
+                    console.warn(
+                        "Xavion backend:",
+                        message
+                    )
             }
         }
 
-        onExited: function(exitCode, exitStatus) {
+        onExited: function(exitCode) {
             service.backendReady = false
             service.awaitingFirstChunk = false
             service.busy = false

@@ -13,27 +13,145 @@ PanelWindow {
     required property var service
 
     property bool settingsOpen: false
+    property bool expanded: false
+    property string reservedMonitor: ""
+
+    readonly property bool onHdmi:
+        panel.screen && panel.screen.name === "HDMI-A-1"
+
+    readonly property int normalOuterTop:
+        onHdmi ? 10 : 2
+
+    readonly property int normalOuterRight:
+        onHdmi ? 10 : 12
+
+    readonly property int normalOuterBottom:
+        onHdmi ? 10 : 12
+
+    readonly property int normalOuterLeft:
+        onHdmi ? 10 : 12
+
+    readonly property int normalInnerGap:
+        onHdmi ? 4 : 5
+
+    readonly property var focusedWorkspaceRef:
+        Hyprland.focusedWorkspace
+
+    function applyWorkspaceReservation(expand, monitorName): void {
+        var targetMonitor =
+            monitorName && monitorName.length > 0
+            ? monitorName
+            : (
+                panel.screen
+                ? panel.screen.name
+                : ""
+            )
+
+        if (targetMonitor.length === 0)
+            return
+
+        var helperPath =
+            Quickshell.env("HOME")
+            + "/.config/hypr/xavion_sidebar.lua"
+
+        var lua =
+            'local x = dofile("'
+            + helperPath
+            + '"); x.set("'
+            + targetMonitor
+            + '", '
+            + (expand ? "true" : "false")
+            + ', '
+            + panel.implicitWidth
+            + ', '
+            + (
+                targetMonitor === "HDMI-A-1"
+                ? 10
+                : 12
+            )
+            + ')'
+
+        Quickshell.execDetached([
+            "hyprctl",
+            "eval",
+            lua
+        ])
+    }
 
     function closePanel(): void {
         settingsOpen = false
-        focusGrab.active = false
+
+        if (expanded) {
+            applyWorkspaceReservation(false, reservedMonitor)
+            expanded = false
+            reservedMonitor = ""
+        }
+
         service.closePanel()
     }
 
-    implicitWidth: 390
-    implicitHeight: 460
+    function enterExpandedMode(): void {
+        if (expanded)
+            return
+
+        reservedMonitor =
+            panel.screen
+            ? panel.screen.name
+            : ""
+
+        expanded = true
+        applyWorkspaceReservation(true, reservedMonitor)
+
+        Qt.callLater(function() {
+            input.forceActiveFocus()
+        })
+    }
+
+    function leaveExpandedMode(): void {
+        if (!expanded)
+            return
+
+        applyWorkspaceReservation(false, reservedMonitor)
+
+        expanded = false
+        reservedMonitor = ""
+
+        Qt.callLater(function() {
+            input.forceActiveFocus()
+        })
+    }
+
+    function toggleExpandedMode(): void {
+        if (expanded)
+            leaveExpandedMode()
+        else
+            enterExpandedMode()
+    }
+
+    onFocusedWorkspaceRefChanged: {
+        if (expanded)
+            applyWorkspaceReservation(true, reservedMonitor)
+    }
+
+    implicitWidth: 450
+    implicitHeight: 550
 
     anchors {
         top: true
+        bottom: expanded
         left: true
     }
 
     margins {
-        top: 0
-        left: 12
+        top: expanded ? normalOuterTop : 0
+        bottom: expanded ? normalOuterBottom : 0
+        left: normalOuterLeft
     }
 
+    // Never reserve layer-shell space: other Quickshell surfaces keep the
+    // full monitor. Only Hyprland workspaces are shifted by xavion_sidebar.lua.
     exclusiveZone: 0
+
     color: "transparent"
 
     WlrLayershell.layer: WlrLayershell.Overlay
@@ -54,17 +172,23 @@ PanelWindow {
 
         Qt.callLater(function() {
             input.forceActiveFocus()
-            focusGrab.active = true
         })
+    }
+
+    Component.onDestruction: {
+        if (expanded && reservedMonitor.length > 0)
+            applyWorkspaceReservation(false, reservedMonitor)
     }
 
     HyprlandFocusGrab {
         id: focusGrab
 
+        // Outside-click closing is only wanted in compact mode.
+        active: !panel.expanded
         windows: [ panel ]
 
         onCleared: {
-            if (service.panelOpen)
+            if (service.panelOpen && !panel.expanded)
                 panel.closePanel()
         }
     }
@@ -196,6 +320,90 @@ PanelWindow {
                     Layout.fillWidth: true
                 }
 
+                // Expand to sidebar / restore compact panel.
+                Rectangle {
+                    Layout.preferredWidth: 32
+                    Layout.preferredHeight: 32
+
+                    radius: width / 2
+
+                    color:
+                        zoomMouse.containsMouse
+                        ? Qt.alpha(Theme.white, 0.10)
+                        : "transparent"
+
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.white, 0.10)
+
+                    Item {
+                        anchors.centerIn: parent
+                        width: 16
+                        height: 16
+
+                        // Compact mode: one square -> enter normal-window mode.
+                        Rectangle {
+                            visible: !panel.expanded
+
+                            anchors.centerIn: parent
+                            width: 11
+                            height: 11
+                            radius: 2
+
+                            color: "transparent"
+                            border.width: 1
+                            border.color:
+                                zoomMouse.containsMouse
+                                ? Theme.white
+                                : Theme.grey1
+                        }
+
+                        // Window mode: overlapping squares -> restore compact mode.
+                        Rectangle {
+                            visible: panel.expanded
+
+                            x: 2
+                            y: 2
+                            width: 9
+                            height: 9
+                            radius: 1.5
+
+                            color: "transparent"
+                            border.width: 1
+                            border.color:
+                                zoomMouse.containsMouse
+                                ? Theme.white
+                                : Theme.grey1
+                        }
+
+                        Rectangle {
+                            visible: panel.expanded
+
+                            x: 5
+                            y: 5
+                            width: 9
+                            height: 9
+                            radius: 1.5
+
+                            color: Qt.alpha(Theme.bg1, 0.92)
+                            border.width: 1
+                            border.color:
+                                zoomMouse.containsMouse
+                                ? Theme.white
+                                : Theme.grey1
+                        }
+                    }
+
+                    MouseArea {
+                        id: zoomMouse
+
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+
+                        onClicked:
+                            panel.toggleExpandedMode()
+                    }
+                }
             }
 
             // ============================================================
@@ -537,8 +745,7 @@ PanelWindow {
                     }
 
                     Text {
-                        anchors.horizontalCenter:
-                            parent.horizontalCenter
+                        anchors.horizontalCenter: parent.horizontalCenter
 
                         visible: service.lastError.length > 0
 
@@ -553,7 +760,6 @@ PanelWindow {
                         font.pixelSize: 10
                     }
                 }
-
             }
 
             // ============================================================
