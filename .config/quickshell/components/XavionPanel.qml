@@ -34,6 +34,26 @@ PanelWindow {
     readonly property int normalInnerGap:
         onHdmi ? 4 : 5
 
+    // Expanded background glows follow the currently selected message theme.
+    readonly property color expandedGlowStart:
+        Qt.alpha(service.gradientStart, 0.050)
+
+    readonly property color expandedGlowMid:
+        Qt.alpha(service.gradientMid, 0.055)
+
+    readonly property color expandedGlowEnd:
+        Qt.alpha(service.gradientEnd, 0.040)
+
+    readonly property color expandedGlowStartSoft:
+        Qt.alpha(service.gradientStart, 0.030)
+
+    readonly property color expandedGlowMidSoft:
+        Qt.alpha(service.gradientMid, 0.028)
+
+    readonly property color expandedGlowEndSoft:
+        Qt.alpha(service.gradientEnd, 0.020)
+
+
     readonly property var focusedWorkspaceRef:
         Hyprland.focusedWorkspace
 
@@ -194,7 +214,7 @@ PanelWindow {
     }
 
     BackgroundEffect.blurRegion:
-        Glass.blurEnabled
+        Glass.blurEnabled && !panel.expanded
         ? panelBlurRegion
         : null
 
@@ -209,8 +229,236 @@ PanelWindow {
 
         anchors.fill: parent
 
+        // Compact mode keeps the normal dotfiles glass material.
+        // Expanded mode becomes Xavion's own opaque surface.
+        glassTint: panel.expanded ? "#050506" : Glass.tint
+        glassOpacity: panel.expanded ? 1.0 : Glass.opacity
         glassRadius: 18
+        showBorder: !panel.expanded
+        showHighlight: !panel.expanded
         clip: true
+
+        // ============================================================
+        // EXPANDED-ONLY XAVION BACKGROUND
+        // ============================================================
+        //
+        // Compact mode keeps the normal glass material.
+        // Expanded mode gets an almost-black background with a couple of very
+        // soft circular ambient glows in Xavion's palette. The glows are made
+        // only from a few translucent circles and slow position/scale
+        // animations, which is much lighter than running a continuously
+        // blurred shader-based effect.
+        Item {
+            id: expandedBackground
+
+            anchors.fill: parent
+            visible: panel.expanded
+
+            Rectangle {
+                anchors.fill: parent
+                radius: panelGlass.radius
+                color: "#050506"
+            }
+
+            Item {
+                id: glowCanvas
+
+                anchors.fill: parent
+                visible: panel.expanded
+
+                // Warm orange/red glow near the upper-left area.
+                Item {
+                    id: warmGlow
+
+                    width: 460
+                    height: 460
+
+                    x: -150
+                    y: -80
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 460
+                        height: 460
+                        radius: width / 2
+                        color: panel.expandedGlowStart
+                    }
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 340
+                        height: 340
+                        radius: width / 2
+                        color: panel.expandedGlowMid
+                    }
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 220
+                        height: 220
+                        radius: width / 2
+                        color: panel.expandedGlowEnd
+                    }
+
+                    SequentialAnimation on x {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: -150
+                            to: -90
+                            duration: 24000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: -90
+                            to: -150
+                            duration: 24000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+
+                    SequentialAnimation on y {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: -80
+                            to: -20
+                            duration: 32000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: -20
+                            to: -80
+                            duration: 32000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+
+                    SequentialAnimation on scale {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: 0.98
+                            to: 1.04
+                            duration: 28000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: 1.04
+                            to: 0.98
+                            duration: 28000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+                }
+
+                // Secondary magenta glow lower on the right side.
+                Item {
+                    id: roseGlow
+
+                    width: 340
+                    height: 340
+
+                    x: panelGlass.width - 240
+                    y: panelGlass.height - 430
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 340
+                        height: 340
+                        radius: width / 2
+                        color: panel.expandedGlowStartSoft
+                    }
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 220
+                        height: 220
+                        radius: width / 2
+                        color: panel.expandedGlowMidSoft
+                    }
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 120
+                        height: 120
+                        radius: width / 2
+                        color: panel.expandedGlowEndSoft
+                    }
+
+                    SequentialAnimation on x {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: panelGlass.width - 240
+                            to: panelGlass.width - 285
+                            duration: 30000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: panelGlass.width - 285
+                            to: panelGlass.width - 240
+                            duration: 30000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+
+                    SequentialAnimation on y {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: panelGlass.height - 430
+                            to: panelGlass.height - 360
+                            duration: 36000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: panelGlass.height - 360
+                            to: panelGlass.height - 430
+                            duration: 36000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+
+                    SequentialAnimation on scale {
+                        running: panel.expanded && panel.visible
+                        loops: Animation.Infinite
+
+                        NumberAnimation {
+                            from: 0.96
+                            to: 1.02
+                            duration: 34000
+                            easing.type: Easing.InOutSine
+                        }
+
+                        NumberAnimation {
+                            from: 1.02
+                            to: 0.96
+                            duration: 34000
+                            easing.type: Easing.InOutSine
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                radius: panelGlass.radius
+                color: "transparent"
+                border.width: 1
+                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.070)
+            }
+        }
 
         ColumnLayout {
             anchors.fill: parent
