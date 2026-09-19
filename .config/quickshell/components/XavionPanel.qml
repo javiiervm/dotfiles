@@ -559,8 +559,12 @@ PanelWindow {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
 
-                        onClicked:
+                        onClicked: {
                             panel.settingsOpen = true
+
+                            if (service.backendReady)
+                                service.refreshModels()
+                        }
                     }
                 }
 
@@ -1020,155 +1024,639 @@ PanelWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                Column {
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
+                Flickable {
+                    id: settingsFlick
 
-                        topMargin: 10
-                        leftMargin: 8
-                        rightMargin: 8
-                    }
+                    anchors.fill: parent
 
-                    spacing: 14
-
-                    Text {
-                        text: "Settings"
-
-                        color: Theme.white
-                        font.family: Theme.fontMain
-                        font.pixelSize: 16
-                        font.bold: true
-                    }
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    contentWidth: width
+                    contentHeight: settingsColumn.implicitHeight + 20
 
                     Column {
-                        width: parent.width
-                        spacing: 10
+                        id: settingsColumn
+
+                        x: 8
+                        y: 10
+
+                        width: settingsFlick.width - 16
+                        spacing: 18
 
                         Text {
-                            text: "Message theme"
+                            text: "Settings"
 
                             color: Theme.white
                             font.family: Theme.fontMain
-                            font.pixelSize: 12
+                            font.pixelSize: 16
                             font.bold: true
                         }
 
-                        Text {
-                            text: "Choose the gradient used for your messages and send button."
+                        // ====================================================
+                        // MESSAGE THEME
+                        // ====================================================
 
-                            color: Theme.grey1
-                            font.family: Theme.fontMain
-                            font.pixelSize: 10
-                        }
+                        Column {
+                            width: parent.width
+                            spacing: 10
 
-                        Row {
-                            anchors.horizontalCenter: parent.horizontalCenter
+                            Text {
+                                text: "Message theme"
 
-                            spacing: 12
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
 
-                            Repeater {
-                                model: service.gradientPresets.length
+                            Text {
+                                width: parent.width
 
-                                Item {
-                                    required property int index
+                                text: "Choose the gradient used for your messages, send button and expanded background."
 
-                                    width: 44
-                                    height: 44
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
 
-                                    Rectangle {
-                                        anchors.centerIn: parent
+                                wrapMode: Text.Wrap
+                            }
 
-                                        width: 40
-                                        height: 40
-                                        radius: width / 2
+                            Row {
+                                anchors.horizontalCenter:
+                                    parent.horizontalCenter
 
-                                        gradient: Gradient {
-                                            orientation: Gradient.Horizontal
+                                spacing: 12
 
-                                            GradientStop {
-                                                position: 0.0
-                                                color:
-                                                    service.gradientPresets[
-                                                        index
-                                                    ].start
-                                            }
+                                Repeater {
+                                    model: service.gradientPresets.length
 
-                                            GradientStop {
-                                                position: 0.52
-                                                color:
-                                                    service.gradientPresets[
-                                                        index
-                                                    ].mid
-                                            }
-
-                                            GradientStop {
-                                                position: 1.0
-                                                color:
-                                                    service.gradientPresets[
-                                                        index
-                                                    ].end
-                                            }
-                                        }
-
-                                        border.width:
-                                            service.gradientIndex === index
-                                            ? 2
-                                            : 1
-
-                                        border.color:
-                                            service.gradientIndex === index
-                                            ? Theme.white
-                                            : Qt.alpha(Theme.white, 0.18)
-                                    }
-
-                                    Rectangle {
-                                        anchors.centerIn: parent
+                                    Item {
+                                        required property int index
 
                                         width: 44
                                         height: 44
-                                        radius: width / 2
 
-                                        color: "transparent"
+                                        Rectangle {
+                                            anchors.centerIn: parent
 
-                                        border.width:
-                                            service.gradientIndex === index
-                                            ? 1
-                                            : 0
+                                            width: 40
+                                            height: 40
+                                            radius: width / 2
+
+                                            gradient: Gradient {
+                                                orientation:
+                                                    Gradient.Horizontal
+
+                                                GradientStop {
+                                                    position: 0.0
+                                                    color:
+                                                        service.gradientPresets[
+                                                            index
+                                                        ].start
+                                                }
+
+                                                GradientStop {
+                                                    position: 0.52
+                                                    color:
+                                                        service.gradientPresets[
+                                                            index
+                                                        ].mid
+                                                }
+
+                                                GradientStop {
+                                                    position: 1.0
+                                                    color:
+                                                        service.gradientPresets[
+                                                            index
+                                                        ].end
+                                                }
+                                            }
+
+                                            border.width:
+                                                service.gradientIndex === index
+                                                ? 2
+                                                : 1
+
+                                            border.color:
+                                                service.gradientIndex === index
+                                                ? Theme.white
+                                                : Qt.alpha(
+                                                    Theme.white,
+                                                    0.18
+                                                )
+                                        }
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+
+                                            width: 44
+                                            height: 44
+                                            radius: width / 2
+
+                                            color: "transparent"
+
+                                            border.width:
+                                                service.gradientIndex === index
+                                                ? 1
+                                                : 0
+
+                                            border.color:
+                                                Qt.alpha(
+                                                    Theme.white,
+                                                    0.30
+                                                )
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+
+                                            hoverEnabled: true
+                                            cursorShape:
+                                                Qt.PointingHandCursor
+
+                                            onClicked:
+                                                service.setGradient(index)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                anchors.horizontalCenter:
+                                    parent.horizontalCenter
+
+                                text:
+                                    service.gradientPresets[
+                                        service.gradientIndex
+                                    ].name
+
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                            }
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 1
+
+                            color:
+                                Qt.alpha(
+                                    Theme.white,
+                                    0.08
+                                )
+                        }
+
+                        // ====================================================
+                        // TONE
+                        // ====================================================
+
+                        Column {
+                            width: parent.width
+                            spacing: 10
+
+                            Text {
+                                text: "Tone"
+
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            Text {
+                                width: parent.width
+
+                                text: "Choose how Xavion should phrase its replies."
+
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+
+                                wrapMode: Text.Wrap
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: 8
+
+                                Repeater {
+                                    model: service.toneOptions.length
+
+                                    Rectangle {
+                                        id: toneOption
+
+                                        required property int index
+
+                                        readonly property var option:
+                                            service.toneOptions[index]
+
+                                        readonly property bool selected:
+                                            service.toneMode
+                                            === option.value
+
+                                        width:
+                                            toneLabel.implicitWidth + 24
+
+                                        height: 32
+                                        radius: height / 2
+
+                                        color:
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.20
+                                            )
+                                            : (
+                                                toneMouse.containsMouse
+                                                ? Qt.alpha(
+                                                    Theme.white,
+                                                    0.09
+                                                )
+                                                : Qt.alpha(
+                                                    Theme.white,
+                                                    0.045
+                                                )
+                                            )
+
+                                        border.width: 1
 
                                         border.color:
-                                            Qt.alpha(
-                                                Theme.white,
-                                                0.30
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.72
                                             )
-                                    }
+                                            : Qt.alpha(
+                                                Theme.white,
+                                                0.10
+                                            )
 
-                                    MouseArea {
-                                        anchors.fill: parent
+                                        Text {
+                                            id: toneLabel
 
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
+                                            anchors.centerIn: parent
 
-                                        onClicked:
-                                            service.setGradient(index)
+                                            text: toneOption.option.label
+
+                                            color:
+                                                toneOption.selected
+                                                ? Theme.white
+                                                : Theme.grey1
+
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                            font.bold:
+                                                toneOption.selected
+                                        }
+
+                                        MouseArea {
+                                            id: toneMouse
+
+                                            anchors.fill: parent
+
+                                            hoverEnabled: true
+                                            cursorShape:
+                                                Qt.PointingHandCursor
+
+                                            onClicked:
+                                                service.setTone(
+                                                    toneOption.option.value
+                                                )
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
+                        Rectangle {
+                            width: parent.width
+                            height: 1
 
-                            text:
-                                service.gradientPresets[
-                                    service.gradientIndex
-                                ].name
-
-                            color: Theme.grey1
-                            font.family: Theme.fontMain
-                            font.pixelSize: 10
+                            color:
+                                Qt.alpha(
+                                    Theme.white,
+                                    0.08
+                                )
                         }
+
+                        // ====================================================
+                        // MODEL
+                        // ====================================================
+
+                        Column {
+                            width: parent.width
+                            spacing: 10
+
+                            Row {
+                                width: parent.width
+                                height: 24
+                                spacing: 8
+
+                                Text {
+                                    anchors.verticalCenter:
+                                        parent.verticalCenter
+
+                                    text: "Model"
+
+                                    color: Theme.white
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                Item {
+                                    width:
+                                        parent.width
+                                        - refreshModelsButton.width
+                                        - 50
+                                    height: 1
+                                }
+
+                                Rectangle {
+                                    id: refreshModelsButton
+
+                                    width: 26
+                                    height: 26
+                                    radius: width / 2
+
+                                    anchors.verticalCenter:
+                                        parent.verticalCenter
+
+                                    color:
+                                        refreshModelsMouse.containsMouse
+                                        ? Qt.alpha(
+                                            Theme.white,
+                                            0.10
+                                        )
+                                        : "transparent"
+
+                                    border.width: 1
+                                    border.color:
+                                        Qt.alpha(
+                                            Theme.white,
+                                            0.10
+                                        )
+
+                                    Text {
+                                        anchors.centerIn: parent
+
+                                        text: "󰑐"
+
+                                        color:
+                                            service.backendReady
+                                            ? (
+                                                refreshModelsMouse.containsMouse
+                                                ? Theme.white
+                                                : Theme.grey1
+                                            )
+                                            : Qt.alpha(
+                                                Theme.grey1,
+                                                0.45
+                                            )
+
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 13
+                                    }
+
+                                    MouseArea {
+                                        id: refreshModelsMouse
+
+                                        anchors.fill: parent
+
+                                        enabled:
+                                            service.backendReady
+                                            && !service.busy
+
+                                        hoverEnabled: true
+
+                                        cursorShape:
+                                            enabled
+                                            ? Qt.PointingHandCursor
+                                            : Qt.ArrowCursor
+
+                                        onClicked:
+                                            service.refreshModels()
+                                    }
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+
+                                text:
+                                    service.backendReady
+                                    ? "Choose the local model used by Xavion."
+                                    : "Models will be available when Xavion finishes starting."
+
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+
+                                wrapMode: Text.Wrap
+                            }
+
+                            Text {
+                                visible:
+                                    service.availableModels.length === 0
+
+                                width: parent.width
+
+                                text:
+                                    service.backendReady
+                                    ? "No local models found."
+                                    : "Starting Xavion…"
+
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 7
+
+                                Repeater {
+                                    model:
+                                        service.availableModels.length
+
+                                    Rectangle {
+                                        id: modelOption
+
+                                        required property int index
+
+                                        readonly property string modelName:
+                                            String(
+                                                service.availableModels[
+                                                    index
+                                                ]
+                                            )
+
+                                        readonly property bool active:
+                                            modelName
+                                            === service.activeModel
+
+                                        readonly property bool selected:
+                                            modelName
+                                            === (
+                                                service.selectedModel.length > 0
+                                                ? service.selectedModel
+                                                : service.activeModel
+                                            )
+
+                                        width: parent.width
+                                        height: 40
+                                        radius: 11
+
+                                        color:
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.16
+                                            )
+                                            : (
+                                                modelMouse.containsMouse
+                                                ? Qt.alpha(
+                                                    Theme.white,
+                                                    0.075
+                                                )
+                                                : Qt.alpha(
+                                                    Theme.white,
+                                                    0.035
+                                                )
+                                            )
+
+                                        border.width: 1
+
+                                        border.color:
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.58
+                                            )
+                                            : Qt.alpha(
+                                                Theme.white,
+                                                0.09
+                                            )
+
+                                        Text {
+                                            anchors {
+                                                left: parent.left
+                                                verticalCenter:
+                                                    parent.verticalCenter
+                                                leftMargin: 12
+                                            }
+
+                                            width:
+                                                parent.width - 86
+
+                                            text:
+                                                modelOption.modelName
+
+                                            color:
+                                                modelOption.selected
+                                                ? Theme.white
+                                                : Theme.grey1
+
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                            font.bold:
+                                                modelOption.selected
+
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            anchors {
+                                                right: parent.right
+                                                verticalCenter:
+                                                    parent.verticalCenter
+                                                rightMargin: 12
+                                            }
+
+                                            text:
+                                                modelOption.active
+                                                ? "Active"
+                                                : (
+                                                    modelOption.selected
+                                                    ? "Selected"
+                                                    : ""
+                                                )
+
+                                            color:
+                                                modelOption.active
+                                                ? Theme.green
+                                                : service.gradientMid
+
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 9
+                                        }
+
+                                        MouseArea {
+                                            id: modelMouse
+
+                                            anchors.fill: parent
+
+                                            enabled:
+                                                service.backendReady
+                                                && !service.busy
+
+                                            hoverEnabled: true
+
+                                            cursorShape:
+                                                enabled
+                                                ? Qt.PointingHandCursor
+                                                : Qt.ArrowCursor
+
+                                            onClicked: {
+                                                if (
+                                                    !modelOption.active
+                                                    || !modelOption.selected
+                                                ) {
+                                                    service.setModel(
+                                                        modelOption.modelName
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Small scrollbar only when the settings page is taller
+                    // than the available panel height.
+                    Rectangle {
+                        anchors {
+                            right: parent.right
+                            rightMargin: 1
+                        }
+
+                        width: 3
+
+                        height:
+                            Math.max(
+                                24,
+                                settingsFlick.height
+                                * settingsFlick.visibleArea.heightRatio
+                            )
+
+                        y:
+                            settingsFlick.visibleArea.yPosition
+                            * (settingsFlick.height - height)
+
+                        radius: width / 2
+
+                        visible:
+                            settingsFlick.contentHeight
+                            > settingsFlick.height
+
+                        color:
+                            Qt.alpha(
+                                Theme.white,
+                                0.20
+                            )
                     }
                 }
             }
