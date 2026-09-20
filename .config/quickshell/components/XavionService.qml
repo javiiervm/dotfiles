@@ -129,6 +129,7 @@ Scope {
 
     signal streamUpdated()
     signal responseFinished()
+    signal panelCloseRequested()
 
     ListModel {
         id: messageModel
@@ -292,10 +293,13 @@ Scope {
     }
 
     function togglePanel(): void {
-        panelOpen = !panelOpen
+        if (panelOpen) {
+            panelCloseRequested()
+            return
+        }
 
-        if (panelOpen)
-            ensureBackend()
+        panelOpen = true
+        ensureBackend()
     }
 
     function openPanel(): void {

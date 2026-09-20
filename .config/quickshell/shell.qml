@@ -580,6 +580,13 @@ ShellRoot {
         onPressed: { mainLauncher.toggle() }
     }
 
+    GlobalShortcut {
+        name: "xavion"
+        onPressed: {
+            xavionService.togglePanel()
+        }
+    }
+
     Process {
         id: backendProc
         command: ["/home/javier/.config/quickshell/scripts/backend_daemon.sh"]

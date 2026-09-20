@@ -13,7 +13,8 @@ PanelWindow {
     required property var service
 
     property bool settingsOpen: false
-    property bool expanded: false
+    readonly property bool expanded: true
+    property bool closing: false
     property string reservedMonitor: ""
 
     readonly property bool onHdmi:
@@ -34,24 +35,35 @@ PanelWindow {
     readonly property int normalInnerGap:
         onHdmi ? 4 : 5
 
-    // Expanded background glows follow the currently selected message theme.
+    // Theme-aware sidebar surface. The base stays very dark, but it picks up
+    // a subtle amount of the selected gradient instead of being pure black.
+    readonly property color expandedBaseColor:
+        Qt.rgba(
+            0.025 + service.gradientMid.r * 0.055,
+            0.025 + service.gradientMid.g * 0.055,
+            0.030 + service.gradientMid.b * 0.055,
+            1.0
+        )
+
+    // Ambient circles are intentionally more visible than before while still
+    // remaining soft enough not to compete with the chat content.
     readonly property color expandedGlowStart:
-        Qt.alpha(service.gradientStart, 0.050)
+        Qt.alpha(service.gradientStart, 0.090)
 
     readonly property color expandedGlowMid:
-        Qt.alpha(service.gradientMid, 0.055)
+        Qt.alpha(service.gradientMid, 0.110)
 
     readonly property color expandedGlowEnd:
-        Qt.alpha(service.gradientEnd, 0.040)
+        Qt.alpha(service.gradientEnd, 0.085)
 
     readonly property color expandedGlowStartSoft:
-        Qt.alpha(service.gradientStart, 0.030)
+        Qt.alpha(service.gradientStart, 0.060)
 
     readonly property color expandedGlowMidSoft:
-        Qt.alpha(service.gradientMid, 0.028)
+        Qt.alpha(service.gradientMid, 0.055)
 
     readonly property color expandedGlowEndSoft:
-        Qt.alpha(service.gradientEnd, 0.020)
+        Qt.alpha(service.gradientEnd, 0.045)
 
 
     readonly property var focusedWorkspaceRef:
@@ -84,11 +96,7 @@ PanelWindow {
             + ', '
             + panel.implicitWidth
             + ', '
-            + (
-                targetMonitor === "HDMI-A-1"
-                ? 10
-                : 12
-            )
+            + 0
             + ')'
 
         Quickshell.execDetached([
@@ -99,82 +107,52 @@ PanelWindow {
     }
 
     function closePanel(): void {
-        settingsOpen = false
+        if (closing)
+            return
 
-        if (expanded) {
+        settingsOpen = false
+        closing = true
+        input.focus = false
+        slideOut.restart()
+    }
+
+    function finishClose(): void {
+        if (reservedMonitor.length > 0) {
             applyWorkspaceReservation(false, reservedMonitor)
-            expanded = false
             reservedMonitor = ""
         }
 
         service.closePanel()
     }
 
-    function enterExpandedMode(): void {
-        if (expanded)
-            return
-
-        reservedMonitor =
-            panel.screen
-            ? panel.screen.name
-            : ""
-
-        expanded = true
-        applyWorkspaceReservation(true, reservedMonitor)
-
-        Qt.callLater(function() {
-            input.forceActiveFocus()
-        })
-    }
-
-    function leaveExpandedMode(): void {
-        if (!expanded)
-            return
-
-        applyWorkspaceReservation(false, reservedMonitor)
-
-        expanded = false
-        reservedMonitor = ""
-
-        Qt.callLater(function() {
-            input.forceActiveFocus()
-        })
-    }
-
-    function toggleExpandedMode(): void {
-        if (expanded)
-            leaveExpandedMode()
-        else
-            enterExpandedMode()
-    }
-
     onFocusedWorkspaceRefChanged: {
-        if (expanded)
+        if (reservedMonitor.length > 0)
             applyWorkspaceReservation(true, reservedMonitor)
     }
 
-    implicitWidth: 450
+    implicitWidth: 420
     implicitHeight: 550
 
     anchors {
         top: true
-        bottom: expanded
+        bottom: true
         left: true
     }
 
     margins {
-        top: expanded ? normalOuterTop : 0
-        bottom: expanded ? normalOuterBottom : 0
-        left: normalOuterLeft
+        top: 0
+        bottom: 0
+        left: 0
     }
 
-    // Never reserve layer-shell space: other Quickshell surfaces keep the
-    // full monitor. Only Hyprland workspaces are shifted by xavion_sidebar.lua.
-    exclusiveZone: 0
+    // A real sidebar should ignore the exclusion zones created by the rest of
+    // Quickshell (especially the 44 px top bar), otherwise the compositor
+    // starts this surface below them instead of at the physical screen edge.
+    exclusionMode: ExclusionMode.Ignore
 
     color: "transparent"
 
-    WlrLayershell.layer: WlrLayershell.Overlay
+    WlrLayershell.layer: WlrLayershell.Bottom
     WlrLayershell.keyboardFocus: WlrLayershell.OnDemand
 
     function submitMessage(): void {
@@ -191,26 +169,21 @@ PanelWindow {
         service.ensureBackend()
 
         Qt.callLater(function() {
-            input.forceActiveFocus()
+            reservedMonitor =
+                panel.screen
+                ? panel.screen.name
+                : ""
+
+            if (reservedMonitor.length > 0)
+                applyWorkspaceReservation(true, reservedMonitor)
+
+            slideIn.restart()
         })
     }
 
     Component.onDestruction: {
         if (expanded && reservedMonitor.length > 0)
             applyWorkspaceReservation(false, reservedMonitor)
-    }
-
-    HyprlandFocusGrab {
-        id: focusGrab
-
-        // Outside-click closing is only wanted in compact mode.
-        active: !panel.expanded
-        windows: [ panel ]
-
-        onCleared: {
-            if (service.panelOpen && !panel.expanded)
-                panel.closePanel()
-        }
     }
 
     BackgroundEffect.blurRegion:
@@ -229,21 +202,24 @@ PanelWindow {
 
         anchors.fill: parent
 
-        // Compact mode keeps the normal dotfiles glass material.
-        // Expanded mode becomes Xavion's own opaque surface.
-        glassTint: panel.expanded ? "#050506" : Glass.tint
+        transform: Translate {
+            id: panelSlide
+            x: -panel.implicitWidth
+        }
+
+        // Xavion always opens as its dedicated opaque sidebar surface.
+        glassTint: panel.expanded ? panel.expandedBaseColor : Glass.tint
         glassOpacity: panel.expanded ? 1.0 : Glass.opacity
-        glassRadius: 18
+        glassRadius: 0
         showBorder: !panel.expanded
         showHighlight: !panel.expanded
         clip: true
 
         // ============================================================
-        // EXPANDED-ONLY XAVION BACKGROUND
+        // XAVION SIDEBAR BACKGROUND
         // ============================================================
         //
-        // Compact mode keeps the normal glass material.
-        // Expanded mode gets an almost-black background with a couple of very
+        // The sidebar uses an almost-black background with a couple of very
         // soft circular ambient glows in Xavion's palette. The glows are made
         // only from a few translucent circles and slow position/scale
         // animations, which is much lighter than running a continuously
@@ -252,19 +228,19 @@ PanelWindow {
             id: expandedBackground
 
             anchors.fill: parent
-            visible: panel.expanded
+            visible: true
 
             Rectangle {
                 anchors.fill: parent
                 radius: panelGlass.radius
-                color: "#050506"
+                color: panel.expandedBaseColor
             }
 
             Item {
                 id: glowCanvas
 
                 anchors.fill: parent
-                visible: panel.expanded
+                visible: true
 
                 // Warm orange/red glow near the upper-left area.
                 Item {
@@ -301,7 +277,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on x {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -320,7 +296,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on y {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -339,7 +315,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on scale {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -393,7 +369,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on x {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -412,7 +388,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on y {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -431,7 +407,7 @@ PanelWindow {
                     }
 
                     SequentialAnimation on scale {
-                        running: panel.expanded && panel.visible
+                        running: panel.visible
                         loops: Animation.Infinite
 
                         NumberAnimation {
@@ -456,13 +432,16 @@ PanelWindow {
                 radius: panelGlass.radius
                 color: "transparent"
                 border.width: 1
-                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.070)
+                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.095)
             }
         }
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 12
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            anchors.topMargin: 44 + 12
+            anchors.bottomMargin: 12 + panel.normalOuterBottom
             spacing: 10
 
             // ============================================================
@@ -572,90 +551,6 @@ PanelWindow {
                     Layout.fillWidth: true
                 }
 
-                // Expand to sidebar / restore compact panel.
-                Rectangle {
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 32
-
-                    radius: width / 2
-
-                    color:
-                        zoomMouse.containsMouse
-                        ? Qt.alpha(Theme.white, 0.10)
-                        : "transparent"
-
-                    border.width: 1
-                    border.color: Qt.alpha(Theme.white, 0.10)
-
-                    Item {
-                        anchors.centerIn: parent
-                        width: 16
-                        height: 16
-
-                        // Compact mode: one square -> enter normal-window mode.
-                        Rectangle {
-                            visible: !panel.expanded
-
-                            anchors.centerIn: parent
-                            width: 11
-                            height: 11
-                            radius: 2
-
-                            color: "transparent"
-                            border.width: 1
-                            border.color:
-                                zoomMouse.containsMouse
-                                ? Theme.white
-                                : Theme.grey1
-                        }
-
-                        // Window mode: overlapping squares -> restore compact mode.
-                        Rectangle {
-                            visible: panel.expanded
-
-                            x: 2
-                            y: 2
-                            width: 9
-                            height: 9
-                            radius: 1.5
-
-                            color: "transparent"
-                            border.width: 1
-                            border.color:
-                                zoomMouse.containsMouse
-                                ? Theme.white
-                                : Theme.grey1
-                        }
-
-                        Rectangle {
-                            visible: panel.expanded
-
-                            x: 5
-                            y: 5
-                            width: 9
-                            height: 9
-                            radius: 1.5
-
-                            color: Qt.alpha(Theme.bg1, 0.92)
-                            border.width: 1
-                            border.color:
-                                zoomMouse.containsMouse
-                                ? Theme.white
-                                : Theme.grey1
-                        }
-                    }
-
-                    MouseArea {
-                        id: zoomMouse
-
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-
-                        onClicked:
-                            panel.toggleExpandedMode()
-                    }
-                }
             }
 
             // ============================================================
@@ -950,7 +845,7 @@ PanelWindow {
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: 6
+                    spacing: 9
 
                     visible: service.messages.count === 0
 
@@ -958,8 +853,8 @@ PanelWindow {
                         anchors.horizontalCenter:
                             parent.horizontalCenter
 
-                        width: 54
-                        height: 54
+                        width: 76
+                        height: 76
 
                         source: "../assets/xavion/chat.png"
 
@@ -976,7 +871,8 @@ PanelWindow {
 
                         color: Theme.grey1
                         font.family: Theme.fontMain
-                        font.pixelSize: 12
+                        font.pixelSize: 16
+                        font.bold: true
                     }
 
                     Text {
@@ -993,7 +889,7 @@ PanelWindow {
                                 : Theme.grey1
 
                         font.family: Theme.fontMain
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                     }
 
                     Text {
@@ -1831,8 +1727,40 @@ PanelWindow {
         }
     }
 
+    NumberAnimation {
+        id: slideIn
+        target: panelSlide
+        property: "x"
+        from: -panel.implicitWidth
+        to: 0
+        duration: 320
+        easing.type: Easing.OutQuart
+
+        onFinished: {
+            panel.closing = false
+            input.forceActiveFocus()
+        }
+    }
+
+    NumberAnimation {
+        id: slideOut
+        target: panelSlide
+        property: "x"
+        from: 0
+        to: -panel.implicitWidth
+        duration: 260
+        easing.type: Easing.InCubic
+
+        onFinished:
+            panel.finishClose()
+    }
+
     Connections {
         target: service
+
+        function onPanelCloseRequested() {
+            panel.closePanel()
+        }
 
         function onStreamUpdated() {
             Qt.callLater(function() {
