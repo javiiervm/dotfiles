@@ -35,13 +35,13 @@ PanelWindow {
     readonly property int normalInnerGap:
         onHdmi ? 4 : 5
 
-    // Theme-aware sidebar surface. The base stays very dark, but it picks up
-    // a subtle amount of the selected gradient instead of being pure black.
+    // Theme-aware sidebar surface. Keep it clearly dark, but noticeably
+    // lighter than before so the panel does not read as near-black.
     readonly property color expandedBaseColor:
         Qt.rgba(
-            0.025 + service.gradientMid.r * 0.055,
-            0.025 + service.gradientMid.g * 0.055,
-            0.030 + service.gradientMid.b * 0.055,
+            0.045 + service.gradientMid.r * 0.085,
+            0.045 + service.gradientMid.g * 0.085,
+            0.050 + service.gradientMid.b * 0.085,
             1.0
         )
 
@@ -450,13 +450,13 @@ PanelWindow {
 
             RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 36
-                spacing: 8
+                Layout.preferredHeight: 42
+                spacing: 10
 
                 // New chat / Back.
                 Rectangle {
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 32
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 38
 
                     radius: width / 2
 
@@ -480,7 +480,7 @@ PanelWindow {
                             : Theme.grey1
 
                         font.family: Theme.fontIcons
-                        font.pixelSize: panel.settingsOpen ? 15 : 14
+                        font.pixelSize: panel.settingsOpen ? 18 : 17
                     }
 
                     MouseArea {
@@ -504,8 +504,8 @@ PanelWindow {
                 Rectangle {
                     visible: !panel.settingsOpen
 
-                    Layout.preferredWidth: visible ? 32 : 0
-                    Layout.preferredHeight: 32
+                    Layout.preferredWidth: visible ? 38 : 0
+                    Layout.preferredHeight: 38
 
                     radius: width / 2
 
@@ -528,7 +528,7 @@ PanelWindow {
                             : Theme.grey1
 
                         font.family: Theme.fontIcons
-                        font.pixelSize: 15
+                        font.pixelSize: 18
                     }
 
                     MouseArea {
@@ -570,7 +570,7 @@ PanelWindow {
                     anchors.rightMargin: 6
 
                     clip: true
-                    spacing: 6
+                    spacing: 8
 
                     model: service.messages
                     boundsBehavior: Flickable.StopAtBounds
@@ -589,8 +589,8 @@ PanelWindow {
 
                         height:
                             fromUser
-                            ? userBubble.height + 8
-                            : assistantText.implicitHeight + 12
+                            ? userBubble.height + 10
+                            : assistantText.implicitHeight + 16
 
                         // ====================================================
                         // USER MESSAGE
@@ -604,13 +604,13 @@ PanelWindow {
                             anchors.right: parent.right
 
                             width: Math.min(
-                                messageList.width * 0.78,
-                                userText.implicitWidth + 24
+                                messageList.width * 0.82,
+                                userText.implicitWidth + 30
                             )
 
-                            height: userText.implicitHeight + 18
+                            height: userText.implicitHeight + 22
 
-                            radius: 16
+                            radius: 18
 
                             // Message-sent entrance animation:
                             // the bubble grows out from the right side of the chat,
@@ -652,9 +652,9 @@ PanelWindow {
                                     right: parent.right
                                     top: parent.top
 
-                                    leftMargin: 12
-                                    rightMargin: 12
-                                    topMargin: 9
+                                    leftMargin: 14
+                                    rightMargin: 14
+                                    topMargin: 11
                                 }
 
                                 text: messageDelegate.text
@@ -662,7 +662,7 @@ PanelWindow {
                                 color: Theme.white
 
                                 font.family: Theme.fontMain
-                                font.pixelSize: 12
+                                font.pixelSize: 13
 
                                 wrapMode: Text.Wrap
                                 textFormat: Text.PlainText
@@ -727,8 +727,8 @@ PanelWindow {
                                 left: parent.left
                                 right: parent.right
 
-                                leftMargin: 10
-                                rightMargin: 20
+                                leftMargin: 12
+                                rightMargin: 24
                             }
 
                             text:
@@ -742,7 +742,7 @@ PanelWindow {
                             color: Theme.white
 
                             font.family: Theme.fontMain
-                            font.pixelSize: 12
+                            font.pixelSize: 13
 
                             wrapMode: Text.Wrap
                             textFormat: Text.MarkdownText
@@ -752,7 +752,7 @@ PanelWindow {
 
                     footer: Item {
                         width: messageList.width
-                        height: service.awaitingFirstChunk ? 34 : 0
+                        height: service.awaitingFirstChunk ? 38 : 0
                         visible: service.awaitingFirstChunk
 
                         Row {
@@ -767,9 +767,9 @@ PanelWindow {
                                 Rectangle {
                                     required property int index
 
-                                    width: 6
-                                    height: 6
-                                    radius: 3
+                                    width: 7
+                                    height: 7
+                                    radius: 3.5
 
                                     color: Theme.grey1
                                     opacity: 0.35
@@ -1561,166 +1561,234 @@ PanelWindow {
             // INPUT
             // ============================================================
 
-            Rectangle {
+            Item {
                 visible: !panel.settingsOpen
                 Layout.fillWidth: true
-                Layout.preferredHeight: 36
+                Layout.preferredHeight: 44
 
-                radius: height / 2
-
-                color: Qt.alpha(
-                    Theme.bg1,
-                    0.72
-                )
-
-                border.width: 1
-
-                border.color:
-                    input.activeFocus
-                    ? Qt.alpha(Theme.white, 0.18)
-                    : Qt.alpha(Theme.white, 0.10)
-
-                Text {
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                        leftMargin: 14
-                    }
-
-                    visible: input.text.length === 0
-
-                    text:
-                        service.backendReady
-                        ? (
-                            service.busy
-                            ? "Xavion is thinking…"
-                            : "Ask Xavion..."
-                        )
-                        : "Starting Xavion…"
-
-                    color: Theme.grey1
-
-                    font.family: Theme.fontMain
-                    font.pixelSize: 12
-                }
-
-                TextInput {
-                    id: input
-
-                    anchors {
-                        left: parent.left
-                        right: sendButton.left
-
-                        top: parent.top
-                        bottom: parent.bottom
-
-                        leftMargin: 14
-                        rightMargin: 8
-                    }
-
-                    enabled:
-                        service.backendReady
-                        && !service.busy
-
-                    color: Theme.white
-
-                    selectionColor:
-                        Qt.alpha(
-                            Theme.blue,
-                            0.45
-                        )
-
-                    selectedTextColor:
-                        Theme.white
-
-                    font.family: Theme.fontMain
-                    font.pixelSize: 12
-
-                    verticalAlignment:
-                        TextInput.AlignVCenter
-
-                    clip: true
-
-                    onAccepted:
-                        panel.submitMessage()
-
-                    Keys.onEscapePressed: function(event) {
-                        panel.closePanel()
-                        event.accepted = true
-                    }
-                }
-
+                // Attachment button lives outside the text field.
                 Item {
-                    id: sendButton
+                    id: attachButton
 
                     anchors {
-                        right: parent.right
+                        left: parent.left
                         verticalCenter: parent.verticalCenter
-                        rightMargin: 4
                     }
 
-                    width: 28
-                    height: 28
+                    width: 44
+                    height: 44
 
                     Rectangle {
                         anchors.fill: parent
 
                         radius: width / 2
 
-                        opacity:
-                            service.backendReady
-                            && !service.busy
-                            && input.text.trim().length > 0
-                            ? 1.0
-                            : 0.34
+                        color:
+                            attachMouse.containsMouse
+                            ? Qt.alpha(Theme.white, 0.08)
+                            : Qt.alpha(Theme.bg1, 0.72)
 
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-
-                            GradientStop {
-                                position: 0.0
-                                color: service.gradientStart
-                            }
-
-                            GradientStop {
-                                position: 0.52
-                                color: service.gradientMid
-                            }
-
-                            GradientStop {
-                                position: 1.0
-                                color: service.gradientEnd
-                            }
-                        }
+                        border.width: 1
+                        border.color:
+                            attachMouse.containsMouse
+                            ? Qt.alpha(Theme.white, 0.16)
+                            : Qt.alpha(Theme.white, 0.10)
                     }
 
                     Text {
                         anchors.centerIn: parent
-                        anchors.verticalCenterOffset: 1
 
-                        text: "󰁝"
+                        text: "+"
 
-                        color: Theme.white
+                        color:
+                            attachMouse.containsMouse
+                            ? Theme.white
+                            : Theme.grey1
 
-                        font.family: Theme.fontIcons
-                        font.pixelSize: 15
+                        font.family: Theme.fontMain
+                        font.pixelSize: 24
+                        font.weight: Font.Light
                     }
 
                     MouseArea {
-                        id: sendMouse
+                        id: attachMouse
 
                         anchors.fill: parent
                         hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
 
-                        cursorShape:
+                        // Intentionally no onClicked yet.
+                        // File picking/backend support will be added later.
+                    }
+                }
+
+                Rectangle {
+                    id: inputField
+
+                    anchors {
+                        left: attachButton.right
+                        right: parent.right
+                        top: parent.top
+                        bottom: parent.bottom
+                        leftMargin: 10
+                    }
+
+                    radius: height / 2
+
+                    color: Qt.alpha(
+                        Theme.bg1,
+                        0.72
+                    )
+
+                    border.width: 1
+
+                    border.color:
+                        input.activeFocus
+                        ? Qt.alpha(Theme.white, 0.18)
+                        : Qt.alpha(Theme.white, 0.10)
+
+                    Text {
+                        anchors {
+                            left: parent.left
+                            verticalCenter: parent.verticalCenter
+                            leftMargin: 16
+                        }
+
+                        visible: input.text.length === 0
+
+                        text:
+                            service.backendReady
+                            ? (
+                                service.busy
+                                ? "Xavion is thinking…"
+                                : "Ask Xavion..."
+                            )
+                            : "Starting Xavion…"
+
+                        color: Theme.grey1
+
+                        font.family: Theme.fontMain
+                        font.pixelSize: 13
+                    }
+
+                    TextInput {
+                        id: input
+
+                        anchors {
+                            left: parent.left
+                            right: sendButton.left
+
+                            top: parent.top
+                            bottom: parent.bottom
+
+                            leftMargin: 16
+                            rightMargin: 10
+                        }
+
+                        enabled:
                             service.backendReady
                             && !service.busy
-                            && input.text.trim().length > 0
-                            ? Qt.PointingHandCursor
-                            : Qt.ArrowCursor
 
-                        onClicked:
+                        color: Theme.white
+
+                        selectionColor:
+                            Qt.alpha(
+                                Theme.blue,
+                                0.45
+                            )
+
+                        selectedTextColor:
+                            Theme.white
+
+                        font.family: Theme.fontMain
+                        font.pixelSize: 13
+
+                        verticalAlignment:
+                            TextInput.AlignVCenter
+
+                        clip: true
+
+                        onAccepted:
                             panel.submitMessage()
+
+                        Keys.onEscapePressed: function(event) {
+                            panel.closePanel()
+                            event.accepted = true
+                        }
+                    }
+
+                    Item {
+                        id: sendButton
+
+                        anchors {
+                            right: parent.right
+                            verticalCenter: parent.verticalCenter
+                            rightMargin: 5
+                        }
+
+                        width: 34
+                        height: 34
+
+                        Rectangle {
+                            anchors.fill: parent
+
+                            radius: width / 2
+
+                            opacity:
+                                service.backendReady
+                                && !service.busy
+                                && input.text.trim().length > 0
+                                ? 1.0
+                                : 0.34
+
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+
+                                GradientStop {
+                                    position: 0.0
+                                    color: service.gradientStart
+                                }
+
+                                GradientStop {
+                                    position: 0.52
+                                    color: service.gradientMid
+                                }
+
+                                GradientStop {
+                                    position: 1.0
+                                    color: service.gradientEnd
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            anchors.verticalCenterOffset: 1
+
+                            text: "󰁝"
+
+                            color: Theme.white
+
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 17
+                        }
+
+                        MouseArea {
+                            id: sendMouse
+
+                            anchors.fill: parent
+                            hoverEnabled: true
+
+                            cursorShape:
+                                service.backendReady
+                                && !service.busy
+                                && input.text.trim().length > 0
+                                ? Qt.PointingHandCursor
+                                : Qt.ArrowCursor
+
+                            onClicked:
+                                panel.submitMessage()
+                        }
                     }
                 }
             }
