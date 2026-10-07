@@ -587,7 +587,7 @@ PanelWindow {
 
                         width: parent.width
                         height: ncWindow.topTileHeight
-                        glassRadius: 22
+                        glassRadius: height / 2
                         glassOpacity:
                             ncWindow.wifiPending ? 0.45
                             : wifiMouse.containsMouse ? 0.45
@@ -675,7 +675,7 @@ PanelWindow {
 
                         width: parent.width
                         height: ncWindow.topTileHeight
-                        glassRadius: 22
+                        glassRadius: height / 2
                         glassOpacity:
                             ncWindow.btPending ? 0.45
                             : btMouse.containsMouse ? 0.45
@@ -763,7 +763,7 @@ PanelWindow {
 
                         width: parent.width
                         height: ncWindow.topTileHeight
-                        glassRadius: 22
+                        glassRadius: height / 2
                         glassOpacity:
                             ncWindow.caffeinePending ? 0.45
                             : caffeineMouse.containsMouse ? 0.45
@@ -1197,7 +1197,7 @@ PanelWindow {
 
                         width: parent.width
                         height: ncWindow.topTileHeight
-                        glassRadius: 22
+                        glassRadius: height / 2
                         glassOpacity:
                             ncWindow.airplanePending ? 0.45
                             : airplaneMouse.containsMouse ? 0.45
@@ -1609,7 +1609,7 @@ PanelWindow {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 126
                         height: 30
-                        glassRadius: 12
+                        glassRadius: height / 2
                         glassOpacity: 0.28
                         showHighlight: false
 

@@ -153,7 +153,6 @@ ShellRoot {
 
     property alias sharedNotifModel: sharedNotifModel
     ListModel { id: sharedNotifModel }
-    ListModel { id: popupModel }
     ListModel {
         id: cavaModel
         Component.onCompleted: {
@@ -169,14 +168,6 @@ ShellRoot {
 
     function clearNotifications() { cmdProc.command = ["sh", "-c", "echo CLEAR > /tmp/qs_notif_cmd"]; cmdProc.running = true }
     function toggleDnd() { cmdProc.command = ["sh", "-c", "echo TOGGLE_DND > /tmp/qs_notif_cmd"]; cmdProc.running = true }
-    function removePopup(notifId) {
-        for (var i = 0; i < popupModel.count; i++) {
-            if (popupModel.get(i).nId === notifId) {
-                popupModel.remove(i);
-                break;
-            }
-        }
-    }
     
     // Funciones del Portapapeles
     function refreshClipboard() {
@@ -457,16 +448,13 @@ ShellRoot {
     }
 
     onIsNotifOpenChanged: {
-        // Opening the Notification Center marks the current notifications
-        // as seen and immediately removes any popup that is still visible.
-        //
-        // New notifications received while the center is open are still
-        // added to sharedNotifModel through STATE, but the POPUP branch below
-        // ignores them because isNotifOpen is true. The backend can therefore
-        // keep playing the notification sound normally.
+        // Opening Notification Center marks everything as seen and collapses
+        // any transient notification currently occupying the Dynamic Island.
+        // New notifications still enter sharedNotifModel through STATE; the
+        // POPUP event is ignored below while the center itself is open.
         if (isNotifOpen) {
             hasUnread = false
-            popupModel.clear()
+            islandNotification.dismissAll()
         }
     }
 
@@ -648,23 +636,12 @@ ShellRoot {
                         sharedNotifModel.append(state.notifications[i])
                     }
                 } else if (line.startsWith("POPUP|")) {
-                    // Never create popup UI while:
-                    //  - Do Not Disturb is enabled, or
-                    //  - the Notification Center is already open.
-                    //
-                    // STATE still updates sharedNotifModel, so notifications
-                    // received while the center is open appear there directly.
+                    // DND and an open Notification Center suppress transient
+                    // presentation, while STATE still keeps history up to date.
                     if (!root.isNotifOpen && !root.dnd) {
                         root.hasUnread = true
                         var n = JSON.parse(line.substring(6))
-                        popupModel.insert(0, {
-                            "nId": n.id,
-                            "pApp": n.app,
-                            "pTitle": n.title,
-                            "pBody": n.body,
-                            "pIcon": n.icon,
-                            "pUrgency": n.urgency
-                        })
+                        islandNotification.enqueue(n)
                     }
                 }
             }
@@ -864,120 +841,6 @@ ShellRoot {
                     root.advSignal = parts[3];
                     root.advMac = parts[4];
                     root.advBattery = parts[5];
-                }
-            }
-        }
-    }
-
-    PanelWindow {
-        id: osdWindow
-        screen: root.primaryUiScreen
-        anchors { top: true; right: true }
-        margins { top: 50; right: 15 }
-        implicitWidth: 360 
-        implicitHeight: popupColumn.implicitHeight
-        exclusiveZone: 0
-        color: "transparent"
-        WlrLayershell.layer: WlrLayershell.Top
-        visible: popupModel.count > 0
-
-        BackgroundEffect.blurRegion: Glass.blurEnabled ? osdBlurRegion : null
-
-        Region {
-            id: osdBlurRegion
-            item: popupColumn
-            radius: Glass.radius
-        }
-
-        Column {
-            id: popupColumn
-            width: parent.width
-            spacing: 10
-            Repeater {
-                model: popupModel
-                delegate: GlassSurface {
-                    id: popupItem
-                    width: 360
-                    height: 80
-                    glassRadius: 15
-
-                    glassTint: pUrgency === 2 ? Theme.red : Glass.tint
-                    glassOpacity: pUrgency === 2 ? 0.15 : Glass.opacity
-                    border.color: pUrgency === 2 ? Theme.red : Glass.borderColor
-                    border.width: pUrgency === 2 ? 2 : Glass.borderWidth
-                    
-                    transform: Translate { id: slideTrans; x: 400 }
-                    Component.onCompleted: { slideIn.start(); hideTimer.start(); }
-                    NumberAnimation { id: slideIn; target: slideTrans; property: "x"; to: 0; duration: 400; easing.type: Easing.OutBack }
-                    NumberAnimation { id: slideOut; target: slideTrans; property: "x"; to: 400; duration: 300; easing.type: Easing.InBack; onFinished: root.removePopup(nId) }
-                    Timer { id: hideTimer; interval: 5000; onTriggered: slideOut.start() }
-                    
-                    MouseArea { anchors.fill: parent; onClicked: slideOut.start() }
-                    
-                    RowLayout {
-                        anchors.fill: parent; anchors.margins: 12; spacing: 12
-                        Item {
-                            Layout.preferredWidth: 35
-                            Layout.preferredHeight: 35
-
-                            Image {
-                                id: notifImgPopup
-                                anchors.fill: parent
-                                source: pIcon.startsWith("/") ? "file://" + pIcon : "image://icon/" + pIcon
-                                fillMode: Image.PreserveAspectCrop
-                                visible: false
-                            }
-
-                            Rectangle {
-                                id: maskPopup
-                                anchors.fill: parent
-                                radius: width / 2
-                                visible: false
-                            }
-
-                            OpacityMask {
-                                anchors.fill: parent
-                                source: notifImgPopup
-                                maskSource: maskPopup
-                                layer.enabled: pUrgency === 2 
-                            }
-                        }
-                        
-                        ColumnLayout {
-                            spacing: 2
-                            Text { 
-                                text: pApp + (pUrgency === 2 ? " • CRITICAL" : "") 
-                                color: pUrgency === 2 ? Theme.red : Theme.blue 
-                                font.pixelSize: 10; font.bold: true 
-                            }
-                            Text { text: pTitle; color: Theme.white; font.pixelSize: 12; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                            Text { text: pBody; color: Theme.grey1; font.pixelSize: 11; elide: Text.ElideRight; Layout.fillWidth: true; maximumLineCount: 1 }
-                        }
-
-                        Item {
-                            Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                            width: 20
-                            height: 20
-                            Text { 
-                                anchors.centerIn: parent
-                                text: "󰅖"
-                                font.family: Theme.fontIcons
-                                color: xMousePopup.containsMouse ? Theme.white : Theme.grey1
-                                font.pixelSize: 14 
-                            }
-                            MouseArea { 
-                                id: xMousePopup
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: { 
-                                    slideOut.start() 
-                                    cmdProc.command = ["sh", "-c", "echo 'REMOVE|" + nId + "' > /tmp/qs_notif_cmd"]
-                                    cmdProc.running = true
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -1424,7 +1287,8 @@ ShellRoot {
                                         id: delArea
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
+                                      
+   cursorShape: Qt.PointingHandCursor
                                         onClicked: root.deleteClipItem(clipId)
                                     }
                                 }
@@ -1438,17 +1302,66 @@ ShellRoot {
         DynamicIsland {
             id: islandWidget
 
-            // Laptop keeps its original -38 value. The HDMI value is used
-            // only in clamshell mode, when HDMI-A-1 is the primary UI screen.
+            // Keep the real Dynamic Island permanently in its normal Wayland
+            // position. Moving the PanelWindow itself to -500 while a
+            // notification was visible made Hyprland animate it back down from
+            // the top edge when the notification finished.
             topMargin: root.primaryUiScreen
                 && root.primaryUiScreen.name === "HDMI-A-1"
                 ? -32
                 : -38
 
+            // Hide only the QQuickItem tree inside the already-mapped
+            // PanelWindow. The layer-shell surface itself never moves, unmaps
+            // or changes margin, so Hyprland has nothing to animate back from
+            // the top edge when the notification finishes.
+            contentItem.opacity: islandNotification.notificationActive ? 0 : 1
+            contentItem.enabled: !islandNotification.notificationActive
+
             isFullscreen: root.isFullscreen
             isBtConnected: {
                 var dev = root.btDev ? root.btDev.toLowerCase().trim() : "";
                 return root.btStat === "on" && dev !== "" && dev !== "disconnected" && dev !== "none" && dev !== "null" && dev !== "off";
+            }
+        }
+
+        // Keep this surface declared after DynamicIsland so, while its input
+        // mask is active, it is the topmost layer-shell surface in this slot.
+        // When inactive its mask is empty and input falls through to the real
+        // island underneath.
+        IslandNotification {
+            id: islandNotification
+            screen: root.primaryUiScreen
+
+            // Exactly the same resting position as DynamicIsland, including
+            // the clamshell HDMI adjustment.
+            topMargin: root.primaryUiScreen
+                && root.primaryUiScreen.name === "HDMI-A-1"
+                ? -32
+                : -38
+
+            // The X removes every notification currently grouped in the
+            // transient island stack. Send all REMOVE commands through one
+            // FIFO writer so no request is lost while cmdProc is busy.
+            onRemoveManyRequested: function(notificationIds) {
+                if (!notificationIds || notificationIds.length === 0)
+                    return
+
+                var args = []
+                for (var i = 0; i < notificationIds.length; ++i) {
+                    var id = Number(notificationIds[i])
+                    if (!isNaN(id) && id >= 0)
+                        args.push("'REMOVE|" + id + "'")
+                }
+
+                if (args.length === 0)
+                    return
+
+                cmdProc.command = [
+                    "bash", "-c",
+                    "printf '%s\n' " + args.join(" ") + " > /tmp/qs_notif_cmd"
+                ]
+                cmdProc.running = true
             }
         }
     }
@@ -1516,7 +1429,7 @@ ShellRoot {
         // Important: do not keep the pill permanently mapped and merely move
         // it above the screen. It exists visually only while the pointer is in
         // the top-centre reveal area (or over the pill itself).
-        visible: root.isFullscreen && root.isTopHovered
+        visible: root.isFullscreen && root.isTopHovered && !islandNotification.notificationActive
 
         implicitWidth: fsGhostLayout.implicitWidth + 36
         implicitHeight: 32
