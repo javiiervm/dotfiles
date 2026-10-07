@@ -11,6 +11,12 @@ fi
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+
+export PATH="$PATH:$ANDROID_HOME/platform-tools"
+export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
+
 # Theme handled by Starship.
 ZSH_THEME=""
 
@@ -43,9 +49,11 @@ source "$ZSH/oh-my-zsh.sh"
 # ------------------------------------------------------------------------------
 
 alias ls="lsd -lag"
+alias reload="source ~/.zshrc"
 alias cex="python3 ~/.scripts/cex.py"
 alias cleanup="$HOME/.local/bin/cleanup.py"
 alias plmedit="QT_QPA_PLATFORMTHEME=kde kcmshell6 kcm_plasmalogin"
+alias pytime='/usr/bin/time -f "\n------------------------\nTime: %e s\nMemory: %M KB" python'
 
 
 # ------------------------------------------------------------------------------
