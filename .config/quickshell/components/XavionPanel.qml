@@ -752,79 +752,95 @@ PanelWindow {
 
                     footer: Item {
                         width: messageList.width
-                        height: service.awaitingFirstChunk ? 38 : 0
+                        height: service.awaitingFirstChunk ? 40 : 0
                         visible: service.awaitingFirstChunk
 
                         Row {
                             anchors.left: parent.left
                             anchors.leftMargin: 12
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 5
+                            spacing: 6
 
-                            Repeater {
-                                model: 3
+                            Text {
+                                visible: service.thinking
+                                text: "Thinking"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                                anchors.verticalCenter: dotsRow.verticalCenter
+                            }
 
-                                Rectangle {
-                                    required property int index
+                            Row {
+                                id: dotsRow
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 5
 
-                                    width: 7
-                                    height: 7
-                                    radius: 3.5
+                                Repeater {
+                                    model: 3
 
-                                    color: Theme.grey1
-                                    opacity: 0.35
+                                    Rectangle {
+                                        required property int index
 
-                                    SequentialAnimation on opacity {
-                                        running: service.awaitingFirstChunk
-                                        loops: Animation.Infinite
+                                        width: 7
+                                        height: 7
+                                        radius: 3.5
 
-                                        PauseAnimation {
-                                            duration: index * 140
+                                        color: Theme.grey1
+                                        opacity: 0.35
+
+                                        SequentialAnimation on opacity {
+                                            running: service.awaitingFirstChunk
+                                            loops: Animation.Infinite
+
+                                            PauseAnimation {
+                                                duration: index * 140
+                                            }
+
+                                            NumberAnimation {
+                                                from: 0.35
+                                                to: 1.0
+                                                duration: 220
+                                                easing.type: Easing.InOutQuad
+                                            }
+
+                                            NumberAnimation {
+                                                from: 1.0
+                                                to: 0.35
+                                                duration: 220
+                                                easing.type: Easing.InOutQuad
+                                            }
+
+                                            PauseAnimation {
+                                                duration: (2 - index) * 140
+                                            }
                                         }
 
-                                        NumberAnimation {
-                                            from: 0.35
-                                            to: 1.0
-                                            duration: 220
-                                            easing.type: Easing.InOutQuad
-                                        }
+                                        SequentialAnimation on y {
+                                            running: service.awaitingFirstChunk
+                                            loops: Animation.Infinite
 
-                                        NumberAnimation {
-                                            from: 1.0
-                                            to: 0.35
-                                            duration: 220
-                                            easing.type: Easing.InOutQuad
-                                        }
+                                            PauseAnimation {
+                                                duration: index * 140
+                                            }
 
-                                        PauseAnimation {
-                                            duration: (2 - index) * 140
-                                        }
-                                    }
+                                            NumberAnimation {
+                                                from: 0
+                                                to: -3
+                                                duration: 180
+                                                easing.type: Easing.OutQuad
+                                            }
 
-                                    SequentialAnimation on y {
-                                        running: service.awaitingFirstChunk
-                                        loops: Animation.Infinite
+                                            NumberAnimation {
+                                                from: -3
+                                                to: 0
+                                                duration: 180
+                                                easing.type: Easing.InQuad
+                                            }
 
-                                        PauseAnimation {
-                                            duration: index * 140
-                                        }
-
-                                        NumberAnimation {
-                                            from: 0
-                                            to: -3
-                                            duration: 180
-                                            easing.type: Easing.OutQuad
-                                        }
-
-                                        NumberAnimation {
-                                            from: -3
-                                            to: 0
-                                            duration: 180
-                                            easing.type: Easing.InQuad
-                                        }
-
-                                        PauseAnimation {
-                                            duration: (2 - index) * 140
+                                            PauseAnimation {
+                                                duration: (2 - index) * 140
+                                            }
                                         }
                                     }
                                 }
@@ -1228,6 +1244,153 @@ PanelWindow {
                         Rectangle {
                             width: parent.width
                             height: 1
+
+                            color:
+                                Qt.alpha(
+                                    Theme.white,
+                                    0.08
+                                )
+                        }
+
+                        // ====================================================
+                        // REASONING
+                        // ====================================================
+
+                        Column {
+                            visible: service.reasoningSupported
+
+                            width: parent.width
+                            spacing: 10
+
+                            Text {
+                                text: "Reasoning"
+
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            Text {
+                                width: parent.width
+
+                                text: "Control whether the selected model reasons before answering. Auto will be enabled with adaptive reasoning."
+
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                                wrapMode: Text.Wrap
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: 8
+
+                                Repeater {
+                                    model: service.reasoningOptions.length
+
+                                    Rectangle {
+                                        id: reasoningOption
+
+                                        required property int index
+
+                                        readonly property var option:
+                                            service.reasoningOptions[index]
+
+                                        readonly property bool optionEnabled:
+                                            Boolean(option.enabled)
+
+                                        readonly property bool selected:
+                                            service.reasoningMode
+                                            === option.value
+
+                                        width:
+                                            (parent.width - 16) / 3
+
+                                        height: 34
+                                        radius: height / 2
+                                        opacity:
+                                            optionEnabled
+                                            ? 1.0
+                                            : 0.38
+
+                                        color:
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.20
+                                            )
+                                            : (
+                                                reasoningMouse.containsMouse
+                                                && optionEnabled
+                                                ? Qt.alpha(
+                                                    Theme.white,
+                                                    0.09
+                                                )
+                                                : Qt.alpha(
+                                                    Theme.white,
+                                                    0.045
+                                                )
+                                            )
+
+                                        border.width: 1
+                                        border.color:
+                                            selected
+                                            ? Qt.alpha(
+                                                service.gradientMid,
+                                                0.72
+                                            )
+                                            : Qt.alpha(
+                                                Theme.white,
+                                                0.10
+                                            )
+
+                                        Text {
+                                            anchors.centerIn: parent
+
+                                            text: reasoningOption.option.label
+
+                                            color:
+                                                reasoningOption.selected
+                                                ? Theme.white
+                                                : Theme.grey1
+
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                            font.bold:
+                                                reasoningOption.selected
+                                        }
+
+                                        MouseArea {
+                                            id: reasoningMouse
+
+                                            anchors.fill: parent
+                                            enabled:
+                                                reasoningOption.optionEnabled
+                                                && service.backendReady
+                                                && !service.busy
+
+                                            hoverEnabled: true
+                                            cursorShape:
+                                                enabled
+                                                ? Qt.PointingHandCursor
+                                                : Qt.ArrowCursor
+
+                                            onClicked:
+                                                service.setReasoning(
+                                                    reasoningOption.option.value
+                                                )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: service.reasoningSupported
+
+                            width: parent.width
+                            height: visible ? 1 : 0
 
                             color:
                                 Qt.alpha(
@@ -1660,7 +1823,11 @@ PanelWindow {
                             service.backendReady
                             ? (
                                 service.busy
-                                ? "Xavion is thinking…"
+                                ? (
+                                    service.thinking
+                                    ? "Xavion is thinking…"
+                                    : "Xavion is responding…"
+                                )
                                 : "Ask Xavion..."
                             )
                             : "Starting Xavion…"

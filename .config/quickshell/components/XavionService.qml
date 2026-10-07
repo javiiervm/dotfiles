@@ -9,6 +9,7 @@ Scope {
     property bool backendReady: false
     property bool busy: false
     property bool awaitingFirstChunk: false
+    property bool thinking: false
     property bool settingsLoaded: false
 
     property string activeModel: ""
@@ -28,6 +29,12 @@ Scope {
     // Empty means "use the backend default" until settings are loaded.
     property string selectedModel: ""
 
+    // Reasoning preference is kept independently from model support so that
+    // switching temporarily to a non-thinking model does not discard it.
+    property string reasoningMode: "off"
+    property string activeReasoningMode: "off"
+    property bool reasoningSupported: false
+
     property var availableModels: []
 
     readonly property var toneOptions: [
@@ -44,6 +51,14 @@ Scope {
         { value: "math", label: "Math" },
         { value: "code", label: "Code" },
         { value: "translate", label: "Translate" }
+    ]
+
+    // Auto is intentionally present in the UI contract already, but disabled
+    // until Xavion gains per-request adaptive reasoning.
+    readonly property var reasoningOptions: [
+        { value: "auto", label: "Auto", enabled: false },
+        { value: "on", label: "On", enabled: true },
+        { value: "off", label: "Off", enabled: true }
     ]
 
     readonly property var gradientPresets: [
@@ -113,8 +128,11 @@ Scope {
         bridge.running
 
     readonly property string statusText: {
-        if (busy)
+        if (thinking)
             return "Thinking…"
+
+        if (busy)
+            return "Responding…"
 
         if (backendReady)
             return activeModel.length > 0
@@ -222,6 +240,33 @@ Scope {
         }
     }
 
+    function setReasoning(value): void {
+        var target = String(value)
+
+        // Auto is part of the UI now, but is deliberately not selectable yet.
+        if (target !== "on" && target !== "off")
+            return
+
+        reasoningMode = target
+
+        _writeSetting(
+            reasoningSave,
+            "xavion-reasoning",
+            reasoningMode
+        )
+
+        if (
+            backendReady
+            && reasoningSupported
+            && activeReasoningMode !== reasoningMode
+        ) {
+            sendCommand({
+                type: "set_reasoning",
+                mode: reasoningMode
+            })
+        }
+    }
+
     function setModel(value): void {
         var target = String(value)
 
@@ -283,6 +328,26 @@ Scope {
         )
     }
 
+    function applyReasoningPreference(): void {
+        if (
+            !backendReady
+            || !settingsLoaded
+            || !reasoningSupported
+        ) {
+            return
+        }
+
+        if (reasoningMode !== "on" && reasoningMode !== "off")
+            reasoningMode = "off"
+
+        if (activeReasoningMode !== reasoningMode) {
+            sendCommand({
+                type: "set_reasoning",
+                mode: reasoningMode
+            })
+        }
+    }
+
     // ============================================================
     // BACKEND / PANEL
     // ============================================================
@@ -338,6 +403,7 @@ Scope {
 
         currentAssistantIndex = -1
         awaitingFirstChunk = true
+        thinking = false
         busy = true
 
         if (!sendCommand({
@@ -347,6 +413,7 @@ Scope {
             tone_mode: toneMode
         })) {
             awaitingFirstChunk = false
+            thinking = false
             busy = false
             return false
         }
@@ -387,6 +454,7 @@ Scope {
             backendReady = true
             busy = false
             awaitingFirstChunk = false
+            thinking = false
             lastError = ""
 
             if (event.model !== undefined)
@@ -395,7 +463,14 @@ Scope {
             if (event.models !== undefined)
                 availableModels = event.models
 
+            if (event.reasoning_supported !== undefined)
+                reasoningSupported = Boolean(event.reasoning_supported)
+
+            if (event.reasoning_mode !== undefined)
+                activeReasoningMode = String(event.reasoning_mode)
+
             applyModelPreference()
+            applyReasoningPreference()
             break
 
         case "models":
@@ -405,7 +480,14 @@ Scope {
             if (event.active_model !== undefined)
                 activeModel = String(event.active_model)
 
+            if (event.reasoning_supported !== undefined)
+                reasoningSupported = Boolean(event.reasoning_supported)
+
+            if (event.reasoning_mode !== undefined)
+                activeReasoningMode = String(event.reasoning_mode)
+
             applyModelPreference()
+            applyReasoningPreference()
             break
 
         case "model_changed":
@@ -417,11 +499,36 @@ Scope {
             if (event.models !== undefined)
                 availableModels = event.models
 
+            if (event.reasoning_supported !== undefined)
+                reasoningSupported = Boolean(event.reasoning_supported)
+            else
+                reasoningSupported = false
+
+            if (event.reasoning_mode !== undefined)
+                activeReasoningMode = String(event.reasoning_mode)
+
+            thinking = false
+            applyReasoningPreference()
+            break
+
+        case "reasoning_changed":
+            if (event.mode !== undefined) {
+                activeReasoningMode = String(event.mode)
+                reasoningMode = activeReasoningMode
+            }
+
+            if (event.supported !== undefined)
+                reasoningSupported = Boolean(event.supported)
+
             break
 
         case "start":
             busy = true
             awaitingFirstChunk = true
+            thinking =
+                event.thinking !== undefined
+                ? Boolean(event.thinking)
+                : false
             break
 
         case "chunk":
@@ -432,6 +539,10 @@ Scope {
 
             if (chunk.length === 0)
                 break
+
+            // The first visible response token marks the end of the hidden
+            // reasoning phase.
+            thinking = false
 
             if (currentAssistantIndex < 0) {
                 messageModel.append({
@@ -476,6 +587,7 @@ Scope {
 
             currentAssistantIndex = -1
             awaitingFirstChunk = false
+            thinking = false
             busy = false
 
             streamUpdated()
@@ -518,6 +630,7 @@ Scope {
 
             currentAssistantIndex = -1
             awaitingFirstChunk = false
+            thinking = false
             busy = false
             streamUpdated()
             break
@@ -526,6 +639,7 @@ Scope {
             messageModel.clear()
             currentAssistantIndex = -1
             awaitingFirstChunk = false
+            thinking = false
             busy = false
             lastError = ""
             streamUpdated()
@@ -535,6 +649,7 @@ Scope {
             messageModel.clear()
             currentAssistantIndex = -1
             awaitingFirstChunk = false
+            thinking = false
             busy = false
             streamUpdated()
             break
@@ -562,7 +677,8 @@ Scope {
             + "printf 'gradient|%s\\n' \"$(readv xavion-gradient 0)\"; "
             + "printf 'tone|%s\\n' \"$(readv xavion-tone adaptive)\"; "
             + "printf 'mode|%s\\n' \"$(readv xavion-mode auto)\"; "
-            + "printf 'model|%s\\n' \"$(readv xavion-model '')\""
+            + "printf 'model|%s\\n' \"$(readv xavion-model '')\"; "
+            + "printf 'reasoning|%s\\n' \"$(readv xavion-reasoning off)\""
         ]
 
         stdout: SplitParser {
@@ -592,6 +708,11 @@ Scope {
                     service.intentMode = value
                 } else if (key === "model") {
                     service.selectedModel = value
+                } else if (key === "reasoning") {
+                    service.reasoningMode =
+                        value === "on"
+                        ? "on"
+                        : "off"
                 }
             }
         }
@@ -600,6 +721,7 @@ Scope {
             if (!running) {
                 service.settingsLoaded = true
                 service.applyModelPreference()
+                service.applyReasoningPreference()
             }
         }
     }
@@ -618,6 +740,10 @@ Scope {
 
     Process {
         id: modelSave
+    }
+
+    Process {
+        id: reasoningSave
     }
 
     // ============================================================
@@ -660,7 +786,9 @@ Scope {
         onExited: function(exitCode) {
             service.backendReady = false
             service.awaitingFirstChunk = false
+            service.thinking = false
             service.busy = false
+            service.reasoningSupported = false
 
             if (service.panelOpen) {
                 service.lastError =
