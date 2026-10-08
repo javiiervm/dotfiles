@@ -47,6 +47,7 @@ ShellRoot {
     property bool volMute: false
     property string volDesc: ""
     property string wifiSsid: ""
+    property bool wifiRadioEnabled: false
     property string wifiSig: ""
     property string wifiFreq: ""
     property string btStat: "off"
@@ -60,7 +61,7 @@ ShellRoot {
     property int cpuUsage: 0
     property int memUsage: 0
 
-    // Nuevos estados para el NotificationCenter
+    // Estados del panel lateral (ControlCenter)
     property bool airplaneMode: false
     property bool caffeineMode: false
     property bool onAcPower: false
@@ -244,7 +245,36 @@ ShellRoot {
                 Qt.callLater(root.pumpNotifCommandQueue)
         }
     }
-    Process { id: wifiProc; command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"] }
+    Process {
+        id: wifiProc
+        command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"]
+        onRunningChanged: {
+            if (!running)
+                Qt.callLater(root.refreshWifiRadioState)
+        }
+    }
+    // Event-triggered radio probe: a connected SSID alone cannot tell us
+    // whether Wi-Fi is enabled but not yet connected to a network.
+    Process {
+        id: wifiRadioStateProc
+        running: true
+        command: ["sh", "-c", "LC_ALL=C nmcli radio wifi 2>/dev/null"]
+        stdout: SplitParser {
+            onRead: function(line) {
+                var status = line.trim()
+                if (status === "enabled" || status === "disabled")
+                    root.wifiRadioEnabled = (status === "enabled")
+            }
+        }
+    }
+    function refreshWifiRadioState() {
+        if (!wifiRadioStateProc.running)
+            wifiRadioStateProc.running = true
+    }
+    onWifiSsidChanged: {
+        if (isNotifOpen)
+            Qt.callLater(root.refreshWifiRadioState)
+    }
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
     Process { id: caffeineProc; command: ["sh", "-c", "pidof hypridle > /dev/null && killall hypridle || hypridle &"] }
@@ -494,6 +524,7 @@ ShellRoot {
         if (isNotifOpen) {
             hasUnread = false
             islandNotification.dismissAll()
+            Qt.callLater(root.refreshWifiRadioState)
         }
     }
 
@@ -545,8 +576,8 @@ ShellRoot {
         }
     }
 
-    NotificationCenter {
-        id: notifCenterWindow
+    ControlCenter {
+        id: controlCenterPanel
         screen: root.primaryUiScreen
 
         // Laptop keeps the original position. The HDMI value is used only
@@ -563,9 +594,10 @@ ShellRoot {
 
         visible_state: root.isNotifOpen
         dndState: root.dnd
-        modelData: sharedNotifModel
         
-        wifiState: root.wifiSsid !== "" && root.wifiSsid !== "disconnected" && root.wifiSsid !== "Disconnected"
+        wifiState: root.wifiRadioEnabled
+        wifiNetworkName: root.wifiSsid
+        btDeviceName: root.btDev
         btState: root.btStat === "on"
         airplaneState: root.airplaneMode
         caffeineState: root.caffeineMode
@@ -576,7 +608,6 @@ ShellRoot {
         
         onRequestClose: { root.isNotifOpen = false }
         onToggleDndRequested: { root.toggleDnd() }
-        onClearRequested: { root.clearNotifications() }
 
         onToggleWifiRequested: { wifiProc.running = true }
         onToggleBtRequested: { btProc.running = true }
