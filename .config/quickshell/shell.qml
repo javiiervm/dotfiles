@@ -1138,9 +1138,9 @@ ShellRoot {
                         batteryStatus: root.batStat
                         powerSaverMode: root.perfMode === "power-saver"
                     }
-                    // Open ControlCenter: a three-slider icon instead of the
-                    // old notification bell. This button does not depend on
-                    // unread state or Focus; both belong to DynamicIsland.
+                    // El ControlCenter vuelve a usar el logo original de Arch.
+                    // La accion sigue siendo abrir/cerrar el ControlCenter;
+                    // no depende del estado de Focus ni de las notificaciones.
                     MouseArea {
                         id: controlCenterToggleArea
                         width: 26
@@ -1149,38 +1149,12 @@ ShellRoot {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.isNotifOpen = !root.isNotifOpen
 
-                        Item {
+                        Text {
                             anchors.centerIn: parent
-                            width: 20
-                            height: 17
-
-                            Repeater {
-                                model: 3
-                                Item {
-                                    required property int index
-                                    width: 20
-                                    height: 3
-                                    y: index * 7
-
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width
-                                        height: 1.5
-                                        radius: 0.75
-                                        color: root.isNotifOpen || controlCenterToggleArea.containsMouse
-                                               ? Theme.white : Theme.grey1
-                                    }
-                                    Rectangle {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        x: index === 0 ? 5 : (index === 1 ? 13 : 8)
-                                        width: 5
-                                        height: 5
-                                        radius: width / 2
-                                        color: root.isNotifOpen || controlCenterToggleArea.containsMouse
-                                               ? Theme.white : Theme.grey1
-                                    }
-                                }
-                            }
+                            text: ""
+                            color: Theme.white
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 22
                         }
                     }
                 }

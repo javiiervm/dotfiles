@@ -588,8 +588,8 @@ PanelWindow {
 
             // CONTROL CENTER — 3 rows, 2 columns. All buttons share one size.
             // Wi-Fi              | Bluetooth
-            // Airplane           | Caffeine
-            // Mute notifications | Power mode
+            // Airplane           | Focus
+            // Caffeine           | Power
             Grid {
                 id: topRow
                 width: parent.width
@@ -879,6 +879,70 @@ PanelWindow {
                 }
 
                 GlassSurface {
+                    id: focusButton
+                    width: (parent.width - ncWindow.tileGap) / 2
+                    height: ncWindow.topTileHeight
+                    glassRadius: height / 2
+                    // Avoid the straight top highlight protruding past the pill's curved edge.
+                    showHighlight: false
+                    clip: true
+                    glassOpacity: ncWindow.dndState ? 0.43 : focusMouse.containsMouse ? 0.45 : 0.34
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 8
+                        spacing: 8
+                        Item {
+                            width: 40
+                            height: parent.height
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 36
+                                height: 36
+                                radius: width / 2
+                                color: ncWindow.dndState ? Theme.white : Qt.alpha(Theme.white, 0.13)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "󰖔" // Crescent moon for Focus, whether enabled or disabled
+                                    font.family: Theme.fontIcons
+                                    font.pixelSize: 16
+                                    color: ncWindow.dndState ? Theme.bg0 : Theme.white
+                                }
+                            }
+                        }
+                        Column {
+                            width: parent.width - 48
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 2
+                            Text {
+                                width: parent.width
+                                text: "Focus"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                width: parent.width
+                                text: ncWindow.dndState ? "On" : "Off"
+                                color: Qt.alpha(Theme.white, 0.60)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                            }
+                        }
+                    }
+                    MouseArea {
+                        id: focusMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: ncWindow.toggleDndRequested()
+                    }
+                }
+
+                GlassSurface {
                     id: caffeineTile
 
                     width: (parent.width - ncWindow.tileGap) / 2
@@ -969,70 +1033,6 @@ PanelWindow {
                                 ncWindow.toggleCaffeineRequested()
                             }
                         }
-                    }
-                }
-
-                GlassSurface {
-                    id: focusButton
-                    width: (parent.width - ncWindow.tileGap) / 2
-                    height: ncWindow.topTileHeight
-                    glassRadius: height / 2
-                    // Avoid the straight top highlight protruding past the pill's curved edge.
-                    showHighlight: false
-                    clip: true
-                    glassOpacity: ncWindow.dndState ? 0.43 : focusMouse.containsMouse ? 0.45 : 0.34
-
-                    Row {
-                        anchors.fill: parent
-                        anchors.leftMargin: 10
-                        anchors.rightMargin: 8
-                        spacing: 8
-                        Item {
-                            width: 40
-                            height: parent.height
-                            Rectangle {
-                                anchors.centerIn: parent
-                                width: 36
-                                height: 36
-                                radius: width / 2
-                                color: ncWindow.dndState ? Theme.white : Qt.alpha(Theme.white, 0.13)
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "󰖔" // Crescent moon for Focus, whether enabled or disabled
-                                    font.family: Theme.fontIcons
-                                    font.pixelSize: 16
-                                    color: ncWindow.dndState ? Theme.bg0 : Theme.white
-                                }
-                            }
-                        }
-                        Column {
-                            width: parent.width - 48
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
-                            Text {
-                                width: parent.width
-                                text: "Focus"
-                                color: Theme.white
-                                font.family: Theme.fontMain
-                                font.pixelSize: 12
-                                font.bold: true
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                width: parent.width
-                                text: ncWindow.dndState ? "On" : "Off"
-                                color: Qt.alpha(Theme.white, 0.60)
-                                font.family: Theme.fontMain
-                                font.pixelSize: 10
-                            }
-                        }
-                    }
-                    MouseArea {
-                        id: focusMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: ncWindow.toggleDndRequested()
                     }
                 }
 
