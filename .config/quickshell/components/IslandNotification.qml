@@ -279,23 +279,10 @@ PanelWindow {
         dismissPresentation()
     }
 
-    // The X closes every notification currently grouped in this island
-    // presentation. Older notifications that were already only in Notification
-    // Center are left alone.
+    // The popup is transient UI, not the notification history. Its X only
+    // closes this presentation: pending notifications remain in the shared
+    // model and in the Dynamic Island's notifications tab.
     function clearAll() {
-        if (!presentationActive)
-            return
-
-        var ids = []
-        for (var i = 0; i < notifications.length; ++i) {
-            var id = Number(notifications[i].id)
-            if (!isNaN(id) && id >= 0)
-                ids.push(id)
-        }
-
-        if (ids.length > 0)
-            removeManyRequested(ids)
-
         dismissPresentation()
     }
 
@@ -621,7 +608,7 @@ PanelWindow {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: function(mouse) {
                             mouse.accepted = true
-                            notificationIsland.clearAll()
+                            notificationIsland.dismissPresentation()
                         }
                     }
                 }

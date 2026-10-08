@@ -166,8 +166,40 @@ ShellRoot {
     property alias clipboardModel: clipboardModel
     ListModel { id: clipboardModel }
 
-    function clearNotifications() { cmdProc.command = ["sh", "-c", "echo CLEAR > /tmp/qs_notif_cmd"]; cmdProc.running = true }
-    function toggleDnd() { cmdProc.command = ["sh", "-c", "echo TOGGLE_DND > /tmp/qs_notif_cmd"]; cmdProc.running = true }
+    // Serialize writes to the notification daemon FIFO. The Notification
+    // Center, the Dynamic Island notifications tab and the transient island
+    // presentation may all request actions close together.
+    property var notifCommandQueue: []
+
+    function pumpNotifCommandQueue() {
+        if (notifActionProc.running || notifCommandQueue.length === 0)
+            return
+
+        var queue = notifCommandQueue.slice(0)
+        var command = queue.shift()
+        notifCommandQueue = queue
+
+        notifActionProc.command = [
+            "bash", "-c",
+            "printf '%s\\n' '" + command + "' > /tmp/qs_notif_cmd"
+        ]
+        notifActionProc.running = true
+    }
+
+    function sendNotifCommand(command) {
+        var queue = notifCommandQueue.slice(0)
+        queue.push(String(command))
+        notifCommandQueue = queue
+        pumpNotifCommandQueue()
+    }
+
+    function clearNotifications() { sendNotifCommand("CLEAR") }
+    function toggleDnd() { sendNotifCommand("TOGGLE_DND") }
+    function removeNotification(notifId) {
+        var id = Number(notifId)
+        if (!isNaN(id) && id >= 0)
+            sendNotifCommand("REMOVE|" + id)
+    }
     
     // Funciones del Portapapeles
     function refreshClipboard() {
@@ -205,6 +237,13 @@ ShellRoot {
     
     // Procesos separados
     Process { id: cmdProc }
+    Process {
+        id: notifActionProc
+        onRunningChanged: {
+            if (!running)
+                Qt.callLater(root.pumpNotifCommandQueue)
+        }
+    }
     Process { id: wifiProc; command: ["sh", "-c", "nmcli radio wifi | grep -q 'enabled' && nmcli radio wifi off || nmcli radio wifi on"] }
     Process { id: btProc; command: ["sh", "-c", "rfkill toggle bluetooth"] }
     Process { id: airplaneProc; command: ["sh", "-c", "rfkill list all | grep -q 'Soft blocked: no' && rfkill block all || rfkill unblock all"] }
@@ -615,6 +654,8 @@ ShellRoot {
                     var newTopId = state.notifications.length > 0
                         ? Number(state.notifications[0].id)
                         : -1
+                    var isNewNotification = state.count > previousCount
+                        || (newTopId !== -1 && newTopId !== root.lastNotifId)
 
                     root.dnd = state.dnd
                     root.notifCount = state.count
@@ -623,9 +664,8 @@ ShellRoot {
                     // suppresses POPUP and sound. Therefore the bell can still
                     // light up without showing a popup.
                     if (!root.isNotifOpen
-                            && (state.count > previousCount
-                                || (newTopId !== -1
-                                    && newTopId !== root.lastNotifId))) {
+                            && !islandWidget.viewingNotifications
+                            && isNewNotification) {
                         root.hasUnread = true
                     }
 
@@ -635,10 +675,19 @@ ShellRoot {
                     for (var i = 0; i < state.notifications.length; i++) {
                         sharedNotifModel.append(state.notifications[i])
                     }
+                    // A newly arrived notification must be visible at the top
+                    // even if the user previously scrolled down in the tab.
+                    if (isNewNotification && islandWidget.viewingNotifications)
+                        Qt.callLater(islandWidget.showLatestNotificationFromTab)
                 } else if (line.startsWith("POPUP|")) {
-                    // DND and an open Notification Center suppress transient
-                    // presentation, while STATE still keeps history up to date.
-                    if (!root.isNotifOpen && !root.dnd) {
+                    // Never interrupt an expanded Dynamic Island tab (Music,
+                    // System, App Usage or Notifications) with a transient popup.
+                    // STATE always updates sharedNotifModel, so the new item is
+                    // available in Notifications even when the popup is skipped.
+                    // The daemon owns the notification sound; this only skips
+                    // the visual popup, without changing the sound behaviour.
+                    if (!root.isNotifOpen && !root.dnd
+                            && !islandWidget.isExpanded) {
                         root.hasUnread = true
                         var n = JSON.parse(line.substring(6))
                         islandNotification.enqueue(n)
@@ -1302,6 +1351,23 @@ ShellRoot {
         DynamicIsland {
             id: islandWidget
 
+            // Notifications are now a native optional DynamicIsland tab.
+            // DynamicIsland owns the carousel, hover lifecycle and closing
+            // behaviour; shell.qml only supplies the shared data/actions.
+            notificationModel: sharedNotifModel
+            pendingNotificationCount: root.notifCount
+
+            onRemoveNotificationRequested: function(notificationId) {
+                root.removeNotification(notificationId)
+            }
+
+            onClearNotificationsRequested: {
+                root.hasUnread = false
+                root.clearNotifications()
+            }
+
+            onNotificationsViewed: root.hasUnread = false
+
             // Keep the real Dynamic Island permanently in its normal Wayland
             // position. Moving the PanelWindow itself to -500 while a
             // notification was visible made Hyprland animate it back down from
@@ -1341,27 +1407,17 @@ ShellRoot {
                 : -38
 
             // The X removes every notification currently grouped in the
-            // transient island stack. Send all REMOVE commands through one
-            // FIFO writer so no request is lost while cmdProc is busy.
+            // transient island stack. Use the same serialized FIFO queue as
+            // the Notification Center and the persistent island tab.
             onRemoveManyRequested: function(notificationIds) {
                 if (!notificationIds || notificationIds.length === 0)
                     return
 
-                var args = []
                 for (var i = 0; i < notificationIds.length; ++i) {
                     var id = Number(notificationIds[i])
                     if (!isNaN(id) && id >= 0)
-                        args.push("'REMOVE|" + id + "'")
+                        root.sendNotifCommand("REMOVE|" + id)
                 }
-
-                if (args.length === 0)
-                    return
-
-                cmdProc.command = [
-                    "bash", "-c",
-                    "printf '%s\n' " + args.join(" ") + " > /tmp/qs_notif_cmd"
-                ]
-                cmdProc.running = true
             }
         }
     }

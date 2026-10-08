@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
 import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
@@ -52,6 +53,29 @@ PanelWindow {
     // que puede desincronizarse con el input-region real de la capa Wayland.
     property bool isFullscreen: false
     visible: !isFullscreen
+
+    // V6_NATIVE_NOTIFICATIONS_TAB
+    // The notification page is part of DynamicIsland itself. shell.qml only
+    // provides the shared ListModel and executes the daemon actions requested
+    // by this component.
+    property var notificationModel: null
+    property int pendingNotificationCount: 0
+    readonly property int notificationTabIndex: 3
+    readonly property bool notificationsTabVisible: pendingNotificationCount > 0
+    // Single source of truth for popup suppression in shell.qml.
+    // A notification arriving while this page is visible updates the shared
+    // ListModel only; it must not replace the page with a transient popup.
+    readonly property bool viewingNotifications:
+        isExpanded && notificationsTabVisible && currentTab === notificationTabIndex
+
+    function showLatestNotificationFromTab() {
+        if (viewingNotifications)
+            islandNotificationsList.positionViewAtBeginning()
+    }
+
+    signal removeNotificationRequested(int notificationId)
+    signal clearNotificationsRequested()
+    signal notificationsViewed()
 
     function triggerMsg(icon, color, text) {
         triggerTextNotification(icon, text, color);
@@ -146,7 +170,7 @@ PanelWindow {
 
     onLiveActivityTypesChanged: Qt.callLater(islandWindow.normalizeLiveActivitySelection)
     onLiveActivityCountChanged: {
-        if (liveActivityCount === 0 && hoverArea.containsMouse)
+        if (liveActivityCount === 0 && islandHoverHandler.hovered)
             suppressNormalHoverUntilExit = true;
     }
     readonly property bool recordingActivityActive:
@@ -472,24 +496,131 @@ PanelWindow {
     }
 
     property int currentTab: 0
-    property int totalTabs: 3
+    readonly property int totalTabs: notificationsTabVisible ? 4 : 3
 
-    // Devuelve la posición visual más cercana de una pestaña respecto a la activa.
-    // A diferencia de (tabIndex - currentTab), esta distancia "envuelve" los extremos
-    // del carrusel. Así, desde la pestaña 2, la 0 está a +1 isla (no a -2), y
-    // desde la pestaña 0, la 2 está a -1 isla (no a +2).
-    // Resultado: los saltos 2 -> 0 y 0 -> 2 se animan exactamente una pestaña
-    // en la misma dirección que el resto del carrusel.
+    // Animated circular carousel: only the outgoing and incoming pages
+    // participate in each slide. In particular this avoids the ambiguous
+    // +/-2 distance when there are four pages, and prevents hidden pages
+    // from moving across the island during the next navigation gesture.
+    property int previousTab: -1
+    property int tabSlideDirection: 1
+    property real tabSlideProgress: 1
+    property bool tabTransitionRunning: false
+    property real tabWheelAccumulator: 0
+
     function circularTabOffset(tabIndex) {
-        var delta = tabIndex - currentTab;
-        var half = totalTabs / 2;
-
+        var delta = tabIndex - currentTab
+        var half = totalTabs / 2
         if (delta > half)
-            delta -= totalTabs;
+            delta -= totalTabs
         else if (delta < -half)
-            delta += totalTabs;
+            delta += totalTabs
+        return delta
+    }
 
-        return delta;
+    function tabPageX(tabIndex, pageWidth) {
+        if (tabTransitionRunning) {
+            if (tabIndex === previousTab)
+                return -tabSlideDirection * pageWidth * tabSlideProgress
+            if (tabIndex === currentTab)
+                return tabSlideDirection * pageWidth * (1 - tabSlideProgress)
+        }
+        return tabIndex === currentTab ? 0 : circularTabOffset(tabIndex) * pageWidth
+    }
+
+    function tabPageVisible(tabIndex) {
+        if (tabIndex === notificationTabIndex && !notificationsTabVisible)
+            return false
+        return tabIndex === currentTab
+               || (tabTransitionRunning && tabIndex === previousTab)
+    }
+
+    function resetTabTransition() {
+        tabSlideAnimation.stop()
+        tabTransitionRunning = false
+        previousTab = -1
+        tabSlideProgress = 1
+        tabWheelAccumulator = 0
+        tabWheelReset.stop()
+    }
+
+    function cycleExpandedTab(step) {
+        if (!isExpanded || tabTransitionRunning || totalTabs < 2)
+            return
+        var nextTab = (currentTab + (step >= 0 ? 1 : -1) + totalTabs) % totalTabs
+        previousTab = currentTab
+        tabSlideDirection = step >= 0 ? 1 : -1
+        tabSlideProgress = 0
+        tabTransitionRunning = true
+        currentTab = nextTab
+        tabSlideAnimation.restart()
+    }
+
+    // The entire expanded surface uses one wheel accumulator. A mouse wheel
+    // works in one tick; a smooth touchpad can add several small deltas.
+    // During the 350 ms slide, swallow the tail of the same gesture.
+    function handleTabWheel(wheel) {
+        if (!isExpanded)
+            return
+
+        var dx = wheel.angleDelta.x
+        var dy = wheel.angleDelta.y
+        if (!dx && !dy) {
+            dx = wheel.pixelDelta.x
+            dy = wheel.pixelDelta.y
+        }
+
+        var delta = Math.abs(dx) > Math.abs(dy) ? dx : dy
+        if (!delta)
+            return
+        wheel.accepted = true
+
+        // Shift+wheel explicitly scrolls the notification list rather than
+        // switching pages. Dragging its scrollbar also works normally.
+        if (currentTab === notificationTabIndex
+                && (wheel.modifiers & Qt.ShiftModifier)
+                && islandNotificationsList.contentHeight > islandNotificationsList.height) {
+            var newY = islandNotificationsList.contentY - delta
+            islandNotificationsList.contentY = Math.max(0, Math.min(
+                islandNotificationsList.contentHeight - islandNotificationsList.height, newY))
+            return
+        }
+        if (tabTransitionRunning)
+            return
+
+        if (tabWheelAccumulator && tabWheelAccumulator * delta < 0)
+            tabWheelAccumulator = 0
+        tabWheelAccumulator += delta
+        tabWheelReset.restart()
+
+        if (tabWheelAccumulator <= -40) {
+            tabWheelAccumulator = 0
+            cycleExpandedTab(1)
+        } else if (tabWheelAccumulator >= 40) {
+            tabWheelAccumulator = 0
+            cycleExpandedTab(-1)
+        }
+    }
+
+    Timer {
+        id: tabWheelReset
+        interval: 180
+        repeat: false
+        onTriggered: islandWindow.tabWheelAccumulator = 0
+    }
+
+    NumberAnimation {
+        id: tabSlideAnimation
+        target: islandWindow
+        property: "tabSlideProgress"
+        from: 0
+        to: 1
+        duration: 350
+        easing.type: Easing.OutQuint
+        onFinished: {
+            islandWindow.tabTransitionRunning = false
+            islandWindow.previousTab = -1
+        }
     }
 
     // Stats is strictly on-demand. The Process below only exists while the
@@ -497,13 +628,65 @@ PanelWindow {
     // immediately when leaving it so the collapsed island never keeps a stale
     // download indicator alive.
     onIsExpandedChanged: {
-        if (!isExpanded)
+        resetTabTransition()
+        if (!isExpanded) {
             dlSpeed = 0
+            return
+        }
+
+        // Pending notifications are the optional first page. Every fresh
+        // expansion starts there; once the user scrolls away, normal circular
+        // navigation takes over until the island is closed again.
+        if (notificationsTabVisible) {
+            currentTab = notificationTabIndex
+            notificationsViewed()
+        }
     }
 
     onCurrentTabChanged: {
         if (currentTab !== 1)
             dlSpeed = 0
+
+        if (notificationsTabVisible && currentTab === notificationTabIndex)
+            notificationsViewed()
+    }
+
+    // Clearing the last notification and pressing Clear All have the exact
+    // same closing behaviour. Do not select Music as an expanded fallback:
+    // instead contract the island and disarm the current physical hover.
+    function closeEmptyNotificationsTab() {
+        suppressNormalHoverUntilExit = true
+        liveActivityHoverExpandArmed = false
+        isUserSeeking = false
+        resetTabTransition()
+        currentTab = 0
+    }
+
+    onPendingNotificationCountChanged: {
+        if (pendingNotificationCount === 0) {
+            // Also cover clears coming from NotificationCenter/the daemon.
+            if (currentTab === notificationTabIndex && isExpanded)
+                closeEmptyNotificationsTab()
+            else {
+                if (tabTransitionRunning)
+                    resetTabTransition()
+                if (currentTab === notificationTabIndex)
+                    currentTab = 0
+            }
+        }
+    }
+
+    function removeNotificationFromTab(notificationId) {
+        // Respond immediately to the last X rather than waiting for the
+        // asynchronous STATE update from notif_daemon.py.
+        if (viewingNotifications && pendingNotificationCount === 1)
+            closeEmptyNotificationsTab()
+        removeNotificationRequested(notificationId)
+    }
+
+    function clearAllNotificationsFromTab() {
+        closeEmptyNotificationsTab()
+        clearNotificationsRequested()
     }
 
     // --- ACTUALIZAR EN LAS PROPIEDADES DE LA ISLA ---
@@ -1097,7 +1280,7 @@ PanelWindow {
     // easy to click, so expansion is only armed by hovering the clock area.
     property bool isExpanded: islandWindow.isUserSeeking
                               || (!islandWindow.hasLiveActivities
-                                  && hoverArea.containsMouse
+                                  && islandHoverHandler.hovered
                                   && !islandWindow.suppressNormalHoverUntilExit)
                               || (islandWindow.hasLiveActivities
                                   && islandWindow.liveActivityHoverExpandArmed)
@@ -1151,58 +1334,67 @@ PanelWindow {
             }
         }
 
+        // Passive hover remains active over nested delegates and their buttons.
+        // A MouseArea.containsMouse can become false when a child MouseArea
+        // takes hover, which used to collapse the island under the pointer.
+        HoverHandler {
+            id: islandHoverHandler
+            onHoveredChanged: {
+                if (!hovered) {
+                    if (!islandWindow.isUserSeeking && islandWindow.hasLiveActivities)
+                        islandWindow.liveActivityHoverExpandArmed = false
+                    islandWindow.suppressNormalHoverUntilExit = false
+                }
+            }
+        }
+
+        Timer {
+            id: liveActivityWheelCooldown
+            interval: 260
+            repeat: false
+        }
+
         MouseArea {
             id: hoverArea
             anchors.fill: parent
             hoverEnabled: true
+            acceptedButtons: Qt.NoButton
 
-            onExited: {
-                if (!islandWindow.isUserSeeking && islandWindow.hasLiveActivities)
-                    islandWindow.liveActivityHoverExpandArmed = false
-
-                // Leaving the island completes the hover cycle that was active
-                // when the final Live Activity disappeared. A subsequent hover
-                // is therefore allowed to expand the normal island again.
-                islandWindow.suppressNormalHoverUntilExit = false
-            }
-            
-            Timer { id: wheelCooldown; interval: 260 }
-            
-            onWheel: (wheel) => {
-                if (wheelCooldown.running) return;
-
+            // Handles Live Activities when collapsed and normal carousel
+            // navigation when expanded (without the optional notifications tab).
+            onWheel: function(wheel) {
                 if (!islandWindow.isExpanded && islandWindow.liveActivityCount > 1) {
-                    // Compact Live Activities: vertical touchpad gesture or
-                    // mouse wheel rotates the activity carousel. Ignore mostly
-                    // horizontal deltas here so normal touchpad movement cannot
-                    // switch activities accidentally.
-                    var vertical = wheel.angleDelta.y;
-                    if (vertical < -35) {
-                        islandWindow.cycleLiveActivity(1);
-                        wheelCooldown.restart();
-                        wheel.accepted = true;
-                    } else if (vertical > 35) {
-                        islandWindow.cycleLiveActivity(-1);
-                        wheelCooldown.restart();
-                        wheel.accepted = true;
+                    var vertical = wheel.angleDelta.y
+                    if (liveActivityWheelCooldown.running) {
+                        wheel.accepted = true
+                        return
                     }
-                    return;
+                    if (vertical < -35) {
+                        islandWindow.cycleLiveActivity(1)
+                        liveActivityWheelCooldown.restart()
+                        wheel.accepted = true
+                    } else if (vertical > 35) {
+                        islandWindow.cycleLiveActivity(-1)
+                        liveActivityWheelCooldown.restart()
+                        wheel.accepted = true
+                    }
+                    return
                 }
+                islandWindow.handleTabWheel(wheel)
+            }
+        }
 
-                if (!islandWindow.isExpanded) return;
-
-                // Expanded island: preserve the existing tab carousel.
-                var delta = Math.abs(wheel.angleDelta.x) >= Math.abs(wheel.angleDelta.y)
-                            ? wheel.angleDelta.x
-                            : wheel.angleDelta.y;
-
-                if (delta < -40) {
-                    currentTab = (currentTab + 1) % totalTabs;
-                    wheelCooldown.restart();
-                } else if (delta > 40) {
-                    currentTab = (currentTab - 1 + totalTabs) % totalTabs;
-                    wheelCooldown.restart();
-                }
+        // A wheel-only overlay above delegates ensures the ListView cannot
+        // steal wheel events from the circular tab carousel. Buttons remain
+        // clickable because this area accepts no mouse buttons.
+        MouseArea {
+            id: notificationTabWheelSurface
+            anchors.fill: parent
+            z: 1400
+            enabled: islandWindow.isExpanded && islandWindow.notificationsTabVisible
+            acceptedButtons: Qt.NoButton
+            onWheel: function(wheel) {
+                islandWindow.handleTabWheel(wheel)
             }
         }
 
@@ -2041,17 +2233,261 @@ PanelWindow {
                 }
             }
 
+            // =========================================================
+            // OPTIONAL TAB 3: NOTIFICATIONS
+            // Circular order when present: Notifications -> Music -> System
+            // -> App Usage -> Notifications. When count reaches zero this
+            // entire page leaves the carousel because totalTabs falls to 3.
+            // =========================================================
+            Item {
+                width: parent.width
+                height: parent.height
+                x: islandWindow.tabPageX(islandWindow.notificationTabIndex, width)
+                visible: islandWindow.tabPageVisible(islandWindow.notificationTabIndex)
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    anchors.topMargin: 10
+                    anchors.bottomMargin: 10
+                    spacing: 7
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 26
+                        spacing: 7
+
+                        Text {
+                            text: "Notifications"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: Math.max(22, notificationCountText.implicitWidth + 10)
+                            Layout.preferredHeight: 19
+                            radius: 9.5
+                            color: Qt.alpha(Theme.white, 0.09)
+                            border.width: 1
+                            border.color: Qt.alpha(Theme.white, 0.08)
+
+                            Text {
+                                id: notificationCountText
+                                anchors.centerIn: parent
+                                text: islandWindow.pendingNotificationCount
+                                color: Qt.alpha(Theme.white, 0.68)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Rectangle {
+                            id: islandClearNotificationsButton
+                            Layout.preferredWidth: 66
+                            Layout.preferredHeight: 23
+                            radius: 11.5
+                            color: islandClearNotificationsMouse.containsMouse
+                                   ? Qt.alpha(Theme.red, 0.18)
+                                   : Qt.alpha(Theme.white, 0.06)
+                            border.width: 1
+                            border.color: islandClearNotificationsMouse.containsMouse
+                                          ? Qt.alpha(Theme.red, 0.48)
+                                          : Qt.alpha(Theme.white, 0.08)
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Clear All"
+                                color: islandClearNotificationsMouse.containsMouse
+                                       ? Theme.red
+                                       : Qt.alpha(Theme.white, 0.72)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                id: islandClearNotificationsMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: islandWindow.clearAllNotificationsFromTab()
+                            }
+                        }
+                    }
+
+                    ListView {
+                        id: islandNotificationsList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        model: islandWindow.notificationModel
+                        spacing: 6
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            interactive: true
+                        }
+
+                        delegate: Rectangle {
+                            width: ListView.view.width
+                            height: 58
+                            radius: 13
+                            color: model.urgency === 2
+                                   ? Qt.alpha(Theme.red, 0.13)
+                                   : Qt.alpha(Theme.white, notificationRowMouse.containsMouse ? 0.09 : 0.055)
+                            border.width: 1
+                            border.color: model.urgency === 2
+                                          ? Qt.alpha(Theme.red, 0.34)
+                                          : Qt.alpha(Theme.white, 0.07)
+
+                            MouseArea {
+                                id: notificationRowMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 9
+                                anchors.rightMargin: 7
+                                anchors.topMargin: 7
+                                anchors.bottomMargin: 7
+                                spacing: 9
+
+                                Item {
+                                    Layout.preferredWidth: 38
+                                    Layout.preferredHeight: 38
+                                    Layout.alignment: Qt.AlignVCenter
+
+                                    Image {
+                                        id: islandRawNotificationIcon
+                                        anchors.fill: parent
+                                        source: model.icon
+                                                ? (String(model.icon).startsWith("/")
+                                                   ? "file://" + model.icon
+                                                   : "image://icon/" + model.icon)
+                                                : ""
+                                        fillMode: Image.PreserveAspectCrop
+                                        visible: false
+                                    }
+
+                                    Rectangle {
+                                        id: islandNotificationIconMask
+                                        anchors.fill: parent
+                                        radius: 10
+                                        visible: false
+                                    }
+
+                                    OpacityMask {
+                                        anchors.fill: parent
+                                        source: islandRawNotificationIcon
+                                        maskSource: islandNotificationIconMask
+                                        visible: islandRawNotificationIcon.status === Image.Ready
+                                    }
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 10
+                                        visible: islandRawNotificationIcon.status !== Image.Ready
+                                        color: Qt.alpha(Theme.white, 0.10)
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: ""
+                                            font.family: Theme.fontIcons
+                                            font.pixelSize: 15
+                                            color: Theme.white
+                                        }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                    spacing: 1
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: model.app + (model.urgency === 2 ? "  •  CRITICAL" : "")
+                                        color: model.urgency === 2
+                                               ? Theme.red
+                                               : Qt.alpha(Theme.white, 0.55)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 8
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: model.title
+                                        color: Theme.white
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: model.body
+                                        color: Qt.alpha(Theme.white, 0.55)
+                                        font.family: Theme.fontMain
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 24
+                                    Layout.preferredHeight: 24
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: 12
+                                    color: islandDismissNotificationMouse.containsMouse
+                                           ? Qt.alpha(Theme.white, 0.15)
+                                           : "transparent"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "󰅖"
+                                        font.family: Theme.fontIcons
+                                        font.pixelSize: 12
+                                        color: islandDismissNotificationMouse.containsMouse
+                                               ? Theme.white
+                                               : Qt.alpha(Theme.white, 0.62)
+                                    }
+
+                                    MouseArea {
+                                        id: islandDismissNotificationMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: islandWindow.removeNotificationFromTab(Number(model.id))
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
+            }
+
             // ================================
             // TAB 0: MUSIC PLAYER
             // ================================
             Item {
                 width: parent.width
                 height: parent.height
-                x: islandWindow.circularTabOffset(0) * width
-                opacity: currentTab === 0 ? 1 : 0
-                Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
-                Behavior on opacity { NumberAnimation { duration: 250 } }
-                visible: opacity > 0
+                x: islandWindow.tabPageX(0, width)
+                visible: islandWindow.tabPageVisible(0)
 
                 // ========================================================
                 // NOTHING PLAYING
@@ -2697,11 +3133,8 @@ PanelWindow {
             Item {
                 width: parent.width
                 height: parent.height
-                x: islandWindow.circularTabOffset(1) * width
-                opacity: currentTab === 1 ? 1 : 0
-                Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
-                Behavior on opacity { NumberAnimation { duration: 250 } }
-                visible: opacity > 0
+                x: islandWindow.tabPageX(1, width)
+                visible: islandWindow.tabPageVisible(1)
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -3035,11 +3468,8 @@ PanelWindow {
             Item {
                 width: parent.width
                 height: parent.height
-                x: islandWindow.circularTabOffset(2) * width
-                opacity: currentTab === 2 ? 1 : 0
-                Behavior on x { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
-                Behavior on opacity { NumberAnimation { duration: 250 } }
-                visible: opacity > 0
+                x: islandWindow.tabPageX(2, width)
+                visible: islandWindow.tabPageVisible(2)
 
                 ColumnLayout {
                     anchors.fill: parent
