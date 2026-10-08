@@ -60,6 +60,12 @@ PanelWindow {
     // by this component.
     property var notificationModel: null
     property int pendingNotificationCount: 0
+    // Status comes from shell.qml, which already tracks new notifications and
+    // Focus/DND through the existing daemon. No polling or extra processes.
+    property bool hasUnreadNotifications: false
+    property bool focusModeActive: false
+    readonly property bool showUnreadIndicator:
+        hasUnreadNotifications && pendingNotificationCount > 0
     readonly property int notificationTabIndex: 3
     readonly property bool notificationsTabVisible: pendingNotificationCount > 0
     // Single source of truth for popup suppression in shell.qml.
@@ -720,7 +726,11 @@ PanelWindow {
         // Solo reservamos espacio extra para indicadores que realmente
         // ocupan los laterales del estado colapsado.
         var leftSideWidth = (dlSpeed >= 5 ? 18 : 0);
-        var rightSideWidth = (globalMicActive ? 12 : 0) + (globalCamActive ? 12 : 0);
+        // Reserve room for the indicators so they never touch the rounded
+        // right edge. Their width changes only in response to state updates.
+        var rightSideWidth = (focusModeActive ? 19 : 0)
+                           + (globalMicActive ? 12 : 0)
+                           + (globalCamActive ? 12 : 0);
         return 120 + (Math.max(leftSideWidth, rightSideWidth) * 2);
     }
 
@@ -1304,14 +1314,55 @@ PanelWindow {
         // únicamente aquí. El borde glass normal permanece intacto.
         showHighlight: false
 
-        border.color: baseAlertColor !== "transparent" ? baseAlertColor : Glass.borderColor
-        border.width: baseAlertColor !== "transparent" ? 2 : Glass.borderWidth
-        
+        // Unread notifications use the same 2 px stroke as the existing
+        // temperature/load/Bluetooth alerts. Do not reserve a second outline.
+        readonly property bool unreadBorderActive:
+            islandWindow.showUnreadIndicator
+            && !isExpanded
+            && !islandWindow.isNotifying
+        readonly property bool coloredBorderActive: baseAlertColor !== "transparent"
+        readonly property bool mixedBorderActive: unreadBorderActive && coloredBorderActive
+        readonly property color unreadWhite: Qt.alpha(Theme.white, 0.96)
+        readonly property color mixedSecondaryColor:
+            (isOverheating && isOverloaded) ? colorLoad : baseAlertColor
+
+        // Colored alerts take priority as the resting color. When both are
+        // present, white visits the border briefly rather than staying on top.
+        border.color: coloredBorderActive ? baseAlertColor
+                      : (unreadBorderActive ? unreadWhite : Glass.borderColor)
+        border.width: (coloredBorderActive || unreadBorderActive) ? 2 : Glass.borderWidth
+
+        // One animation owns the border. With no unread notification, keep
+        // the previous red/orange or pulse animation. When an unread
+        // notification coincides with a colored alert, cycle primarily through
+        // the alert colors, then briefly fade to white and back. If red and
+        // orange are both active, both remain present in the cycle.
         SequentialAnimation on border.color {
-            running: baseAlertColor !== "transparent" && !isExpanded && (isOverheating || isOverloaded)
+            running: !isExpanded && (
+                visualBg.mixedBorderActive ||
+                (visualBg.coloredBorderActive && (isOverheating || isOverloaded))
+            )
             loops: Animation.Infinite
-            ColorAnimation { to: altAlertColor; duration: 800 }
-            ColorAnimation { to: baseAlertColor; duration: 800 }
+
+            PauseAnimation { duration: visualBg.mixedBorderActive ? 950 : 0 }
+            ColorAnimation {
+                to: visualBg.mixedBorderActive ? visualBg.mixedSecondaryColor : altAlertColor
+                duration: visualBg.mixedBorderActive ? 550 : 800
+                easing.type: Easing.InOutSine
+            }
+            PauseAnimation { duration: visualBg.mixedBorderActive ? 750 : 0 }
+            ColorAnimation {
+                to: visualBg.mixedBorderActive ? visualBg.unreadWhite : baseAlertColor
+                duration: visualBg.mixedBorderActive ? 500 : 800
+                easing.type: Easing.InOutSine
+            }
+            PauseAnimation { duration: visualBg.mixedBorderActive ? 180 : 0 }
+            ColorAnimation {
+                to: baseAlertColor
+                duration: visualBg.mixedBorderActive ? 650 : 0
+                easing.type: Easing.InOutSine
+            }
+            PauseAnimation { duration: visualBg.mixedBorderActive ? 1000 : 0 }
         }
 
         Behavior on width  { NumberAnimation { duration: 300; easing.type: Easing.OutQuint } }
@@ -1825,14 +1876,25 @@ PanelWindow {
                 }
             }
 
-            Row {
+            // Subtle, event-driven statuses next to the clock. Keep the
+            // orange microphone and green camera dots unchanged; do not
+            // repurpose the island border (already used for BT/heat/load).
+            RowLayout {
                 anchors.left: customClock.right
-                anchors.leftMargin: 10
+                anchors.leftMargin: 9
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-                
-                Rectangle { width: 6; height: 6; radius: 3; color: "#ff9f0a"; visible: globalMicActive }
-                Rectangle { width: 6; height: 6; radius: 3; color: "#30d158"; visible: globalCamActive }
+                spacing: 7
+
+                Text {
+                    visible: islandWindow.focusModeActive
+                    text: "󰂛" // Nerd Font Material Design: bell-off
+                    font.family: Theme.fontIcons
+                    font.pixelSize: 12
+                    color: Qt.alpha(Theme.white, 0.72)
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                Rectangle { Layout.preferredWidth: 6; Layout.preferredHeight: 6; radius: 3; color: "#ff9f0a"; visible: globalMicActive; Layout.alignment: Qt.AlignVCenter }
+                Rectangle { Layout.preferredWidth: 6; Layout.preferredHeight: 6; radius: 3; color: "#30d158"; visible: globalCamActive; Layout.alignment: Qt.AlignVCenter }
             }
 
             Timer { 
@@ -2117,6 +2179,30 @@ PanelWindow {
                 font.family: Theme.fontMain
                 font.pixelSize: 11
                 font.bold: true
+            }
+        }
+
+        // When a Live Activity replaces the normal collapsed clock layout,
+        // keep the small status icons visible immediately before the fixed
+        // clock. The clock itself remains at exactly its original coordinates.
+        RowLayout {
+            visible: !islandWindow.isExpanded
+                     && !islandWindow.isNotifying
+                     && islandWindow.hasLiveActivities
+                     && islandWindow.focusModeActive
+            anchors.right: fixedLiveActivityClock.left
+            anchors.rightMargin: 4
+            anchors.verticalCenter: fixedLiveActivityClock.verticalCenter
+            spacing: 6
+            z: 1140
+
+            Text {
+                visible: islandWindow.focusModeActive
+                text: "󰂛"
+                font.family: Theme.fontIcons
+                font.pixelSize: 10
+                color: Qt.alpha(Theme.white, 0.72)
+                Layout.alignment: Qt.AlignVCenter
             }
         }
 

@@ -517,12 +517,11 @@ ShellRoot {
     }
 
     onIsNotifOpenChanged: {
-        // Opening Notification Center marks everything as seen and collapses
-        // any transient notification currently occupying the Dynamic Island.
-        // New notifications still enter sharedNotifModel through STATE; the
-        // POPUP event is ignored below while the center itself is open.
+        // The ControlCenter no longer displays pending notifications, so
+        // opening it must NOT mark them as read. Only the island's native
+        // Notifications tab acknowledges them. Keep the existing popup
+        // dismissal and Wi-Fi state refresh when ControlCenter opens.
         if (isNotifOpen) {
-            hasUnread = false
             islandNotification.dismissAll()
             Qt.callLater(root.refreshWifiRadioState)
         }
@@ -685,18 +684,22 @@ ShellRoot {
                     var newTopId = state.notifications.length > 0
                         ? Number(state.notifications[0].id)
                         : -1
+                    // A lower count can expose a different top ID when an
+                    // item was removed; that is not a new unread notification.
                     var isNewNotification = state.count > previousCount
-                        || (newTopId !== -1 && newTopId !== root.lastNotifId)
+                        || (state.count > 0 && state.count >= previousCount
+                            && newTopId !== root.lastNotifId)
 
                     root.dnd = state.dnd
                     root.notifCount = state.count
 
-                    // STATE is emitted for every notification even when DND
-                    // suppresses POPUP and sound. Therefore the bell can still
-                    // light up without showing a popup.
-                    if (!root.isNotifOpen
-                            && !islandWidget.viewingNotifications
-                            && isNewNotification) {
+                    // The unread indicator now lives on the Dynamic Island.
+                    // The ControlCenter is NOT a notification reader. DND may
+                    // suppress the popup, but the incoming item is still unread.
+                    if (state.count === 0) {
+                        root.hasUnread = false
+                    } else if (!islandWidget.viewingNotifications
+                               && isNewNotification) {
                         root.hasUnread = true
                     }
 
@@ -1135,14 +1138,49 @@ ShellRoot {
                         batteryStatus: root.batStat
                         powerSaverMode: root.perfMode === "power-saver"
                     }
+                    // Open ControlCenter: a three-slider icon instead of the
+                    // old notification bell. This button does not depend on
+                    // unread state or Focus; both belong to DynamicIsland.
                     MouseArea {
-                        width: 26; height: 26; cursorShape: Qt.PointingHandCursor; onClicked: { root.isNotifOpen = !root.isNotifOpen }
-                        Notification { 
-                            dnd: root.dnd; 
-                            count: root.notifCount; 
-                            hasUnread: root.hasUnread; 
-                            showContainer: false; 
-                            anchors.fill: parent 
+                        id: controlCenterToggleArea
+                        width: 26
+                        height: 26
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.isNotifOpen = !root.isNotifOpen
+
+                        Item {
+                            anchors.centerIn: parent
+                            width: 20
+                            height: 17
+
+                            Repeater {
+                                model: 3
+                                Item {
+                                    required property int index
+                                    width: 20
+                                    height: 3
+                                    y: index * 7
+
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width
+                                        height: 1.5
+                                        radius: 0.75
+                                        color: root.isNotifOpen || controlCenterToggleArea.containsMouse
+                                               ? Theme.white : Theme.grey1
+                                    }
+                                    Rectangle {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        x: index === 0 ? 5 : (index === 1 ? 13 : 8)
+                                        width: 5
+                                        height: 5
+                                        radius: width / 2
+                                        color: root.isNotifOpen || controlCenterToggleArea.containsMouse
+                                               ? Theme.white : Theme.grey1
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1387,6 +1425,8 @@ ShellRoot {
             // behaviour; shell.qml only supplies the shared data/actions.
             notificationModel: sharedNotifModel
             pendingNotificationCount: root.notifCount
+            hasUnreadNotifications: root.hasUnread
+            focusModeActive: root.dnd
 
             onRemoveNotificationRequested: function(notificationId) {
                 root.removeNotification(notificationId)
