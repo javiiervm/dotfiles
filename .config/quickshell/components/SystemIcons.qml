@@ -43,10 +43,6 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Wi-Fi Network", "SSID: " + ssid, "Signal: " + wifiSignal + "%", "#3498db", 142)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 142)
-            onClicked: {
-                rootRef.controlCenterTab = "wifi"
-                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
-            }
         }
     }
 
@@ -65,10 +61,6 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Bluetooth", btOn ? "Active" : "Off", "Device: " + btDev, "#3b82f6", 112)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 112)
-            onClicked: {
-                rootRef.controlCenterTab = "bluetooth"
-                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
-            }
         }
     }
 
@@ -94,10 +86,6 @@ Row {
             hoverEnabled: true 
             onEntered: iconsRoot.updateMenu(true, "Audio", (volMute || vol === 0) ? "Muted" : "Level: " + vol + "%", "Output: " + volDesc, "#e74c3c", 82)
             onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 82)
-            onClicked: {
-                rootRef.controlCenterTab = "audio"
-                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
-            }            
         }
     }
 
@@ -126,10 +114,6 @@ Row {
             }
             onExited: {
                 iconsRoot.updateMenu(false, "", "", "", "#ffffff", 52);
-            }
-            onClicked: {
-                rootRef.controlCenterTab = "performance"
-                rootRef.isControlCenterOpen = !rootRef.isControlCenterOpen
             }
         }
     }
