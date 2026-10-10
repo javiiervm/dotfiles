@@ -6,19 +6,34 @@ import ".."
 // The Python helper runs only when Settings is opened or Apply is clicked.
 FocusScope {
     id: settings
-    height: 578
+    height: isNetworkTab ? 520 : 578
     focus: visible
     signal requestBack()
 
-    property int selectedTab: 0
+    property int selectedTab: 0 // 0 Wi-Fi, 1 Bluetooth, 2 Hyprland, 3 Quickshell
     // Focus stays in this FocusScope except while an input is being edited.
-    // 0/1 = tabs, 2.. = settings, next two = Discard / Apply.
+    // 0..3 tabs; then controls/rows; then Discard / Apply on visual tabs.
     property int keyboardIndex: 0
     property int pickerIndex: 0  // 0..2 RGB, 3..18 presets, 19 Done
     property var editOriginal: null
     property string editingKey: ""
-    readonly property int fieldCount: selectedTab === 0 ? hyprFields.length : quickFields.length
-    readonly property var currentFields: selectedTab === 0 ? hyprFields : quickFields
+    readonly property bool isNetworkTab: selectedTab === 0 || selectedTab === 1
+    readonly property int fieldCount: selectedTab === 2 ? hyprFields.length : quickFields.length
+    readonly property var currentFields: selectedTab === 2 ? hyprFields : quickFields
+    // Network listings are still fetched/structured by Launcher's existing provider.
+    property var networkModel: null
+    property bool wifiEnabled: false
+    property bool btEnabled: false
+    property bool wifiLoading: false
+    property bool btLoading: false
+    signal requestNetworkData(string kind)
+    signal requestNetworkRescan(string kind)
+    signal requestNetworkPower(string kind, bool enable)
+    signal requestNetworkAction(string command, string name)
+    signal requestConnectWifi(string ssid, string password)
+    property bool wifiPasswordOpen: false
+    property string wifiPasswordSsid: ""
+    readonly property int networkCount: networkModel ? networkModel.count : 0
     readonly property var presetColors: [
         "#61afef", "#c678dd", "#e08c75", "#98c379",
         "#e5c07b", "#ff6b9d", "#55c8c6", "#ffffff",
@@ -142,6 +157,9 @@ FocusScope {
 
     function openPanel() {
         colorPickerOpen = false
+        wifiPasswordOpen = false
+        wifiPasswordSsid = ""
+        wifiPasswordInput.text = ""
         selectedTab = 0
         keyboardIndex = 0
         pickerIndex = 0
@@ -155,6 +173,7 @@ FocusScope {
             busy = true
             readProc.running = true
         }
+        requestNetworkData("wifi")
         Qt.callLater(function() { settings.forceActiveFocus() })
     }
 
@@ -178,44 +197,122 @@ FocusScope {
         saveProc.running = true
     }
 
-    // Keyboard navigation is event-driven; no timers, polling or extra processes.
+    // Keyboard geometry: 0..3 = tabs, 4.. = content. The two axes
+    // are deliberately independent: Left/Right = tabs, Up/Down = content.
+    // No polling: network rows are read only when the user navigates.
+    function keyboardSize() {
+        return isNetworkTab ? 6 + networkCount : 6 + fieldCount
+    }
+
+    function selectableNetworkRow(index) {
+        return index < 6 || (networkModel && index - 6 < networkCount
+                              && networkModel.get(index - 6).type !== "dummy")
+    }
+
     function selectKeyboard(index, wrap) {
-        var count = 4 + fieldCount
-        keyboardIndex = wrap ? (index % count + count) % count
-                             : Math.max(0, Math.min(count - 1, index))
-        if (keyboardIndex >= 2 && keyboardIndex < 2 + fieldCount) {
-            // 69px row + 8px gap, with enough margin to show focus clearly.
-            var y = (keyboardIndex - 2) * 77
-            if (y < rowsScroll.contentY)
-                rowsScroll.contentY = y
+        var count = keyboardSize()
+        var wanted = wrap ? (index % count + count) % count
+                          : Math.max(4, Math.min(count - 1, index))
+        if (isNetworkTab && wanted >= 6) {
+            // Ignore group headings (Connected / Saved Networks / etc.).
+            var direction = wanted >= keyboardIndex ? 1 : -1
+            while (wanted >= 6 && wanted < count && !selectableNetworkRow(wanted))
+                wanted += direction
+            if (wanted >= count || wanted < 4)
+                return // Reached the end: never focus a heading.
+        }
+        keyboardIndex = wanted
+        if (isNetworkTab) {
+            if (wanted >= 6 && networkModel)
+                networkList.positionViewAtIndex(wanted - 6, ListView.Contain)
+        } else if (wanted >= 4 && wanted < 4 + fieldCount) {
+            var y = (wanted - 4) * 77
+            if (y < rowsScroll.contentY) rowsScroll.contentY = y
             else if (y + 69 > rowsScroll.contentY + rowsScroll.height)
                 rowsScroll.contentY = Math.min(Math.max(0, rowsScroll.contentHeight - rowsScroll.height),
                                                y + 69 - rowsScroll.height)
         }
     }
 
+    function moveVertical(direction, wrap) {
+        // Down from any tab enters its own contents, not the next tab.
+        if (keyboardIndex <= 3) {
+            if (direction > 0) selectKeyboard(4, false)
+            else if (wrap) selectKeyboard(keyboardSize() - 1, false)
+            return
+        }
+        // Up from the first button/setting focuses the current tab.
+        if (direction < 0 && keyboardIndex === 4) {
+            keyboardIndex = selectedTab
+            return
+        }
+        // Tab wraps from the last control back to the active tab.
+        if (direction > 0 && keyboardIndex === keyboardSize() - 1 && wrap) {
+            keyboardIndex = selectedTab
+            return
+        }
+        selectKeyboard(keyboardIndex + direction, false)
+    }
+
     function switchTab(tab) {
-        selectedTab = Math.max(0, Math.min(1, tab))
-        keyboardIndex = selectedTab
+        var next = Math.max(0, Math.min(3, tab))
+        selectedTab = next
+        keyboardIndex = next
+        editingKey = "" // Switching away from a TextInput exits edit mode.
         rowsScroll.contentY = 0
+        if (next === 0) requestNetworkData("wifi")
+        else if (next === 1) requestNetworkData("bt")
         forceActiveFocus()
+    }
+
+    function activateNetwork(command, name) {
+        if (!command || command.length === 0 || command === "qs_none") return
+        if (command.indexOf("qs_wifi_pass:") === 0) {
+            wifiPasswordSsid = command.substring("qs_wifi_pass:".length)
+            wifiPasswordInput.text = ""
+            wifiPasswordOpen = true
+            Qt.callLater(function() { wifiPasswordInput.forceActiveFocus() })
+        } else {
+            requestNetworkAction(command, name)
+        }
+    }
+
+    function closeWifiPassword() {
+        wifiPasswordInput.text = ""
+        wifiPasswordSsid = ""
+        wifiPasswordOpen = false
+        settings.forceActiveFocus()
+    }
+
+    function submitWifiPassword() {
+        if (wifiPasswordSsid.length === 0 || wifiPasswordInput.text.length === 0) return
+        var ssid = wifiPasswordSsid
+        var pwd = wifiPasswordInput.text
+        closeWifiPassword()
+        requestConnectWifi(ssid, pwd)
     }
 
     function activateSelection() {
         if (busy) return
-        if (keyboardIndex <= 1) {
+        if (keyboardIndex <= 3) {
             switchTab(keyboardIndex)
-        } else if (keyboardIndex < 2 + fieldCount) {
-            if (!loaded) return
-            var field = currentFields[keyboardIndex - 2]
-            if (field.kind === "toggle") {
-                setValue(field.key, !values[field.key])
-            } else if (field.kind === "color") {
-                openColorPicker(field.key, field.label)
-            } else {
-                focusSelectedEntry()
+        } else if (isNetworkTab) {
+            var kind = selectedTab === 0 ? "wifi" : "bt"
+            if (keyboardIndex === 4) requestNetworkRescan(kind)
+            else if (keyboardIndex === 5)
+                requestNetworkPower(kind, !(kind === "wifi" ? wifiEnabled : btEnabled))
+            else if (networkModel && keyboardIndex - 6 < networkCount) {
+                var item = networkModel.get(keyboardIndex - 6)
+                if (item.type !== "dummy" && item.type !== "wifi_current")
+                    activateNetwork(item.exec, item.name)
             }
-        } else if (keyboardIndex === 2 + fieldCount) {
+        } else if (keyboardIndex < 4 + fieldCount) {
+            if (!loaded) return
+            var field = currentFields[keyboardIndex - 4]
+            if (field.kind === "toggle") setValue(field.key, !values[field.key])
+            else if (field.kind === "color") openColorPicker(field.key, field.label)
+            else focusSelectedEntry()
+        } else if (keyboardIndex === 4 + fieldCount) {
             discardChanges()
         } else {
             applyChanges()
@@ -223,8 +320,7 @@ FocusScope {
     }
 
     function focusSelectedEntry() {
-        // The Repeater delegate may have been recreated after changing tabs.
-        var item = rowsRepeater.itemAt(keyboardIndex - 2)
+        var item = rowsRepeater.itemAt(keyboardIndex - 4)
         if (!item || !item.valueEditor) return
         item.valueEditor.forceActiveFocus()
         item.valueEditor.selectAll()
@@ -302,26 +398,29 @@ FocusScope {
             event.accepted = handlePickerKey(event)
             return
         }
+        if (wifiPasswordOpen) return
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
             requestBack()
             event.accepted = true
         } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-            selectKeyboard(keyboardIndex +
-                           ((event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier)) ? -1 : 1), true)
+            var tabDirection = event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) ? -1 : 1
+            moveVertical(tabDirection, true)
             event.accepted = true
         } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Up) {
-            selectKeyboard(keyboardIndex + (event.key === Qt.Key_Down ? 1 : -1), false)
+            moveVertical(event.key === Qt.Key_Down ? 1 : -1, false)
             event.accepted = true
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
-            if (keyboardIndex <= 1) {
-                switchTab(event.key === Qt.Key_Left ? 0 : 1)
+            // A tab switch works even if an item in the current tab is focused.
+            // Editable TextInputs and the color picker have their own handlers.
+            if (editingKey === "") {
+                switchTab(selectedTab + (event.key === Qt.Key_Left ? -1 : 1))
                 event.accepted = true
             }
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
             activateSelection()
             event.accepted = true
-        } else if (event.key === Qt.Key_F2 && keyboardIndex >= 2 && keyboardIndex < 2 + fieldCount) {
-            var field = currentFields[keyboardIndex - 2]
+        } else if (event.key === Qt.Key_F2 && !isNetworkTab && keyboardIndex >= 4 && keyboardIndex < 4 + fieldCount) {
+            var field = currentFields[keyboardIndex - 4]
             if (field.kind !== "toggle") focusSelectedEntry()
             event.accepted = true
         }
@@ -398,11 +497,11 @@ FocusScope {
             height: 39
             spacing: 10
             Repeater {
-                model: ["Hyprland", "Quickshell"]
+                model: ["Wi-Fi", "Bluetooth", "Hyprland", "Quickshell"]
                 delegate: Rectangle {
                     required property int index
                     required property string modelData
-                    width: (settings.width - 10) / 2
+                    width: (settings.width - 30) / 4
                     height: 39
                     radius: 12
                     color: settings.selectedTab === index
@@ -434,10 +533,187 @@ FocusScope {
             }
         }
 
+        // Wi-Fi and Bluetooth: larger version of the original Launcher lists.
+        Column {
+            id: networkSection
+            visible: settings.isNetworkTab
+            width: parent.width
+            // Use the available height; the help text is anchored at the bottom.
+            height: visible ? Math.max(380, settings.height - 87) : 0
+            spacing: 10
+
+            Row {
+                width: parent.width
+                height: 43
+                spacing: 10
+                Text {
+                    width: parent.width - 108
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    text: settings.selectedTab === 0 ? "Wi-Fi Networks" : "Bluetooth Devices"
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 15
+                    font.bold: true
+                }
+                Rectangle {
+                    width: 43; height: 43; radius: 14
+                    color: Qt.alpha(Theme.white, networkRefreshArea.containsMouse ? 0.17 : 0.08)
+                    border.color: settings.keyboardIndex === 4 ? Theme.blue : Qt.alpha(Theme.white, 0.14)
+                    border.width: settings.keyboardIndex === 4 ? 2 : 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: "󰑐"
+                        font.family: Theme.fontIcons
+                        font.pixelSize: 18
+                        color: Theme.white
+                    }
+                    MouseArea {
+                        id: networkRefreshArea
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
+                        onClicked: {
+                            settings.keyboardIndex = 4
+                            settings.requestNetworkRescan(settings.selectedTab === 0 ? "wifi" : "bt")
+                            settings.forceActiveFocus()
+                        }
+                    }
+                }
+                Rectangle {
+                    width: 43; height: 43; radius: 14
+                    property bool enabledRadio: settings.selectedTab === 0 ? settings.wifiEnabled : settings.btEnabled
+                    color: enabledRadio ? Theme.white : Qt.alpha(Theme.white, powerMouse.containsMouse ? 0.17 : 0.08)
+                    border.color: settings.keyboardIndex === 5 ? Theme.blue : Qt.alpha(Theme.white, 0.14)
+                    border.width: settings.keyboardIndex === 5 ? 2 : 1
+                    Text {
+                        anchors.centerIn: parent
+                        text: settings.selectedTab === 0 ? "" : ""
+                        font.family: Theme.fontIcons
+                        font.pixelSize: 17
+                        color: parent.enabledRadio ? Theme.bg0 : Theme.white
+                    }
+                    MouseArea {
+                        id: powerMouse
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        hoverEnabled: true
+                        onClicked: {
+                            settings.keyboardIndex = 5
+                            settings.requestNetworkPower(settings.selectedTab === 0 ? "wifi" : "bt", !parent.enabledRadio)
+                            settings.forceActiveFocus()
+                        }
+                    }
+                }
+            }
+
+            ListView {
+                id: networkList
+                width: parent.width
+                height: networkSection.height - 43 - networkSection.spacing
+                model: settings.networkModel
+                clip: true
+                spacing: 3
+                interactive: true
+                boundsBehavior: Flickable.StopAtBounds
+                delegate: Rectangle {
+                    id: networkRow
+                    required property int index
+                    required property string name
+                    required property string comment
+                    required property string icon
+                    required property string exec
+                    required property string type
+                    width: networkList.width
+                    height: type === "dummy" ? 34 : 59
+                    radius: 12
+                    color: type === "dummy" ? "transparent"
+                           : (settings.keyboardIndex === index + 6
+                              ? Qt.alpha(Theme.white, 0.14)
+                              : Qt.alpha(Theme.white, networkItemMouse.containsMouse ? 0.10 : 0.055))
+                    border.width: (type !== "dummy" && settings.keyboardIndex === index + 6) ? 2 : 0
+                    border.color: Theme.blue
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 14
+                        spacing: 14
+                        Text {
+                            width: 26
+                            height: parent.height
+                            visible: networkRow.type !== "dummy"
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignHCenter
+                            text: settings.selectedTab === 0 ? "" : ""
+                            font.family: Theme.fontIcons
+                            color: networkRow.type === "wifi_current" || networkRow.type === "bt_current"
+                                   ? "#30d158" : Theme.white
+                            font.pixelSize: 19
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            width: parent.width - 85
+                            Text {
+                                width: parent.width
+                                text: networkRow.name
+                                font.family: Theme.fontMain
+                                color: networkRow.type === "dummy" ? Qt.alpha(Theme.white, 0.56)
+                                    : (networkRow.type === "wifi_current" ? "#30d158" : Theme.white)
+                                font.pixelSize: networkRow.type === "dummy" ? 11 : 14
+                                font.bold: networkRow.type !== "dummy"
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                visible: networkRow.type !== "dummy" && networkRow.comment !== ""
+                                width: parent.width
+                                text: networkRow.comment
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                                color: Theme.grey1
+                                elide: Text.ElideRight
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "󰄬"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 19
+                            color: "#30d158"
+                            visible: networkRow.type === "wifi_current" || networkRow.type === "bt_current"
+                        }
+                    }
+                    MouseArea {
+                        id: networkItemMouse
+                        anchors.fill: parent
+                        enabled: networkRow.type !== "dummy" && networkRow.type !== "wifi_current"
+                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        hoverEnabled: true
+                        onClicked: {
+                            settings.keyboardIndex = 6 + networkRow.index
+                            settings.activateNetwork(networkRow.exec, networkRow.name)
+                            settings.forceActiveFocus()
+                        }
+                    }
+                }
+                Text {
+                    anchors.centerIn: parent
+                    visible: networkList.count === 0
+                    text: settings.selectedTab === 0
+                          ? (settings.wifiEnabled ? "Scanning networks..." : "Wi-Fi is disabled")
+                          : (settings.btEnabled ? "Scanning devices..." : "Bluetooth is disabled")
+                    color: Theme.grey1
+                    font.family: Theme.fontMain
+                    font.pixelSize: 13
+                }
+            }
+        }
+
         Flickable {
             id: rowsScroll
             width: parent.width
-            height: 380
+            height: settings.isNetworkTab ? 0 : 380
+            visible: !settings.isNetworkTab
             contentWidth: width
             contentHeight: rowsColumn.height
             clip: true
@@ -460,9 +736,9 @@ FocusScope {
                         height: 69
                         radius: 13
                         color: Qt.alpha(Theme.white, 0.065)
-                        border.color: settings.keyboardIndex === 2 + index && !settings.colorPickerOpen
+                        border.color: settings.keyboardIndex === 4 + index && !settings.colorPickerOpen
                             ? Theme.blue : Qt.alpha(Theme.white, 0.09)
-                        border.width: settings.keyboardIndex === 2 + index && !settings.colorPickerOpen ? 2 : 1
+                        border.width: settings.keyboardIndex === 4 + index && !settings.colorPickerOpen ? 2 : 1
 
                         Column {
                             anchors.left: parent.left
@@ -521,7 +797,7 @@ FocusScope {
                                 enabled: settings.loaded && !settings.busy
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    settings.keyboardIndex = 2 + settingRow.index
+                                    settings.keyboardIndex = 4 + settingRow.index
                                     settings.setValue(settingRow.modelData.key,
                                                       !settings.values[settingRow.modelData.key])
                                     settings.forceActiveFocus()
@@ -548,7 +824,7 @@ FocusScope {
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        settings.keyboardIndex = 2 + settingRow.index
+                                        settings.keyboardIndex = 4 + settingRow.index
                                         settings.openColorPicker(settingRow.modelData.key,
                                                                  settingRow.modelData.label)
                                     }
@@ -575,7 +851,7 @@ FocusScope {
                                 clip: true
                                 onActiveFocusChanged: {
                                     if (activeFocus) {
-                                        settings.keyboardIndex = 2 + settingRow.index
+                                        settings.keyboardIndex = 4 + settingRow.index
                                         settings.beginTextEdit(settingRow.modelData.key)
                                     }
                                 }
@@ -592,7 +868,7 @@ FocusScope {
                                         var step = (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up ||
                                                     (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) ? -1 : 1
                                         settings.endTextEdit(settingRow.modelData.key, text, false, 0)
-                                        settings.selectKeyboard(settings.keyboardIndex + step, true)
+                                        settings.moveVertical(step, true)
                                         event.accepted = true
                                     }
                                 }
@@ -604,23 +880,25 @@ FocusScope {
         }
 
         Rectangle {
+            visible: !settings.isNetworkTab
             width: parent.width
-            height: 1
+            height: visible ? 1 : 0
             color: Qt.alpha(Theme.white, 0.10)
         }
 
         Row {
+            visible: !settings.isNetworkTab
             width: parent.width
-            height: 39
+            height: visible ? 39 : 0
             spacing: 12
             Rectangle {
                 width: 140
                 height: parent.height
                 radius: 11
                 color: Qt.alpha(Theme.white, discardHover.containsMouse ? 0.17 : 0.08)
-                border.color: settings.keyboardIndex === 2 + settings.fieldCount && !settings.colorPickerOpen
+                border.color: settings.keyboardIndex === 4 + settings.fieldCount && !settings.colorPickerOpen
                     ? Theme.blue : Qt.alpha(Theme.white, 0.12)
-                border.width: settings.keyboardIndex === 2 + settings.fieldCount && !settings.colorPickerOpen ? 2 : 1
+                border.width: settings.keyboardIndex === 4 + settings.fieldCount && !settings.colorPickerOpen ? 2 : 1
                 Text { anchors.centerIn: parent; text: "Discard edits"; color: Theme.white; font.family: Theme.fontMain; font.pixelSize: 12 }
                 MouseArea {
                     id: discardHover
@@ -629,7 +907,7 @@ FocusScope {
                     cursorShape: Qt.PointingHandCursor
                     enabled: settings.dirty && !settings.busy
                     onClicked: {
-                        settings.keyboardIndex = 2 + settings.fieldCount
+                        settings.keyboardIndex = 4 + settings.fieldCount
                         settings.discardChanges()
                         settings.forceActiveFocus()
                     }
@@ -641,7 +919,7 @@ FocusScope {
                 height: parent.height
                 radius: 11
                 color: settings.dirty && !settings.busy ? Theme.blue : Qt.alpha(Theme.white, 0.12)
-                border.width: settings.keyboardIndex === 3 + settings.fieldCount && !settings.colorPickerOpen ? 2 : 0
+                border.width: settings.keyboardIndex === 5 + settings.fieldCount && !settings.colorPickerOpen ? 2 : 0
                 border.color: Theme.white
                 Text {
                     anchors.centerIn: parent
@@ -656,7 +934,7 @@ FocusScope {
                     enabled: settings.loaded && !settings.busy && settings.dirty
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        settings.keyboardIndex = 3 + settings.fieldCount
+                        settings.keyboardIndex = 5 + settings.fieldCount
                         settings.applyChanges()
                         settings.forceActiveFocus()
                     }
@@ -664,8 +942,9 @@ FocusScope {
             }
         }
         Text {
+            visible: !settings.isNetworkTab
             width: parent.width
-            height: 32
+            height: visible ? 32 : 0
             text: settings.statusText
             color: settings.hasError ? Theme.red : Qt.alpha(Theme.white, 0.56)
             font.family: Theme.fontMain
@@ -674,14 +953,98 @@ FocusScope {
             maximumLineCount: 2
             elide: Text.ElideRight
         }
-        Text {
-            width: parent.width
-            height: 16
-            text: "↑↓ / Tab: navigate  •  ←→: tabs  •  Enter: select  •  F2: edit  •  Esc: back"
-            font.family: Theme.fontMain
-            font.pixelSize: 10
-            color: Qt.alpha(Theme.white, 0.43)
-            elide: Text.ElideRight
+    }
+
+    // Keep navigation help close to the bottom edge, not in the scrolling
+    // content's vertical flow. This also frees space for more network rows.
+    Text {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        height: 16
+        text: settings.isNetworkTab
+            ? "←→: tabs  •  ↑↓ / Tab: content  •  Enter: connect/toggle  •  Esc: back"
+            : "←→: tabs  •  ↑↓ / Tab: content  •  Enter: select  •  F2: edit  •  Esc: back"
+        font.family: Theme.fontMain
+        font.pixelSize: 10
+        color: Qt.alpha(Theme.white, 0.43)
+        elide: Text.ElideRight
+    }
+
+    // Secured Wi-Fi networks require a password, still inside the same Launcher.
+    Rectangle {
+        anchors.fill: parent
+        z: 40
+        visible: settings.wifiPasswordOpen
+        color: Qt.alpha(Theme.bg0, 0.78)
+        MouseArea { anchors.fill: parent; onClicked: settings.closeWifiPassword() }
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 36, 420)
+            height: 190
+            radius: Glass.radiusLarge
+            color: Qt.alpha(Glass.tint, 0.98)
+            border.color: Glass.borderColor
+            border.width: 1
+            MouseArea { anchors.fill: parent }
+            Column {
+                anchors.fill: parent
+                anchors.margins: 20
+                spacing: 14
+                Text {
+                    text: "Connect to " + settings.wifiPasswordSsid
+                    width: parent.width
+                    elide: Text.ElideRight
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+                Rectangle {
+                    width: parent.width
+                    height: 42
+                    radius: 11
+                    color: Qt.alpha(Theme.white, 0.09)
+                    border.color: wifiPasswordInput.activeFocus ? Theme.blue : Qt.alpha(Theme.white, 0.18)
+                    border.width: wifiPasswordInput.activeFocus ? 2 : 1
+                    TextInput {
+                        id: wifiPasswordInput
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 14
+                        echoMode: TextInput.Password
+                        selectByMouse: true
+                        verticalAlignment: TextInput.AlignVCenter
+                        Keys.onPressed: (event) => {
+                            if (event.key === Qt.Key_Escape) {
+                                settings.closeWifiPassword()
+                                event.accepted = true
+                            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                                settings.submitWifiPassword()
+                                event.accepted = true
+                            }
+                        }
+                    }
+                }
+                Row {
+                    spacing: 12
+                    Rectangle {
+                        width: 180; height: 39; radius: 11
+                        color: Qt.alpha(Theme.white, 0.10)
+                        Text { anchors.centerIn: parent; text: "Cancel"; color: Theme.white; font.family: Theme.fontMain }
+                        MouseArea { anchors.fill: parent; onClicked: settings.closeWifiPassword(); cursorShape: Qt.PointingHandCursor }
+                    }
+                    Rectangle {
+                        width: 180; height: 39; radius: 11
+                        color: Theme.blue
+                        Text { anchors.centerIn: parent; text: "Connect"; color: Theme.bg0; font.family: Theme.fontMain; font.bold: true }
+                        MouseArea { anchors.fill: parent; onClicked: settings.submitWifiPassword(); cursorShape: Qt.PointingHandCursor }
+                    }
+                }
+            }
         }
     }
 

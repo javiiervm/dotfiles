@@ -15,7 +15,7 @@ PanelWindow {
     property string calcResult: "" 
     
     // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording
-    property int currentMode: 0 // 13: Dotfiles Settings 
+    property int currentMode: 0 // 13: Settings (Wi-Fi, Bluetooth, Hyprland, Quickshell) 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
     property bool isBtEnabled: false
@@ -217,8 +217,10 @@ PanelWindow {
         id: refreshTimer
         interval: 1500
         onTriggered: { 
-            if (launcherWindow.currentMode === 5) loadTabData("--wifi"); 
-            else if (launcherWindow.currentMode === 6) loadTabData("--bt");
+            if (launcherWindow.currentMode === 5 ||
+                (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 0)) loadTabData("--wifi"); 
+            else if (launcherWindow.currentMode === 6 ||
+                (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 1)) loadTabData("--bt");
         }
     }
 
@@ -275,6 +277,8 @@ PanelWindow {
         stdout: SplitParser {
             onRead: (line) => {
                 var name = (line || "").trim();
+                // Fold the legacy Recent entry into the single unified Settings app.
+                if (name === "Dotfiles Settings") name = "Settings";
                 if (name === "") return;
 
                 var names = launcherWindow.recentNames.slice();
@@ -347,7 +351,8 @@ PanelWindow {
             var color = success ? "#30d158" : "#ff3b30";
             var status = success ? "Connected to " : "Failed to connect to ";
             launcherWindow.requestIslandMsg("", color, status + targetName);
-            if (launcherWindow.currentMode === 5) loadTabData("--wifi");
+            if (launcherWindow.currentMode === 5 ||
+                (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 0)) loadTabData("--wifi");
         }
     }
 
@@ -359,7 +364,8 @@ PanelWindow {
             var color = success ? "#30d158" : "#ff3b30";
             var status = success ? "Connected to " : "Failed to connect to ";
             launcherWindow.requestIslandMsg("", color, status + targetName);
-            if (launcherWindow.currentMode === 6) loadTabData("--bt");
+            if (launcherWindow.currentMode === 6 ||
+                (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 1)) loadTabData("--bt");
         }
     }
 
@@ -371,7 +377,7 @@ PanelWindow {
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
             if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12) return 620;
-            if (launcherWindow.currentMode === 13) return 700;
+            if (launcherWindow.currentMode === 13) return 740;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -1197,7 +1203,7 @@ PanelWindow {
                             : (launcherWindow.currentMode === 10 ? "Cleanup"
                             : (launcherWindow.currentMode === 11 ? "Screen Recording"
                             : (launcherWindow.currentMode === 12 ? "Focus Timer"
-                            : (launcherWindow.currentMode === 13 ? "Dotfiles Settings" : "System Options"))))
+                            : (launcherWindow.currentMode === 13 ? "Settings" : "System Options"))))
                         color: Theme.white; font.pixelSize: 16; font.bold: true
                         anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1210,7 +1216,49 @@ PanelWindow {
                 id: settingsPanel
                 width: parent.width
                 visible: launcherWindow.currentMode === 13
+                networkModel: filteredModel
+                wifiEnabled: launcherWindow.isWifiEnabled
+                btEnabled: launcherWindow.isBtEnabled
+                wifiLoading: launcherWindow.isWifiLoading
+                btLoading: launcherWindow.isBtLoading
                 onRequestBack: showApps()
+                onRequestNetworkData: (kind) => {
+                    loadTabData(kind === "wifi" ? "--wifi" : "--bt")
+                }
+                onRequestNetworkRescan: (kind) => {
+                    if (kind === "bt") {
+                        // provider.sh runs a bounded 4-second scan.
+                        // Do not leave a long-running bluetoothctl scan alive.
+                        loadTabData("--bt")
+                    } else {
+                        execProc.running = false
+                        execProc.command = ["nmcli", "device", "wifi", "rescan"]
+                        execProc.running = true
+                        refreshTimer.restart()
+                    }
+                }
+                onRequestNetworkPower: (kind, enable) => {
+                    execProc.running = false
+                    if (kind === "wifi") {
+                        launcherWindow.isWifiLoading = true
+                        execProc.command = ["nmcli", "radio", "wifi", enable ? "on" : "off"]
+                    } else {
+                        launcherWindow.isBtLoading = true
+                        execProc.command = ["/bin/bash", "-c",
+                            "rfkill unblock bluetooth; bluetoothctl power " + (enable ? "on" : "off")]
+                    }
+                    execProc.running = true
+                    refreshTimer.restart()
+                }
+                onRequestNetworkAction: (command, name) => executeApp(command, name)
+                onRequestConnectWifi: (ssid, password) => {
+                    launcherWindow.requestIslandMsg("", "white",
+                                                    "Trying to connect to " + ssid + "...")
+                    netConnectProc.targetName = ssid
+                    netConnectProc.command = ["nmcli", "device", "wifi", "connect",
+                                              ssid, "password", password]
+                    netConnectProc.running = true
+                }
             }
 
             // 2. CLEANUP (Modo 10)
@@ -2622,8 +2670,8 @@ PanelWindow {
             return { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
         if (name === "Focus Timer")
             return { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" };
-        if (name === "Dotfiles Settings")
-            return { name: "Dotfiles Settings", comment: "Customize Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" };
+        if (name === "Settings" || name === "Dotfiles Settings")
+            return { name: "Settings", comment: "Manage Wi-Fi, Bluetooth, Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" };
 
         for (var i = 0; i < appsModel.count; i++) {
             var app = appsModel.get(i);
@@ -2696,7 +2744,8 @@ PanelWindow {
             return;
         }
 
-        if (launcherWindow.currentMode === 5) {
+        if (launcherWindow.currentMode === 5 ||
+            (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 0)) {
             launcherWindow.isWifiLoading = false; 
             var currentW = [], savedW = [], newNetsW = [];
             for (var w = 0; w < rawModel.count; w++) {
@@ -2719,7 +2768,8 @@ PanelWindow {
             return;
         }
 
-        if (launcherWindow.currentMode === 6) {
+        if (launcherWindow.currentMode === 6 ||
+            (launcherWindow.currentMode === 13 && settingsPanel.selectedTab === 1)) {
             launcherWindow.isBtLoading = false; 
             var currentB = [], savedB = [];
             for (var b = 0; b < rawModel.count; b++) {
@@ -2758,7 +2808,7 @@ PanelWindow {
             { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" },
             { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" },
             { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" },
-            { name: "Dotfiles Settings", comment: "Customize Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" }
+            { name: "Settings", comment: "Manage Wi-Fi, Bluetooth, Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" }
         ];
         if (launcherWindow.currentMode === 0) {
             for (var si = 0; si < specialItems.length; si++) {

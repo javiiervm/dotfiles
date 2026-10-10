@@ -4,8 +4,7 @@ MODE=$1
 
 if [ "$MODE" = "--apps" ]; then
     # Inyectamos comandos virtuales para abrir los submenús
-    echo "Wi-Fi Settings|Manage wireless networks|network-wireless|qs_wifi|cmd"
-    echo "Bluetooth Settings|Manage bluetooth devices|preferences-system-bluetooth|qs_bt|cmd"
+    # Wi-Fi and Bluetooth are now tabs in the Settings launcher submenu.
     echo "System Options|Power off, reboot, suspend...|preferences-system-power|qs_sys|cmd"
     
     # Listado de aplicaciones (Lógica original restaurada)
@@ -28,7 +27,7 @@ if [ "$MODE" = "--apps" ]; then
             # Lista negra manual: Bloquea ejecutables o utilidades de sistema que estorban
             filename=$(basename "$file")
             case "$filename" in
-                *avahi*|*lstopo*|*btrfs-assistant*|*kvantum*|*gtk3-widget-factory*|*micro.desktop*)
+                *avahi*|*lstopo*|*btrfs-assistant*|*kvantum*|*gtk3-widget-factory*|*micro.desktop*|Dotfiles-Settings.desktop)
                     continue ;;
             esac
 
