@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Effects
 
 import Quickshell
 import Quickshell.Wayland
-import Quickshell.Hyprland
 
 import ".."
 
@@ -15,27 +15,8 @@ PanelWindow {
     property bool settingsOpen: false
     readonly property bool expanded: true
     property bool closing: false
-    property string reservedMonitor: ""
 
-    readonly property bool onHdmi:
-        panel.screen && panel.screen.name === "HDMI-A-1"
-
-    readonly property int normalOuterTop:
-        onHdmi ? 10 : 2
-
-    readonly property int normalOuterRight:
-        onHdmi ? 10 : 12
-
-    readonly property int normalOuterBottom:
-        onHdmi ? 10 : 12
-
-    readonly property int normalOuterLeft:
-        onHdmi ? 10 : 12
-
-    readonly property int normalInnerGap:
-        onHdmi ? 4 : 5
-
-    // Theme-aware sidebar surface. Keep it clearly dark, but noticeably
+    // Theme-aware panel surface. Keep it clearly dark, but noticeably
     // lighter than before so the panel does not read as near-black.
     readonly property color expandedBaseColor:
         Qt.rgba(
@@ -66,46 +47,6 @@ PanelWindow {
         Qt.alpha(service.gradientEnd, 0.045)
 
 
-    readonly property var focusedWorkspaceRef:
-        Hyprland.focusedWorkspace
-
-    function applyWorkspaceReservation(expand, monitorName): void {
-        var targetMonitor =
-            monitorName && monitorName.length > 0
-            ? monitorName
-            : (
-                panel.screen
-                ? panel.screen.name
-                : ""
-            )
-
-        if (targetMonitor.length === 0)
-            return
-
-        var helperPath =
-            Quickshell.env("HOME")
-            + "/.config/hypr/xavion_sidebar.lua"
-
-        var lua =
-            'local x = dofile("'
-            + helperPath
-            + '"); x.set("'
-            + targetMonitor
-            + '", '
-            + (expand ? "true" : "false")
-            + ', '
-            + panel.implicitWidth
-            + ', '
-            + 0
-            + ')'
-
-        Quickshell.execDetached([
-            "hyprctl",
-            "eval",
-            lua
-        ])
-    }
-
     function closePanel(): void {
         if (closing)
             return
@@ -113,46 +54,30 @@ PanelWindow {
         settingsOpen = false
         closing = true
         input.focus = false
+        slideIn.stop()
         slideOut.restart()
     }
 
     function finishClose(): void {
-        if (reservedMonitor.length > 0) {
-            applyWorkspaceReservation(false, reservedMonitor)
-            reservedMonitor = ""
-        }
-
         service.closePanel()
     }
 
-    onFocusedWorkspaceRefChanged: {
-        if (reservedMonitor.length > 0)
-            applyWorkspaceReservation(true, reservedMonitor)
-    }
+    readonly property real cardWidth: Math.min(
+        620,
+        Math.max(260, (screen ? screen.width : 1280) - 40)
+    )
+    readonly property real cardHeight: Math.min(
+        760,
+        Math.max(280, Math.round((screen ? screen.height : 800) * 0.60)),
+        Math.max(180, (screen ? screen.height : 800) - 12)
+    )
 
-    implicitWidth: 420
-    implicitHeight: 550
-
-    anchors {
-        top: true
-        bottom: true
-        left: true
-    }
-
-    margins {
-        top: 0
-        bottom: 0
-        left: 0
-    }
-
-    // A real sidebar should ignore the exclusion zones created by the rest of
-    // Quickshell (especially the 44 px top bar), otherwise the compositor
-    // starts this surface below them instead of at the physical screen edge.
+    // Transparent fullscreen overlay. Does not reserve tiling margins.
+    anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
-
     color: "transparent"
 
-    WlrLayershell.layer: WlrLayershell.Bottom
+    WlrLayershell.layer: WlrLayershell.Overlay
     WlrLayershell.keyboardFocus: WlrLayershell.OnDemand
 
     function submitMessage(): void {
@@ -167,23 +92,9 @@ PanelWindow {
 
     Component.onCompleted: {
         service.ensureBackend()
-
         Qt.callLater(function() {
-            reservedMonitor =
-                panel.screen
-                ? panel.screen.name
-                : ""
-
-            if (reservedMonitor.length > 0)
-                applyWorkspaceReservation(true, reservedMonitor)
-
             slideIn.restart()
         })
-    }
-
-    Component.onDestruction: {
-        if (expanded && reservedMonitor.length > 0)
-            applyWorkspaceReservation(false, reservedMonitor)
     }
 
     BackgroundEffect.blurRegion:
@@ -197,29 +108,51 @@ PanelWindow {
         radius: panelGlass.radius
     }
 
+    // Click outside the card to dismiss Xavion.
+    MouseArea {
+        anchors.fill: parent
+        onClicked: panel.closePanel()
+    }
+
     GlassSurface {
         id: panelGlass
 
-        anchors.fill: parent
+        width: panel.cardWidth
+        height: panel.cardHeight
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        transformOrigin: Item.Bottom
 
+        // Grow gently upwards from the bottom edge.
+        scale: 0.90
+        opacity: 0.0
         transform: Translate {
             id: panelSlide
-            x: -panel.implicitWidth
+            y: panel.cardHeight
         }
 
-        // Xavion always opens as its dedicated opaque sidebar surface.
-        glassTint: panel.expanded ? panel.expandedBaseColor : Glass.tint
-        glassOpacity: panel.expanded ? 1.0 : Glass.opacity
+        // The GlassSurface is only a layout/animation container here.
+        // A single masked surface below supplies the exact panel silhouette;
+        // leaving the default rounded GlassSurface background visible would
+        // produce square artifacts at the top and ghost curves at the bottom.
+        glassTint: "transparent"
+        glassOpacity: 0.0
         glassRadius: 0
-        showBorder: !panel.expanded
-        showHighlight: !panel.expanded
+        showBorder: false
+        showHighlight: false
         clip: true
 
+        // Consume clicks inside the card, including unoccupied areas.
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
+
         // ============================================================
-        // XAVION SIDEBAR BACKGROUND
+        // XAVION PANEL BACKGROUND
         // ============================================================
         //
-        // The sidebar uses an almost-black background with a couple of very
+        // The panel uses an almost-black background with a couple of very
         // soft circular ambient glows in Xavion's palette. The glows are made
         // only from a few translucent circles and slow position/scale
         // animations, which is much lighter than running a continuously
@@ -228,11 +161,13 @@ PanelWindow {
             id: expandedBackground
 
             anchors.fill: parent
-            visible: true
+            // Render the moving glows into a texture; the texture is only
+            // displayed via the silhouette mask below.
+            layer.enabled: true
+            visible: false
 
             Rectangle {
                 anchors.fill: parent
-                radius: panelGlass.radius
                 color: panel.expandedBaseColor
             }
 
@@ -427,21 +362,56 @@ PanelWindow {
                 }
             }
 
-            Rectangle {
-                anchors.fill: parent
-                radius: panelGlass.radius
-                color: "transparent"
-                border.width: 1
-                border.color: Qt.rgba(1.0, 1.0, 1.0, 0.095)
-            }
+        }
+
+        // One continuous shape: rounded at the top, square at the bottom.
+        // Qt Quick 6.7+ supports independent corner radii on Rectangle.
+        Rectangle {
+            id: panelSilhouetteMask
+            anchors.fill: parent
+            radius: 24
+            topLeftRadius: 24
+            topRightRadius: 24
+            bottomLeftRadius: 0
+            bottomRightRadius: 0
+            color: "white"
+            antialiasing: true
+            layer.enabled: true
+            visible: false
+        }
+
+        // Clip both background and animated glows to that exact silhouette,
+        // including the upper corners. This eliminates the stray sharp edge
+        // previously visible behind the top-left rounded corner.
+        MultiEffect {
+            anchors.fill: parent
+            source: expandedBackground
+            maskEnabled: true
+            maskSource: panelSilhouetteMask
+            autoPaddingEnabled: false
+        }
+
+        // Draw the border once, using the SAME corner radii as the mask.
+        // No overlapping curved/straight outlines or patch rectangles.
+        Rectangle {
+            anchors.fill: parent
+            radius: 24
+            topLeftRadius: 24
+            topRightRadius: 24
+            bottomLeftRadius: 0
+            bottomRightRadius: 0
+            color: "transparent"
+            border.width: 1
+            border.color: Qt.rgba(1.0, 1.0, 1.0, 0.095)
+            antialiasing: true
         }
 
         ColumnLayout {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            anchors.topMargin: 44 + 12
-            anchors.bottomMargin: 12 + panel.normalOuterBottom
+            anchors.topMargin: 16
+            anchors.bottomMargin: 16
             spacing: 10
 
             // ============================================================
@@ -1962,32 +1932,71 @@ PanelWindow {
         }
     }
 
-    NumberAnimation {
+    ParallelAnimation {
         id: slideIn
-        target: panelSlide
-        property: "x"
-        from: -panel.implicitWidth
-        to: 0
-        duration: 320
-        easing.type: Easing.OutQuart
+
+        NumberAnimation {
+            target: panelSlide
+            property: "y"
+            from: panel.cardHeight
+            to: 0
+            duration: 410
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: panelGlass
+            property: "scale"
+            from: 0.90
+            to: 1.0
+            duration: 410
+            easing.type: Easing.OutBack
+            easing.overshoot: 0.48
+        }
+        NumberAnimation {
+            target: panelGlass
+            property: "opacity"
+            from: 0.15
+            to: 1.0
+            duration: 240
+            easing.type: Easing.OutQuad
+        }
 
         onFinished: {
             panel.closing = false
-            input.forceActiveFocus()
+            if (service.backendReady)
+                input.forceActiveFocus()
         }
     }
 
-    NumberAnimation {
+    ParallelAnimation {
         id: slideOut
-        target: panelSlide
-        property: "x"
-        from: 0
-        to: -panel.implicitWidth
-        duration: 260
-        easing.type: Easing.InCubic
 
-        onFinished:
-            panel.finishClose()
+        NumberAnimation {
+            target: panelSlide
+            property: "y"
+            from: 0
+            to: panel.cardHeight
+            duration: 290
+            easing.type: Easing.InCubic
+        }
+        NumberAnimation {
+            target: panelGlass
+            property: "scale"
+            from: 1.0
+            to: 0.90
+            duration: 290
+            easing.type: Easing.InCubic
+        }
+        NumberAnimation {
+            target: panelGlass
+            property: "opacity"
+            from: 1.0
+            to: 0.0
+            duration: 240
+            easing.type: Easing.InQuad
+        }
+
+        onFinished: panel.finishClose()
     }
 
     Connections {
@@ -2004,9 +2013,10 @@ PanelWindow {
         }
 
         function onBackendReadyChanged() {
-            if (service.backendReady) {
+            if (service.backendReady && !panel.closing) {
                 Qt.callLater(function() {
-                    input.forceActiveFocus()
+                    if (!panel.closing)
+                        input.forceActiveFocus()
                 })
             }
         }
