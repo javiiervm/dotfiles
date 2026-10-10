@@ -6,10 +6,10 @@ Rectangle {
     property bool showContainer: true
     property string ssid: ""
     
-    color: showContainer ? Theme.bg1 : "transparent"
-    border.color: showContainer ? Theme.bg2 : "transparent"
-    border.width: 1
-    radius: 15
+    color: showContainer ? Glass.background : "transparent"
+    border.color: showContainer ? Glass.borderColor : "transparent"
+    border.width: showContainer ? Glass.borderWidth : 0
+    radius: Glass.radiusSmall
     
     Layout.preferredHeight: 28
     Layout.preferredWidth: netRow.implicitWidth + 20

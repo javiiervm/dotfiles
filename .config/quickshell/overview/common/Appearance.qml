@@ -10,6 +10,21 @@ import "." as Common
 
 Singleton {
     id: root
+    // Overview can be launched as a separate Quickshell configuration.
+    // Watch the main theme rather than keeping a duplicate fixed palette.
+    property FileView sharedThemeFile: FileView {
+        path: Quickshell.env("HOME") + "/.config/quickshell/Theme.qml"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+    }
+
+    function sharedThemeColor(name, fallback) {
+        const pattern = new RegExp("^\\s*readonly\\s+property\\s+color\\s+"
+                                   + name + "\\s*:\\s*['\"](#[0-9a-fA-F]{6})['\"]", "m")
+        const found = sharedThemeFile.text().match(pattern)
+        return found ? found[1] : fallback
+    }
     property string colorSource: Common.Config.options.appearance.colorSource
     property string caelestiaAccentProfile: Common.Config.options.appearance.caelestia.accentProfile
     property string lastCaelestiaPayload: ""
@@ -129,38 +144,38 @@ Singleton {
         property bool darkmode: true
         
         // Acentos principales
-        property color m3primary: "#61afef" 
-        property color m3onPrimary: "#050505" 
-        property color m3primaryContainer: "#c678dd" 
-        property color m3onPrimaryContainer: "#050505" 
+        property color m3primary: root.sharedThemeColor("blue", "#61afef") 
+        property color m3onPrimary: root.sharedThemeColor("bg0", "#050505") 
+        property color m3primaryContainer: root.sharedThemeColor("purple", "#c678dd") 
+        property color m3onPrimaryContainer: root.sharedThemeColor("bg0", "#050505") 
         
         // Acentos secundarios
-        property color m3secondary: "#98c379" 
-        property color m3onSecondary: "#050505" 
-        property color m3secondaryContainer: "#4b5263" 
-        property color m3onSecondaryContainer: "#ffffff" 
+        property color m3secondary: root.sharedThemeColor("green", "#98c379") 
+        property color m3onSecondary: root.sharedThemeColor("bg0", "#050505") 
+        property color m3secondaryContainer: root.sharedThemeColor("notifBg3", "#4b5263") 
+        property color m3onSecondaryContainer: root.sharedThemeColor("white", "#ffffff") 
 
         // --- FONDOS GENERALES ---
-        property color m3background: "#050505" 
-        property color m3onBackground: "#ffffff" 
+        property color m3background: root.sharedThemeColor("bg0", "#050505") 
+        property color m3onBackground: root.sharedThemeColor("white", "#ffffff") 
 
         // --- VENTANAS Y ÁREAS DE TRABAJO (Gris claro) ---
-        property color m3surface: "#282c34" 
-        property color m3surfaceContainerLow: "#21252b" 
-        property color m3surfaceContainer: "#3e4451" 
-        property color m3surfaceContainerHigh: "#4b5263" 
-        property color m3surfaceContainerHighest: "#828997" 
+        property color m3surface: root.sharedThemeColor("notifBg", "#282c34") 
+        property color m3surfaceContainerLow: root.sharedThemeColor("notifBgAlt", "#21252b") 
+        property color m3surfaceContainer: root.sharedThemeColor("notifBgBtn", "#3e4451") 
+        property color m3surfaceContainerHigh: root.sharedThemeColor("notifBg3", "#4b5263") 
+        property color m3surfaceContainerHighest: root.sharedThemeColor("grey1", "#828997") 
 
         // --- TEXTOS Y NÚMEROS ---
-        property color m3onSurface: "#ffffff" 
-        property color m3surfaceVariant: "#4b5263" 
-        property color m3onSurfaceVariant: "#abb2bf" 
+        property color m3onSurface: root.sharedThemeColor("white", "#ffffff") 
+        property color m3surfaceVariant: root.sharedThemeColor("notifBg3", "#4b5263") 
+        property color m3onSurfaceVariant: root.sharedThemeColor("fg", "#abb2bf") 
 
         // --- BORDES Y OTROS ---
-        property color m3inverseSurface: "#abb2bf" 
-        property color m3inverseOnSurface: "#050505" 
-        property color m3outline: "#828997" 
-        property color m3outlineVariant: "#3e4451" 
+        property color m3inverseSurface: root.sharedThemeColor("fg", "#abb2bf") 
+        property color m3inverseOnSurface: root.sharedThemeColor("bg0", "#050505") 
+        property color m3outline: root.sharedThemeColor("grey1", "#828997") 
+        property color m3outlineVariant: root.sharedThemeColor("notifBgBtn", "#3e4451") 
         property color m3shadow: "#000000"
     }
 
