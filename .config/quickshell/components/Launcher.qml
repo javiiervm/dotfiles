@@ -15,7 +15,7 @@ PanelWindow {
     property string calcResult: "" 
     
     // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording
-    property int currentMode: 0 
+    property int currentMode: 0 // 13: Dotfiles Settings 
     property string targetWifiSsid: ""
     property bool isWifiEnabled: false
     property bool isBtEnabled: false
@@ -371,6 +371,7 @@ PanelWindow {
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
             if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12) return 620;
+            if (launcherWindow.currentMode === 13) return 700;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -624,6 +625,13 @@ PanelWindow {
                             }
 
                             Keys.onPressed: (event) => {
+                                // The Settings panel owns its own editable fields.
+                                if (launcherWindow.currentMode === 13) {
+                                    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) showApps();
+                                    event.accepted = true;
+                                    return;
+                                }
+
 
                                 // Focus Timer: six useful presets in a 2-column grid.
                                 if (launcherWindow.currentMode === 12) {
@@ -1152,7 +1160,7 @@ PanelWindow {
                 // C) CONTROLES DE SISTEMA Y ARCHIVOS (Modos 1 y 4)
                 Item {
                     width: parent.width; height: parent.height
-                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12
+                    visible: launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12 || launcherWindow.currentMode === 13
 
                     Rectangle {
                         id: backBtnSys
@@ -1188,7 +1196,8 @@ PanelWindow {
                         text: launcherWindow.currentMode === 1 ? "File Search Results"
                             : (launcherWindow.currentMode === 10 ? "Cleanup"
                             : (launcherWindow.currentMode === 11 ? "Screen Recording"
-                            : (launcherWindow.currentMode === 12 ? "Focus Timer" : "System Options")))
+                            : (launcherWindow.currentMode === 12 ? "Focus Timer"
+                            : (launcherWindow.currentMode === 13 ? "Dotfiles Settings" : "System Options"))))
                         color: Theme.white; font.pixelSize: 16; font.bold: true
                         anchors.left: backBtnSys.right; anchors.leftMargin: 15; anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1196,6 +1205,14 @@ PanelWindow {
             }
 
             // ------------------------------------------
+            // Embedded Settings: inherits the same Theme/Glass as Launcher.
+            SettingsPanel {
+                id: settingsPanel
+                width: parent.width
+                visible: launcherWindow.currentMode === 13
+                onRequestBack: showApps()
+            }
+
             // 2. CLEANUP (Modo 10)
             // ------------------------------------------
             Column {
@@ -2605,6 +2622,8 @@ PanelWindow {
             return { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" };
         if (name === "Focus Timer")
             return { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" };
+        if (name === "Dotfiles Settings")
+            return { name: "Dotfiles Settings", comment: "Customize Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" };
 
         for (var i = 0; i < appsModel.count; i++) {
             var app = appsModel.get(i);
@@ -2738,7 +2757,8 @@ PanelWindow {
         var specialItems = [
             { name: "Cleanup", comment: "Storage & cache cleanup", icon: "__qs_cleanup__", exec: "qs_cleanup", type: "cmd" },
             { name: "Screen Recording", comment: "Record screen, area, audio and camera", icon: "__qs_recording__", exec: "qs_recording", type: "cmd" },
-            { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" }
+            { name: "Focus Timer", comment: "Start a focus timer in the Dynamic Island", icon: "__qs_timer__", exec: "qs_timer", type: "cmd" },
+            { name: "Dotfiles Settings", comment: "Customize Hyprland and Quickshell", icon: "preferences-system", exec: "qs_settings", type: "cmd" }
         ];
         if (launcherWindow.currentMode === 0) {
             for (var si = 0; si < specialItems.length; si++) {
@@ -2759,7 +2779,7 @@ PanelWindow {
         for (var j = 0; j < sourceModel.count; j++) {
             var item = sourceModel.get(j);
             if (item.type === "dummy" || item.type === "cmd" || item.exec.startsWith("qs_")) {
-                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup" && item.exec !== "qs_recording" && item.exec !== "qs_timer") continue; 
+                if (item.exec !== "qs_sys" && item.exec !== "qs_wifi" && item.exec !== "qs_bt" && item.exec !== "qs_cleanup" && item.exec !== "qs_recording" && item.exec !== "qs_timer" && item.exec !== "qs_settings") continue; 
             }
             var itemName = item.name.toLowerCase();
             var itemComment = item.comment.toLowerCase();
@@ -2797,6 +2817,13 @@ PanelWindow {
         // Every selectable launcher entry participates in Recent.
         rememberRecent(name);
 
+        if (cmd === "qs_settings") {
+            launcherWindow.currentMode = 13;
+            launcherWindow.activeHeaderButton = 0;
+            searchInput.text = "";
+            settingsPanel.openPanel();
+            return;
+        }
         if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
