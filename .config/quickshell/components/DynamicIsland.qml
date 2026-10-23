@@ -79,6 +79,10 @@ PanelWindow {
     }
 
     function dismissBlip() {
+        // Do not reopen the normal island under the pointer after closing.
+        // The existing hover handler rearms expansion once the pointer exits.
+        suppressNormalHoverUntilExit = true
+        liveActivityHoverExpandArmed = false
         blipMode = false
         blipDragHover = false
         blipFileUrls = []
@@ -180,6 +184,10 @@ PanelWindow {
                 islandWindow.blipFailed = true
                 islandWindow.blipMessage = "Blip could not start the transfer"
             }
+            // Closing means the local CLI accepted the send request, not
+            // that the remote device has finished receiving the file.
+            if (exitCode === 0 && islandWindow.blipDispatched && !islandWindow.blipFailed)
+                islandWindow.dismissBlip()
         }
     }
 
