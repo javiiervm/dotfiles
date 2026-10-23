@@ -54,6 +54,135 @@ PanelWindow {
     property bool isFullscreen: false
     visible: !isFullscreen
 
+    // BLIP FILE SHARING
+    // Device discovery and CLI transfers run only on explicit user actions.
+    // Blip itself remains responsible for delivering the transfer.
+    property bool blipDragHover: false
+    property bool blipMode: false
+    property bool blipLoading: false
+    property bool blipSending: false
+    property bool blipDispatched: false
+    property bool blipFailed: false
+    property var blipFileUrls: []
+    property var blipDevices: []
+    property string blipMessage: ""
+
+    function blipFileLabel() {
+        if (blipFileUrls.length !== 1)
+            return "No file selected"
+        var url = String(blipFileUrls[0])
+        try {
+            return decodeURIComponent(url.substring(url.lastIndexOf("/") + 1))
+        } catch (e) {
+            return url.substring(url.lastIndexOf("/") + 1)
+        }
+    }
+
+    function dismissBlip() {
+        blipMode = false
+        blipDragHover = false
+        blipFileUrls = []
+        blipDevices = []
+        blipMessage = ""
+        blipDispatched = false
+        blipFailed = false
+    }
+
+    function acceptBlipDrop(urls) {
+        blipDragHover = false
+        blipMode = true
+        blipDispatched = false
+        blipFailed = false
+        blipDevices = []
+        blipFileUrls = urls
+
+        if (urls.length !== 1) {
+            blipMessage = "Drop one local file at a time"
+            blipFailed = true
+            return
+        }
+
+        blipMessage = "Reading saved devices..."
+        blipLoading = true
+        if (!blipDeviceProc.running)
+            blipDeviceProc.running = true
+    }
+
+    function sendBlipTo(deviceId) {
+        if (blipSending || blipLoading || blipFileUrls.length !== 1)
+            return
+        blipSending = true
+        blipDispatched = false
+        blipFailed = false
+        blipMessage = "Requesting transfer..."
+        blipSendProc.command = [
+            "python3", Quickshell.shellDir + "/scripts/blip_island.py",
+            "send", deviceId, String(blipFileUrls[0])
+        ]
+        blipSendProc.running = true
+    }
+
+    Process {
+        id: blipDeviceProc
+        running: false
+        command: ["python3", Quickshell.shellDir + "/scripts/blip_island.py", "list"]
+        stdout: SplitParser {
+            onRead: function(line) {
+                try {
+                    var result = JSON.parse(line.trim())
+                    if (!result.ok) {
+                        islandWindow.blipFailed = true
+                        islandWindow.blipMessage = result.error || "Could not read Blip devices"
+                        return
+                    }
+                    islandWindow.blipDevices = result.devices || []
+                    islandWindow.blipMessage = islandWindow.blipDevices.length > 0
+                        ? "Saved devices · availability unknown"
+                        : "No saved devices found"
+                } catch (e) {
+                    islandWindow.blipFailed = true
+                    islandWindow.blipMessage = "Invalid response from Blip adapter"
+                }
+            }
+        }
+        onExited: function(exitCode) {
+            islandWindow.blipLoading = false
+            if (exitCode !== 0 && !islandWindow.blipFailed) {
+                islandWindow.blipFailed = true
+                islandWindow.blipMessage = "Could not read Blip devices"
+            }
+        }
+    }
+
+    Process {
+        id: blipSendProc
+        running: false
+        stdout: SplitParser {
+            onRead: function(line) {
+                try {
+                    var result = JSON.parse(line.trim())
+                    if (result.ok && result.status === "dispatched") {
+                        islandWindow.blipDispatched = true
+                        islandWindow.blipMessage = "Sent request to " + result.device
+                    } else {
+                        islandWindow.blipFailed = true
+                        islandWindow.blipMessage = result.error || "Blip could not start the transfer"
+                    }
+                } catch (e) {
+                    islandWindow.blipFailed = true
+                    islandWindow.blipMessage = "Invalid response from Blip adapter"
+                }
+            }
+        }
+        onExited: function(exitCode) {
+            islandWindow.blipSending = false
+            if (exitCode !== 0 && !islandWindow.blipFailed) {
+                islandWindow.blipFailed = true
+                islandWindow.blipMessage = "Blip could not start the transfer"
+            }
+        }
+    }
+
     // V6_NATIVE_NOTIFICATIONS_TAB
     // The notification page is part of DynamicIsland itself. shell.qml only
     // provides the shared ListModel and executes the daemon actions requested
@@ -72,7 +201,8 @@ PanelWindow {
     // A notification arriving while this page is visible updates the shared
     // ListModel only; it must not replace the page with a transient popup.
     readonly property bool viewingNotifications:
-        isExpanded && notificationsTabVisible && currentTab === notificationTabIndex
+        isExpanded && !blipMode && !blipDragHover
+        && notificationsTabVisible && currentTab === notificationTabIndex
 
     function showLatestNotificationFromTab() {
         if (viewingNotifications)
@@ -566,7 +696,7 @@ PanelWindow {
     // works in one tick; a smooth touchpad can add several small deltas.
     // During the 350 ms slide, swallow the tail of the same gesture.
     function handleTabWheel(wheel) {
-        if (!isExpanded)
+        if (!isExpanded || blipMode || blipDragHover)
             return
 
         var dx = wheel.angleDelta.x
@@ -639,6 +769,10 @@ PanelWindow {
             dlSpeed = 0
             return
         }
+
+        // A file drag must not mark notifications as viewed.
+        if (blipDragHover || blipMode)
+            return
 
         // Pending notifications are the optional first page. Every fresh
         // expansion starts there; once the user scrolls away, normal circular
@@ -736,7 +870,7 @@ PanelWindow {
 
     property int targetHeight: {
         if (isExpanded) {
-            return expandedHeight;
+            return blipMode ? 222 : expandedHeight;
         }
         return 32;
     }
@@ -775,7 +909,9 @@ PanelWindow {
     Timer {
         id: positionPoller
         interval: 500 
-        running: islandWindow.isExpanded && islandWindow.isPlayerAvailable && currentTab === 0
+        running: islandWindow.isExpanded && !islandWindow.blipMode
+                 && !islandWindow.blipDragHover
+                 && islandWindow.isPlayerAvailable && currentTab === 0
         repeat: true
         triggeredOnStart: true
         onTriggered: {
@@ -1091,7 +1227,8 @@ PanelWindow {
 
     Process {
         id: statsProc
-        running: islandWindow.isExpanded && currentTab === 1
+        running: islandWindow.isExpanded && !islandWindow.blipMode
+                 && !islandWindow.blipDragHover && currentTab === 1
         command: [
             "bash", "-c",
             "LC_ALL=C; " +
@@ -1169,7 +1306,8 @@ PanelWindow {
     // las medidas detalladas cada segundo.
     Process {
         id: alertWatchdogProc
-        running: !(islandWindow.isExpanded && currentTab === 1)
+        running: !(islandWindow.isExpanded && !islandWindow.blipMode
+                   && !islandWindow.blipDragHover && currentTab === 1)
         command: [
             "bash", "-c",
             "LC_ALL=C; " +
@@ -1245,7 +1383,8 @@ PanelWindow {
     // --- ACTUALIZAR EL PROCESO DE LECTURA ---
     Process {
         id: appUsageProc
-        running: islandWindow.isExpanded && currentTab === 2
+        running: islandWindow.isExpanded && !islandWindow.blipMode
+                 && !islandWindow.blipDragHover && currentTab === 2
         // Ahora lee de ~/.cache para tener persistencia
         command: ["bash", "-c", "cat ~/.cache/qs_app_usage.json 2>/dev/null"]
         stdout: SplitParser {
@@ -1288,7 +1427,9 @@ PanelWindow {
     // Normal behaviour: hovering the island expands it. While a screen
     // recording live activity is shown, the pause/stop controls must remain
     // easy to click, so expansion is only armed by hovering the clock area.
-    property bool isExpanded: islandWindow.isUserSeeking
+    property bool isExpanded: islandWindow.blipMode
+                              || islandWindow.blipDragHover
+                              || islandWindow.isUserSeeking
                               || (!islandWindow.hasLiveActivities
                                   && islandHoverHandler.hovered
                                   && !islandWindow.suppressNormalHoverUntilExit)
@@ -1443,6 +1584,7 @@ PanelWindow {
             anchors.fill: parent
             z: 1400
             enabled: islandWindow.isExpanded && islandWindow.notificationsTabVisible
+                     && !islandWindow.blipMode && !islandWindow.blipDragHover
             acceptedButtons: Qt.NoButton
             onWheel: function(wheel) {
                 islandWindow.handleTabWheel(wheel)
@@ -2295,11 +2437,257 @@ PanelWindow {
             }
         }
 
+        // BLIP: Drag one file onto the visible island. A pinned recipient
+        // picker replaces (but does not modify) the normal carousel until closed.
+        Item {
+            anchors.fill: parent
+            z: 1500
+            visible: islandWindow.blipDragHover && !islandWindow.blipMode
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 7
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "Release to share"
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 17
+                    font.bold: true
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "Send a file with Blip"
+                    color: Qt.alpha(Theme.white, 0.66)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
+                }
+            }
+        }
+
+        Item {
+            id: blipPicker
+            anchors.fill: parent
+            z: 1600
+            visible: islandWindow.blipMode
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 14
+                anchors.topMargin: 11
+                anchors.bottomMargin: 11
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 25
+                    spacing: 9
+
+                    Text {
+                        text: "Share with Blip"
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 15
+                        font.bold: true
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        Layout.preferredWidth: 26
+                        Layout.preferredHeight: 24
+                        radius: 12
+                        color: blipCloseMouse.containsMouse
+                            ? Qt.alpha(Theme.white, 0.16) : Qt.alpha(Theme.white, 0.06)
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.white, 0.09)
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "×"
+                            color: Theme.white
+                            font.pixelSize: 18
+                        }
+
+                        MouseArea {
+                            id: blipCloseMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !islandWindow.blipLoading && !islandWindow.blipSending
+                            onClicked: islandWindow.dismissBlip()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 28
+                    radius: 10
+                    color: Qt.alpha(Theme.white, 0.06)
+
+                    Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        verticalAlignment: Text.AlignVCenter
+                        text: islandWindow.blipFileLabel()
+                        elide: Text.ElideMiddle
+                        color: Qt.alpha(Theme.white, 0.85)
+                        font.family: Theme.fontMain
+                        font.pixelSize: 11
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 20
+                    text: islandWindow.blipLoading ? "Finding saved devices..."
+                        : islandWindow.blipDispatched ? "Transfer requested"
+                        : islandWindow.blipFailed ? "Could not share file"
+                        : "Choose a device"
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                ListView {
+                    id: blipDeviceList
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 3
+                    visible: !islandWindow.blipLoading
+                             && !islandWindow.blipFailed
+                             && !islandWindow.blipDispatched
+                    model: islandWindow.blipDevices
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        width: blipDeviceList.width
+                        height: 27
+                        radius: 9
+                        color: blipDeviceMouse.containsMouse
+                            ? Qt.alpha(Theme.white, 0.14)
+                            : Qt.alpha(Theme.white, 0.045)
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.white, 0.07)
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 11
+                            anchors.right: blipDeviceArrow.left
+                            anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.name
+                            elide: Text.ElideRight
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            id: blipDeviceArrow
+                            anchors.right: parent.right
+                            anchors.rightMargin: 11
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "›"
+                            color: Qt.alpha(Theme.white, 0.66)
+                            font.pixelSize: 17
+                        }
+
+                        MouseArea {
+                            id: blipDeviceMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !islandWindow.blipSending
+                            onClicked: islandWindow.sendBlipTo(modelData.id)
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: islandWindow.blipLoading || islandWindow.blipFailed
+                             || islandWindow.blipDispatched
+
+                    Text {
+                        anchors.centerIn: parent
+                        width: parent.width - 15
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        text: islandWindow.blipMessage
+                        color: islandWindow.blipFailed
+                            ? Theme.red : Qt.alpha(Theme.white, 0.78)
+                        font.family: Theme.fontMain
+                        font.pixelSize: 11
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 18
+                    text: islandWindow.blipSending ? "Requesting transfer..."
+                        : islandWindow.blipMessage
+                    elide: Text.ElideRight
+                    color: islandWindow.blipFailed
+                        ? Theme.red : Qt.alpha(Theme.white, 0.58)
+                    font.family: Theme.fontMain
+                    font.pixelSize: 10
+                }
+            }
+        }
+
+        DropArea {
+            id: blipDropArea
+            anchors.fill: parent
+            z: 1700
+            enabled: !islandWindow.blipMode
+
+            onEntered: function(drag) {
+                if (drag.hasUrls) {
+                    drag.accept(Qt.CopyAction)
+                    islandWindow.blipDragHover = true
+                } else {
+                    drag.accepted = false
+                }
+            }
+            onExited: islandWindow.blipDragHover = false
+            onDropped: function(drop) {
+                if (!drop.hasUrls || drop.urls.length === 0) {
+                    drop.accepted = false
+                    islandWindow.blipDragHover = false
+                    return
+                }
+
+                var localUrls = []
+                for (var i = 0; i < drop.urls.length; i++) {
+                    var url = String(drop.urls[i])
+                    if (url.startsWith("file://"))
+                        localUrls.push(url)
+                }
+                if (localUrls.length === 0) {
+                    drop.accepted = false
+                    islandWindow.blipDragHover = false
+                    return
+                }
+                // CopyAction must never move/delete the source file.
+                drop.accept(Qt.CopyAction)
+                islandWindow.acceptBlipDrop(localUrls)
+            }
+        }
+
         // ── EXPANDED STATE: TABS ──
         Item {
             id: expandedTabsViewport
             anchors.fill: parent
             visible: islandWindow.isExpanded && !visualBg.isAnimating
+                     && !islandWindow.blipMode && !islandWindow.blipDragHover
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 100 } }
 
@@ -2930,6 +3318,8 @@ PanelWindow {
                                     interval: 40 // 25 FPS: suficientemente suave para una onda tan pequeña.
                                     repeat: true
                                     running: islandWindow.isExpanded
+                                             && !islandWindow.blipMode
+                                             && !islandWindow.blipDragHover
                                              && islandWindow.currentTab === 0
                                              && islandWindow.isPlayerAvailable
                                              && islandWindow.isPlaying
