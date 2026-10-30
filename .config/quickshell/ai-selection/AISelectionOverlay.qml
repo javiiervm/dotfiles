@@ -1054,9 +1054,10 @@ Scope {
                         anchors.centerIn: parent
                         // The upper brackets carry more visual weight; a 1px
                         // optical offset centers the icon inside its pill.
-                        anchors.verticalCenterOffset: 1
+                        anchors.verticalCenterOffset: 0
                         width: 24
                         height: 24
+                        scale: 0.88
                         readonly property color iconColor: panel.menuWhite
                         onIconColorChanged: requestPaint()
                         onPaint: {
@@ -1111,6 +1112,7 @@ Scope {
                         anchors.verticalCenterOffset: -1
                         width: 24
                         height: 24
+                        scale: 0.76
                         readonly property color iconColor: panel.menuWhite
                         onIconColorChanged: requestPaint()
                         onPaint: {
