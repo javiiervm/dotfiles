@@ -126,7 +126,7 @@ PanelWindow {
     NumberAnimation on introProgress {
         from: 0
         to: 1
-        duration: 540
+        duration: 320
         running: panel.visible
         easing.type: Easing.OutCubic
     }
@@ -210,7 +210,11 @@ PanelWindow {
 
             // The overlay is not visible until ALL monitors have been captured.
             // This prevents the AI overlay from leaking into the original PNG.
-            snapshotProcess.exec(["grim", "-o", panel.modelData.name, panel.framePath])
+            // Temporary frozen frames live in XDG_RUNTIME_DIR (RAM-backed on
+            // typical Linux setups). Level 0 avoids PNG compression work
+            // before the UI can open; the final saved crop is still a
+            // regular compressed PNG produced by ImageMagick.
+            snapshotProcess.exec(["grim", "-l", "0", "-o", panel.modelData.name, panel.framePath])
         }
 
         // A selection on either monitor clears the previous selection.
@@ -533,8 +537,9 @@ PanelWindow {
         Item {
             id: actions
             visible: panel.hasSelection && !panel.saving
-            width: 188
-            height: 42
+            // One labelled placeholder, one icon placeholder, one working action.
+            width: 218
+            height: 44
 
             readonly property int blurMargin: 20
 
@@ -614,27 +619,125 @@ PanelWindow {
                 }
             }
 
+            // Future Xavion and OCR actions are intentionally visual-only for
+            // this first iteration. Capture remains the only active button.
             Row {
                 anchors.centerIn: parent
-                spacing: 4
+                spacing: 5
 
+                // Placeholder: a future request will send the selected
+                // screenshot to the local Xavion assistant.
                 Rectangle {
-                    width: 106
-                    height: 34
-                    radius: 17
+                    id: askXavionButton
+                    width: 126
+                    height: 36
+                    radius: 18
+                    color: Qt.alpha(panel.menuWhite, 0.075)
+                    opacity: 0.72
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Ask Xavion"
+                        color: panel.menuWhite
+                        font.family: panel.menuFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+                }
+
+                // Placeholder: future text detection / selection.
+                // The selection-corner + T icon is vector-drawn so it doesn't
+                // rely on a particular Nerd Font glyph being installed.
+                Rectangle {
+                    id: textSelectionButton
+                    width: 36
+                    height: 36
+                    radius: 18
+                    color: Qt.alpha(panel.menuWhite, 0.045)
+                    opacity: 0.72
+
+                    Canvas {
+                        id: textSelectionIcon
+                        anchors.centerIn: parent
+                        // The upper brackets carry more visual weight; a 1px
+                        // optical offset centers the icon inside its pill.
+                        anchors.verticalCenterOffset: 1
+                        width: 24
+                        height: 24
+                        readonly property color iconColor: panel.menuWhite
+                        onIconColorChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = String(iconColor)
+                            ctx.lineWidth = 1.6
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            // Selection brackets.
+                            ctx.moveTo(7, 4); ctx.lineTo(4, 4); ctx.lineTo(4, 8)
+                            ctx.moveTo(17, 4); ctx.lineTo(20, 4); ctx.lineTo(20, 8)
+                            ctx.moveTo(4, 16); ctx.lineTo(4, 20); ctx.lineTo(7, 20)
+                            ctx.moveTo(20, 16); ctx.lineTo(20, 20); ctx.lineTo(17, 20)
+                            // Text cursor / letter T.
+                            ctx.moveTo(8, 9); ctx.lineTo(16, 9)
+                            ctx.moveTo(12, 9); ctx.lineTo(12, 17)
+                            ctx.stroke()
+                        }
+                    }
+                }
+
+                // Active: crop the original frozen image, save it and copy
+                // the PNG to the clipboard (unchanged screenshot behaviour).
+                Rectangle {
+                    id: captureButton
+                    width: 36
+                    height: 36
+                    radius: 18
                     color: captureArea.containsMouse
                            ? Qt.alpha(panel.menuWhite, 0.16)
                            : Qt.alpha(panel.menuWhite, 0.075)
 
                     Behavior on color { ColorAnimation { duration: 125 } }
 
-                    Text {
+                    Canvas {
+                        id: captureIcon
                         anchors.centerIn: parent
-                        text: "Capture"
-                        color: panel.menuWhite
-                        font.family: panel.menuFont
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
+                        // The camera outline extends further below the 24px
+                        // canvas midpoint; lift it 1px for optical centering.
+                        anchors.verticalCenterOffset: -1
+                        width: 24
+                        height: 24
+                        readonly property color iconColor: panel.menuWhite
+                        onIconColorChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = String(iconColor)
+                            ctx.lineWidth = 1.6
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            // Compact camera outline.
+                            ctx.moveTo(5, 8)
+                            ctx.lineTo(8, 8)
+                            ctx.lineTo(10, 5.5)
+                            ctx.lineTo(16, 5.5)
+                            ctx.lineTo(18, 8)
+                            ctx.lineTo(20, 8)
+                            ctx.quadraticCurveTo(22, 8, 22, 10)
+                            ctx.lineTo(22, 19)
+                            ctx.quadraticCurveTo(22, 21, 20, 21)
+                            ctx.lineTo(4, 21)
+                            ctx.quadraticCurveTo(2, 21, 2, 19)
+                            ctx.lineTo(2, 10)
+                            ctx.quadraticCurveTo(2, 8, 4, 8)
+                            ctx.closePath()
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.arc(12, 14.5, 3.4, 0, Math.PI * 2)
+                            ctx.stroke()
+                        }
                     }
 
                     MouseArea {
@@ -643,33 +746,6 @@ PanelWindow {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: panel.saveSelection()
-                    }
-                }
-
-                Rectangle {
-                    width: 68
-                    height: 34
-                    radius: 17
-                    color: closeArea.containsMouse
-                           ? Qt.alpha(panel.menuWhite, 0.10)
-                           : "transparent"
-
-                    Behavior on color { ColorAnimation { duration: 125 } }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "Close"
-                        color: panel.menuForeground
-                        font.family: panel.menuFont
-                        font.pixelSize: 12
-                    }
-
-                    MouseArea {
-                        id: closeArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: panel.controller.abortSelection()
                     }
                 }
             }

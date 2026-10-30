@@ -1,10 +1,10 @@
-
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Hyprland
 
-// AI Selection v0.4: separate, persistent Quickshell instance.
-// The existing desktop shell and Xavion are intentionally untouched.
+// AI Selection: independent, persistent Quickshell instance.
+// No process is launched per click: Hyprland dispatches a native shortcut.
 Scope {
     id: service
 
@@ -14,6 +14,7 @@ Scope {
     property int pendingScreens: 0
     property bool selectionCompleted: false
     property bool selectionInProgress: false
+    property double snapshotStartedAt: 0
 
     signal snapshotRequested(int session)
     signal dismissed()
@@ -30,6 +31,7 @@ Scope {
         ++session
         selectionCompleted = false
         selectionInProgress = false
+        snapshotStartedAt = Date.now()
         opening = true
         snapshotRequested(session)
     }
@@ -42,11 +44,12 @@ Scope {
         if (pendingScreens === 0) {
             opening = false
             active = true
+            console.info("AI Selection: frozen screenshots ready in "
+                         + (Date.now() - snapshotStartedAt) + " ms")
         }
     }
 
-    // Shared state: the blue overlay fades from every screen as soon as
-    // the user begins dragging on any monitor.
+    // Blue overlay fades across all monitors when a region begins.
     function beginRegionSelection() {
         selectionCompleted = false
         selectionInProgress = true
@@ -54,8 +57,6 @@ Scope {
     }
 
     function completeRegionSelection() {
-        // Set the completed flag first so the blue overlay never flashes
-        // back between releasing the mouse and showing the action menu.
         selectionCompleted = true
         selectionInProgress = false
     }
@@ -77,6 +78,15 @@ Scope {
         dismissed()
     }
 
+    // Fast path: Hyprland's global-shortcuts Wayland protocol, avoiding
+    // spawning the `qs ipc` command for every Super + left-click.
+    GlobalShortcut {
+        name: "ai_selection"
+        description: "Open AI Selection"
+        onPressed: service.openSelection()
+    }
+
+    // Keep the previous IPC interface for testing and manual invocation.
     IpcHandler {
         target: "aiselection"
 
