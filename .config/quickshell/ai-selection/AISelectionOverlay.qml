@@ -1,0 +1,619 @@
+
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Effects
+import Quickshell
+import Quickshell.Io
+import Quickshell.Wayland
+
+// Frozen-screen selection overlay, one instance per Wayland output.
+PanelWindow {
+    id: panel
+
+    required property var modelData
+    required property var controller
+    screen: modelData
+
+    anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+    }
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "ai-selection"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+    color: "transparent"
+    visible: controller.active
+
+    property int captureSession: 0
+    property string framePath: ""
+    property bool selecting: false
+    property bool hasSelection: false
+    property bool saving: false
+    property bool localSelectionCompleted: false
+    property real introProgress: 0
+
+    // This is a separate Quickshell configuration. Importing the parent
+    // shell's QML components is not supported by its module scanner.
+    // Read the shared theme source as data instead, so the menu follows
+    // changes made to the real dotfiles without duplicating GlassSurface.
+    FileView {
+        id: glassSettings
+        path: Quickshell.env("HOME") + "/.config/quickshell/Glass.qml"
+        watchChanges: true
+        onFileChanged: reload()
+    }
+
+    FileView {
+        id: themeSettings
+        path: Quickshell.env("HOME") + "/.config/quickshell/Theme.qml"
+        watchChanges: true
+        onFileChanged: reload()
+    }
+
+    function settingString(source, key, fallback) {
+        const match = source.match(new RegExp("\\b" + key + "\\s*:\\s*['\"]([^'\"]+)['\"]"))
+        return match ? match[1] : fallback
+    }
+
+    function settingNumber(source, key, fallback) {
+        const match = source.match(new RegExp("\\b" + key + "\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)"))
+        return match ? Number(match[1]) : fallback
+    }
+
+    readonly property color menuTint: settingString(glassSettings.text(), "tint", "#101013")
+    readonly property real menuOpacity: settingNumber(glassSettings.text(), "opacity", 0.38)
+    readonly property real menuBorderWidth: settingNumber(glassSettings.text(), "borderWidth", 1.0)
+    readonly property real menuBorderOpacity: settingNumber(glassSettings.text(), "borderOpacity", 0.20)
+    readonly property real menuHighlightOpacity: settingNumber(glassSettings.text(), "highlightOpacity", 0.10)
+    readonly property color menuForeground: settingString(themeSettings.text(), "fg", "#abb2bf")
+    readonly property color menuWhite: settingString(themeSettings.text(), "white", "#ffffff")
+    readonly property string menuFont: settingString(themeSettings.text(), "fontMain", "Adwaita Sans")
+
+    // A real entrance transition: fade the bluish wash in over the frozen
+    // screen before enabling dragging. The colour waves keep moving after it.
+    NumberAnimation on introProgress {
+        from: 0
+        to: 1
+        duration: 540
+        running: panel.visible
+        easing.type: Easing.OutCubic
+    }
+
+    property real pressX: 0
+    property real pressY: 0
+    property real endX: 0
+    property real endY: 0
+
+    readonly property real leftEdge: Math.min(pressX, endX)
+    readonly property real topEdge: Math.min(pressY, endY)
+    readonly property real selectionWidth: Math.abs(endX - pressX)
+    readonly property real selectionHeight: Math.abs(endY - pressY)
+
+    function clearSelection() {
+        selecting = false
+        hasSelection = false
+        pressX = 0
+        pressY = 0
+        endX = 0
+        endY = 0
+    }
+
+    function saveSelection() {
+        if (!hasSelection || saving || framePath === "")
+            return
+
+        // Wayland panels use logical coordinates; grim's PNG uses physical pixels.
+        // Take both scale factors from the real source image, not screen.scale.
+        const sx = frozenImage.sourceSize.width / panel.width
+        const sy = frozenImage.sourceSize.height / panel.height
+        const x = Math.max(0, Math.round(leftEdge * sx))
+        const y = Math.max(0, Math.round(topEdge * sy))
+        const w = Math.min(frozenImage.sourceSize.width - x,
+                           Math.max(1, Math.round(selectionWidth * sx)))
+        const h = Math.min(frozenImage.sourceSize.height - y,
+                           Math.max(1, Math.round(selectionHeight * sy)))
+        if (w < 2 || h < 2)
+            return
+
+        saving = true
+
+        // Pass all parameters as positional arguments; never interpolate paths
+        // or coordinates into shell commands.
+        saveProcess.exec([
+            "bash", "-c",
+            "set -euo pipefail\n" +
+            "source_file=$1; x=$2; y=$3; w=$4; h=$5\n" +
+            "pictures=$(xdg-user-dir PICTURES 2>/dev/null || printf '%s/Pictures' \"$HOME\")\n" +
+            "directory=\"$pictures/Screenshots\"\n" +
+            "mkdir -p -- \"$directory\"\n" +
+            "filename=\"Screenshot_$(date +%Y-%m-%d_%H-%M-%S_%N).png\"\n" +
+            "out=\"$directory/$filename\"\n" +
+            "if command -v magick >/dev/null 2>&1; then\n" +
+            "  magick \"$source_file\" -crop \"${w}x${h}+${x}+${y}\" +repage \"$out\"\n" +
+            "else\n" +
+            "  convert \"$source_file\" -crop \"${w}x${h}+${x}+${y}\" +repage \"$out\"\n" +
+            "fi\n" +
+            "wl-copy --type image/png < \"$out\"\n" +
+            "touch /tmp/qs_shutter\n",
+            "ai-selection", framePath, String(x), String(y), String(w), String(h)
+        ])
+    }
+
+    Connections {
+        target: controller
+        // Keep the overlay compatible with controllers predating v0.3.
+        ignoreUnknownSignals: true
+
+        function onSnapshotRequested(requestSession) {
+            panel.clearSelection()
+            panel.introProgress = 0
+            panel.localSelectionCompleted = false
+            panel.saving = false
+            panel.captureSession = requestSession
+            frozenImage.source = ""
+
+            const tempDir = Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
+            const safeName = panel.modelData.name.replace(/[^a-zA-Z0-9_-]/g, "_")
+            panel.framePath = tempDir + "/ai-selection-" + safeName + "-" + requestSession + ".png"
+
+            // The overlay is not visible until ALL monitors have been captured.
+            // This prevents the AI overlay from leaking into the original PNG.
+            snapshotProcess.exec(["grim", "-o", panel.modelData.name, panel.framePath])
+        }
+
+        // A selection on either monitor clears the previous selection.
+        function onSelectionsCleared() {
+            panel.clearSelection()
+            panel.localSelectionCompleted = false
+        }
+
+        function onDismissed() {
+            panel.clearSelection()
+            panel.localSelectionCompleted = false
+            panel.saving = false
+            frozenImage.source = ""
+            if (panel.framePath !== "")
+                cleanupProcess.exec(["rm", "-f", "--", panel.framePath])
+            panel.framePath = ""
+        }
+    }
+
+    Process {
+        id: snapshotProcess
+        onExited: function(exitCode, exitStatus) {
+            // Ignore a screenshot that completed after the user cancelled.
+            if (panel.captureSession !== panel.controller.session || !panel.controller.opening)
+                return
+            if (exitCode !== 0) {
+                console.error("AI Selection: grim failed for", panel.modelData.name, exitCode)
+                panel.controller.abortSelection()
+                return
+            }
+            frozenImage.source = "file://" + panel.framePath
+        }
+    }
+
+    Process {
+        id: saveProcess
+        onExited: function(exitCode, exitStatus) {
+            if (exitCode !== 0) {
+                console.error("AI Selection: screenshot save/copy failed:", exitCode)
+                errorProcess.exec(["notify-send", "AI Selection",
+                    "Could not save/copy screenshot. Check ImageMagick and wl-clipboard."])
+            }
+            panel.saving = false
+            panel.controller.abortSelection()
+        }
+    }
+
+    Process { id: cleanupProcess }
+    Process { id: errorProcess }
+
+    Item {
+        id: surface
+        anchors.fill: parent
+        focus: panel.visible
+        Keys.onEscapePressed: {
+            if (!panel.saving)
+                panel.controller.abortSelection()
+        }
+
+        // Keep Escape available even when a child MouseArea is active.
+        Shortcut {
+            sequence: "Escape"
+            context: Qt.WindowShortcut
+            enabled: panel.visible && !panel.saving
+            onActivated: panel.controller.abortSelection()
+        }
+
+        Image {
+            id: frozenImage
+            anchors.fill: parent
+            cache: false
+            asynchronous: false
+            fillMode: Image.Stretch
+            visible: panel.visible
+
+            onStatusChanged: {
+                if (status === Image.Ready && panel.captureSession === panel.controller.session)
+                    panel.controller.snapshotReady(panel.captureSession)
+                else if (status === Image.Error)
+                    panel.controller.abortSelection()
+            }
+        }
+
+        // The original animated blue treatment is visible before dragging.
+        // On the monitor being selected it disappears immediately, so no
+        // colour leaks into the transparent selection region, even for a frame.
+        // Other monitors keep the blue treatment until the selection is done.
+        Item {
+            id: blueTreatment
+            anchors.fill: parent
+            visible: !panel.selecting
+            opacity: (panel.localSelectionCompleted
+                      || panel.controller.selectionCompleted === true)
+                     ? 0 : panel.introProgress
+
+            Behavior on opacity {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                color: "#3264c7"
+                opacity: 0.32
+            }
+
+            // Large blurred colour waves. The Canvases are painted once and their
+            // textures move on the GPU rather than repainting every frame.
+            Item {
+                anchors.fill: parent
+                clip: true
+
+                Canvas {
+                    id: violetWave
+                    width: Math.max(panel.width * 0.70, 720)
+                    height: Math.max(panel.height * 1.2, 720)
+                    x: -width * 0.42
+                    y: -height * 0.28
+                    opacity: 0.58
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        const r = Math.max(width, height) * 0.5
+                        const gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                                   width / 2, height / 2, r)
+                        gradient.addColorStop(0, "rgba(169, 102, 246, 0.72)")
+                        gradient.addColorStop(0.55, "rgba(124, 92, 240, 0.32)")
+                        gradient.addColorStop(1, "rgba(99, 74, 221, 0)")
+                        ctx.fillStyle = gradient
+                        ctx.fillRect(0, 0, width, height)
+                    }
+
+                    SequentialAnimation on x {
+                        running: panel.visible && blueTreatment.visible && blueTreatment.opacity > 0.01
+                        loops: Animation.Infinite
+                        NumberAnimation { to: panel.width * 0.30; duration: 3300; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: -violetWave.width * 0.42; duration: 3700; easing.type: Easing.InOutSine }
+                    }
+                }
+
+                Canvas {
+                    id: cyanWave
+                    width: Math.max(panel.width * 0.75, 760)
+                    height: Math.max(panel.height * 1.15, 700)
+                    x: panel.width * 0.36
+                    y: panel.height * 0.10
+                    opacity: 0.60
+
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        const r = Math.max(width, height) * 0.5
+                        const gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                                   width / 2, height / 2, r)
+                        gradient.addColorStop(0, "rgba(74, 210, 245, 0.68)")
+                        gradient.addColorStop(0.60, "rgba(70, 142, 246, 0.26)")
+                        gradient.addColorStop(1, "rgba(59, 117, 227, 0)")
+                        ctx.fillStyle = gradient
+                        ctx.fillRect(0, 0, width, height)
+                    }
+
+                    SequentialAnimation on y {
+                        running: panel.visible && blueTreatment.visible && blueTreatment.opacity > 0.01
+                        loops: Animation.Infinite
+                        NumberAnimation { to: -cyanWave.height * 0.38; duration: 3800; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: panel.height * 0.10; duration: 4200; easing.type: Easing.InOutSine }
+                    }
+                }
+            }
+        }
+
+        // Four lightweight overlay strips leave a genuine transparent hole
+        // over the selected pixels. The original frozen screenshot underneath
+        // remains untouched, and there is no expensive full-screen mask/shader.
+        // Adjust this value to change the strength of blue outside the region.
+        Item {
+            id: dragTint
+            anchors.fill: parent
+            visible: panel.selecting
+            readonly property real tintOpacity: 0.16
+
+            // Above the selection.
+            Rectangle {
+                x: 0
+                y: 0
+                width: dragTint.width
+                height: panel.topEdge
+                color: "#3264c7"
+                opacity: dragTint.tintOpacity
+            }
+
+            // To the left of the selection.
+            Rectangle {
+                x: 0
+                y: panel.topEdge
+                width: panel.leftEdge
+                height: panel.selectionHeight
+                color: "#3264c7"
+                opacity: dragTint.tintOpacity
+            }
+
+            // To the right of the selection.
+            Rectangle {
+                x: panel.leftEdge + panel.selectionWidth
+                y: panel.topEdge
+                width: Math.max(0, dragTint.width - x)
+                height: panel.selectionHeight
+                color: "#3264c7"
+                opacity: dragTint.tintOpacity
+            }
+
+            // Below the selection.
+            Rectangle {
+                x: 0
+                y: panel.topEdge + panel.selectionHeight
+                width: dragTint.width
+                height: Math.max(0, dragTint.height - y)
+                color: "#3264c7"
+                opacity: dragTint.tintOpacity
+            }
+        }
+
+        MouseArea {
+            id: picker
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            cursorShape: Qt.CrossCursor
+            // Input must not depend on animation state: it can remain at zero
+            // after a reload or reopening and would lock selection completely.
+            enabled: panel.visible && !panel.saving
+
+            onPressed: function(mouse) {
+                if (mouse.button === Qt.RightButton) {
+                    panel.controller.abortSelection()
+                    return
+                }
+                // Sync selections when the v0.3 controller is available.
+                // Older shell.qml versions lack this function; do not abort
+                // mouse input just because the UI controller is older.
+                if (typeof panel.controller.beginRegionSelection === "function")
+                    panel.controller.beginRegionSelection()
+                else
+                    panel.clearSelection()
+
+                panel.localSelectionCompleted = false
+                panel.selecting = true
+                panel.pressX = mouse.x
+                panel.pressY = mouse.y
+                panel.endX = mouse.x
+                panel.endY = mouse.y
+            }
+
+            onPositionChanged: function(mouse) {
+                if (panel.selecting) {
+                    panel.endX = Math.max(0, Math.min(width, mouse.x))
+                    panel.endY = Math.max(0, Math.min(height, mouse.y))
+                }
+            }
+
+            onReleased: function(mouse) {
+                if (!panel.selecting)
+                    return
+                panel.endX = Math.max(0, Math.min(width, mouse.x))
+                panel.endY = Math.max(0, Math.min(height, mouse.y))
+                panel.selecting = false
+                panel.hasSelection = panel.selectionWidth >= 8 && panel.selectionHeight >= 8
+                if (panel.hasSelection) {
+                    panel.localSelectionCompleted = true
+                    if (typeof panel.controller.completeRegionSelection === "function")
+                        panel.controller.completeRegionSelection()
+                } else if (typeof panel.controller.cancelRegionSelection === "function") {
+                    // No valid region: return to the initial blue overlay.
+                    panel.controller.cancelRegionSelection()
+                }
+            }
+
+            onCanceled: {
+                panel.selecting = false
+                if (typeof panel.controller.cancelRegionSelection === "function")
+                    panel.controller.cancelRegionSelection()
+            }
+        }
+
+        // The rectangle is presentation-only: the file used for the final
+        // screenshot is the original, uncoloured PNG recorded by grim.
+        Rectangle {
+            x: panel.leftEdge
+            y: panel.topEdge
+            width: panel.selectionWidth
+            height: panel.selectionHeight
+            visible: panel.selecting || panel.hasSelection
+            // Transparent interior: the user sees the original frozen pixels.
+            color: "transparent"
+            border.color: "#8de4ff"
+            border.width: 2
+            radius: 9
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -3
+                radius: 12
+                color: "transparent"
+                border.width: 1
+                border.color: "#77b9fd"
+                opacity: 0.60
+            }
+        }
+
+        // A small frosted-glass toolbar that uses the same material as the
+        // rest of the desktop. The blur samples the FROZEN screenshot, not
+        // the live compositor behind this full-screen overlay.
+        Item {
+            id: actions
+            visible: panel.hasSelection && !panel.saving
+            width: 188
+            height: 42
+
+            readonly property int blurMargin: 20
+
+            x: Math.max(12, Math.min(panel.width - width - 12,
+                                    panel.leftEdge + (panel.selectionWidth - width) / 2))
+            y: panel.topEdge + panel.selectionHeight + height + 12 < panel.height
+               ? panel.topEdge + panel.selectionHeight + 12
+               : Math.max(12, panel.topEdge - height - 12)
+
+            // Only sample the pixels around this toolbar; blurring a full
+            // 2560x1600 frame would waste GPU memory and processing time.
+            ShaderEffectSource {
+                id: menuSnapshot
+                visible: false
+                x: -actions.blurMargin
+                y: -actions.blurMargin
+                width: actions.width + actions.blurMargin * 2
+                height: actions.height + actions.blurMargin * 2
+                sourceItem: frozenImage
+                sourceRect: Qt.rect(actions.x - actions.blurMargin,
+                                    actions.y - actions.blurMargin,
+                                    width, height)
+                live: true
+            }
+
+            // Rounded alpha mask to avoid square corners on the blur texture.
+            Item {
+                id: menuMask
+                visible: false
+                width: menuSnapshot.width
+                height: menuSnapshot.height
+                layer.enabled: true
+
+                Rectangle {
+                    x: actions.blurMargin
+                    y: actions.blurMargin
+                    width: actions.width
+                    height: actions.height
+                    radius: actions.height / 2
+                    color: "white"
+                }
+            }
+
+            MultiEffect {
+                x: menuSnapshot.x
+                y: menuSnapshot.y
+                width: menuSnapshot.width
+                height: menuSnapshot.height
+                source: menuSnapshot
+                blurEnabled: true
+                blurMax: 20
+                blur: 0.85
+                autoPaddingEnabled: false
+                maskEnabled: true
+                maskSource: menuMask
+            }
+
+            // Same glass material as GlassSurface.qml, rendered inline so the
+            // standalone config does not import QML from another config root.
+            Rectangle {
+                anchors.fill: parent
+                radius: actions.height / 2
+                color: Qt.alpha(panel.menuTint, panel.menuOpacity)
+                border.width: panel.menuBorderWidth
+                border.color: Qt.alpha(panel.menuWhite, panel.menuBorderOpacity)
+
+                Rectangle {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        top: parent.top
+                        leftMargin: parent.radius / 2
+                        rightMargin: parent.radius / 2
+                    }
+                    height: 1
+                    color: Qt.alpha(panel.menuWhite, panel.menuHighlightOpacity)
+                }
+            }
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 4
+
+                Rectangle {
+                    width: 106
+                    height: 34
+                    radius: 17
+                    color: captureArea.containsMouse
+                           ? Qt.alpha(panel.menuWhite, 0.16)
+                           : Qt.alpha(panel.menuWhite, 0.075)
+
+                    Behavior on color { ColorAnimation { duration: 125 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Capture"
+                        color: panel.menuWhite
+                        font.family: panel.menuFont
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        id: captureArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panel.saveSelection()
+                    }
+                }
+
+                Rectangle {
+                    width: 68
+                    height: 34
+                    radius: 17
+                    color: closeArea.containsMouse
+                           ? Qt.alpha(panel.menuWhite, 0.10)
+                           : "transparent"
+
+                    Behavior on color { ColorAnimation { duration: 125 } }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Close"
+                        color: panel.menuForeground
+                        font.family: panel.menuFont
+                        font.pixelSize: 12
+                    }
+
+                    MouseArea {
+                        id: closeArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panel.controller.abortSelection()
+                    }
+                }
+            }
+        }
+    }
+}

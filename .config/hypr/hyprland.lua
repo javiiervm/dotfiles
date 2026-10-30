@@ -84,6 +84,8 @@ hl.on("hyprland.start", function ()
     hl.exec_cmd("python3 -m compileall -q ~/.config/quickshell/scripts/")
     hl.exec_cmd("python3 ~/.config/quickshell/scripts/app_usage_daemon.py")
     hl.exec_cmd("quickshell")
+    -- Start AI Selection in its own Quickshell instance
+    hl.exec_cmd("qs -p ~/.config/quickshell/ai-selection")
     -- hl.exec_cmd("qs -c overview")
     hl.exec_cmd("qs -p ~/.config/quickshell/overview")
 
