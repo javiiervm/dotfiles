@@ -541,6 +541,7 @@ ShellRoot {
     Launcher { 
         id: mainLauncher
         screen: root.primaryUiScreen
+        xavionService: xavionService
         onRequestIslandMsg: function(icon, color, text) {
             if (typeof islandWidget !== "undefined") {
                 islandWidget.triggerMsg(icon, color, text);
@@ -551,16 +552,6 @@ ShellRoot {
     // --- XAVION CHAT ---
     XavionService {
         id: xavionService
-    }
-
-    LazyLoader {
-        id: xavionPanelLoader
-        active: xavionService.panelOpen
-
-        XavionPanel {
-            screen: root.primaryUiScreen
-            service: xavionService
-        }
     }
 
     ControlCenter {
@@ -628,7 +619,7 @@ ShellRoot {
     GlobalShortcut {
         name: "xavion"
         onPressed: {
-            xavionService.togglePanel()
+            mainLauncher.toggleXavion()
         }
     }
 
@@ -1038,7 +1029,7 @@ ShellRoot {
                     cursorShape: Qt.PointingHandCursor
 
                     onClicked: {
-                        xavionService.togglePanel()
+                        mainLauncher.toggleXavion()
                     }
                 }
             }

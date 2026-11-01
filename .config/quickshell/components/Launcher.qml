@@ -12,6 +12,10 @@ PanelWindow {
     // ==========================================
     property bool visible_state: false
     property bool isReallyVisible: false
+
+    // One shared Xavion backend for the Launcher and its embedded chat.
+    required property var xavionService
+    readonly property int xavionMode: 14
     property string calcResult: "" 
     
     // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording
@@ -377,7 +381,7 @@ PanelWindow {
         property int targetWidth: {
             if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) return 420;
             if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12) return 620;
-            if (launcherWindow.currentMode === 13) return 740;
+            if (launcherWindow.currentMode === 13 || launcherWindow.currentMode === launcherWindow.xavionMode) return 740;
             if (launcherWindow.currentMode === 9) return 320; 
             return 720; 
         }
@@ -539,7 +543,7 @@ PanelWindow {
             // ------------------------------------------
             Item {
                 width: parent.width
-                height: launcherWindow.currentMode === 9 ? 85 : 50
+                height: launcherWindow.currentMode === launcherWindow.xavionMode ? 0 : (launcherWindow.currentMode === 9 ? 85 : 50)
                 Behavior on height { NumberAnimation { duration: 350; easing.type: Easing.OutQuint } }
 
                 Text {
@@ -558,19 +562,65 @@ PanelWindow {
 
                 // A) BUSCADOR Y CONTRASEÑA
                 Rectangle {
+                    id: launcherSearchBar
                     anchors.bottom: parent.bottom
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: launcherWindow.currentMode === 9 ? parent.width : Math.min(parent.width, 470)
                     height: launcherWindow.currentMode === 9 ? 50 : 38
                     visible: launcherWindow.currentMode === 0 || launcherWindow.currentMode === 9
                     radius: height / 2
-                    color: launcherWindow.currentMode === 9
-                        ? Qt.alpha(Theme.white, 0.05)
-                        : Qt.alpha(Theme.white, 0.075)
-                    border.color: launcherWindow.currentMode === 9
-                        ? Qt.alpha(Theme.white, 0.15)
-                        : Qt.alpha(Theme.white, 0.18)
-                    border.width: 1
+                    clip: true
+                    // Neutral Launcher glass fill. Xavion colours belong ONLY to
+                    // the outline and the AI magnifier, never to the inside.
+                    color: Qt.alpha(Theme.white, 0.05)
+                    border.width: launcherWindow.currentMode === 9 ? 1 : 0
+                    border.color: Qt.alpha(Theme.white, 0.15)
+
+                    // Single thin continuous gradient outline (no bottom underline).
+                    // Canvas draws the STROKE only: the centre remains the normal
+                    // translucent Launcher material rather than a tinted gradient.
+                    Canvas {
+                        id: xavionSearchOutline
+                        anchors.fill: parent
+                        visible: launcherWindow.currentMode === 0
+                        antialiasing: true
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (width <= 2 || height <= 2) return
+
+                            var inset = 0.8
+                            var left = inset
+                            var top = inset
+                            var right = width - inset
+                            var bottom = height - inset
+                            var r = (bottom - top) / 2
+                            var borderInk = ctx.createLinearGradient(0, 0, width, 0)
+                            borderInk.addColorStop(0, String(launcherWindow.xavionService.gradientStart))
+                            borderInk.addColorStop(0.5, String(launcherWindow.xavionService.gradientMid))
+                            borderInk.addColorStop(1, String(launcherWindow.xavionService.gradientEnd))
+
+                            ctx.beginPath()
+                            ctx.moveTo(left + r, top)
+                            ctx.lineTo(right - r, top)
+                            ctx.arc(right - r, top + r, r, -Math.PI / 2, Math.PI / 2)
+                            ctx.lineTo(left + r, bottom)
+                            ctx.arc(left + r, top + r, r, Math.PI / 2, 3 * Math.PI / 2)
+                            ctx.closePath()
+                            ctx.strokeStyle = borderInk
+                            ctx.lineWidth = 1.5
+                            ctx.stroke()
+                        }
+
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+
+                        Connections {
+                            target: launcherWindow.xavionService
+                            function onGradientIndexChanged() { xavionSearchOutline.requestPaint() }
+                        }
+                    }
 
                     Row {
                         anchors.fill: parent
@@ -589,28 +639,74 @@ PanelWindow {
                             }
                         }
 
-                        Text {
+                        // Vector AI magnifier with two sparkles: always available,
+                        // independent of Nerd Font glyph coverage. All strokes use
+                        // the same live Xavion gradient as the search-bar border.
+                        Canvas {
+                            id: aiSearchIcon
+                            width: 24
+                            height: 24
                             anchors.verticalCenter: parent.verticalCenter
-                            text: ""
-                            font.family: Theme.fontIcons
-                            color: Qt.alpha(Theme.white, 0.58)
-                            font.pixelSize: 14
                             visible: launcherWindow.currentMode === 0
+                            antialiasing: true
+
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                var ink = ctx.createLinearGradient(0, 0, width, height)
+                                ink.addColorStop(0, String(launcherWindow.xavionService.gradientStart))
+                                ink.addColorStop(0.53, String(launcherWindow.xavionService.gradientMid))
+                                ink.addColorStop(1, String(launcherWindow.xavionService.gradientEnd))
+                                ctx.strokeStyle = ink
+                                ctx.fillStyle = ink
+                                ctx.lineWidth = 1.75
+                                ctx.lineCap = "round"
+                                ctx.lineJoin = "round"
+
+                                ctx.beginPath()
+                                ctx.arc(9, 10.5, 5.25, 0, Math.PI * 2)
+                                ctx.stroke()
+                                ctx.beginPath()
+                                ctx.moveTo(13, 14.5)
+                                ctx.lineTo(18.1, 19.6)
+                                ctx.stroke()
+
+                                // Four-point sparkles are drawn directly so
+                                // no decorative font is required.
+                                function sparkle(cx, cy, radius) {
+                                    ctx.beginPath()
+                                    ctx.moveTo(cx, cy - radius)
+                                    ctx.quadraticCurveTo(cx + radius * 0.20, cy - radius * 0.20, cx + radius, cy)
+                                    ctx.quadraticCurveTo(cx + radius * 0.20, cy + radius * 0.20, cx, cy + radius)
+                                    ctx.quadraticCurveTo(cx - radius * 0.20, cy + radius * 0.20, cx - radius, cy)
+                                    ctx.quadraticCurveTo(cx - radius * 0.20, cy - radius * 0.20, cx, cy - radius)
+                                    ctx.closePath()
+                                    ctx.fill()
+                                }
+                                sparkle(19, 5, 3.4)
+                                sparkle(22, 11.5, 1.5)
+                            }
+
+                            Connections {
+                                target: launcherWindow.xavionService
+                                function onGradientIndexChanged() { aiSearchIcon.requestPaint() }
+                            }
                         }
 
                         TextInput {
                             id: searchInput
-                            width: parent.width - (launcherWindow.currentMode === 9 ? 50 : 32)
+                            width: parent.width - (launcherWindow.currentMode === 9 ? 50 : 36)
                             anchors.verticalCenter: parent.verticalCenter
-                            color: Theme.white
+                            color: launcherWindow.currentMode === 9 ? Theme.white : Theme.fg
                             font.pixelSize: launcherWindow.currentMode === 9 ? 16 : 14
-                            selectionColor: Theme.blue
-                            selectedTextColor: Theme.bg0
+                            selectionColor: Qt.alpha(Theme.blue, 0.45)
+                            selectedTextColor: Theme.white
                             clip: true
 
                             Text {
-                                text: launcherWindow.currentMode === 9 ? "Password" : "Search"
-                                color: Qt.alpha(Theme.white, 0.48)
+                                text: launcherWindow.currentMode === 9 ? "Password" : "Search or ask Xavion"
+                                color: launcherWindow.currentMode === 9
+                                    ? Qt.alpha(Theme.white, 0.48) : Theme.grey1
                                 font.pixelSize: launcherWindow.currentMode === 9 ? 16 : 14
                                 anchors.verticalCenter: parent.verticalCenter
                                 visible: searchInput.text === ""
@@ -923,7 +1019,7 @@ PanelWindow {
                                     else { toggle(); }
                                     event.accepted = true;
                                 }
-                                
+
                                 if (event.key === Qt.Key_Backspace && searchInput.text === "") {
                                     if (launcherWindow.currentMode === 9) {
                                         launcherWindow.currentMode = 5; searchInput.echoMode = TextInput.Normal; loadTabData("--wifi");
@@ -932,8 +1028,8 @@ PanelWindow {
                                     }
                                     event.accepted = true;
                                 }
-                                
-                                if (event.key === Qt.Key_Down && launcherWindow.calcResult === "") { 
+
+                                if (event.key === Qt.Key_Down && launcherWindow.calcResult === "") {
                                     if (launcherWindow.currentMode === 0) {
                                         if (launcherWindow.recentKeyboardActive) {
                                             var recentColumnDown = Math.max(0, recentGrid.currentIndex);
@@ -942,21 +1038,21 @@ PanelWindow {
                                             if (filteredModel.count > 0)
                                                 appGrid.currentIndex = Math.min(recentColumnDown, filteredModel.count - 1);
                                         } else {
-                                            appGrid.moveCurrentIndexDown(); 
+                                            appGrid.moveCurrentIndexDown();
                                         }
                                     } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton > 0) {
-                                            launcherWindow.activeHeaderButton = 0; 
+                                            launcherWindow.activeHeaderButton = 0;
                                         } else {
                                             var targetListDown = launcherWindow.currentMode === 1 ? fileList : (launcherWindow.currentMode === 4 ? sysList : (launcherWindow.currentMode === 5 ? wifiList : btList));
                                             if (launcherWindow.currentMode === 1 && filteredModel.get(targetListDown.currentIndex).type === "empty") return;
                                             do { targetListDown.incrementCurrentIndex(); } while (filteredModel.count > 0 && filteredModel.get(targetListDown.currentIndex).type === "dummy" && targetListDown.currentIndex < filteredModel.count - 1);
                                         }
                                     }
-                                    event.accepted = true; 
+                                    event.accepted = true;
                                 }
-                                
-                                if (event.key === Qt.Key_Up && launcherWindow.calcResult === "") { 
+
+                                if (event.key === Qt.Key_Up && launcherWindow.calcResult === "") {
                                     if (launcherWindow.currentMode === 0) {
                                         if (launcherWindow.recentKeyboardActive) {
                                             // Already in Recent: keep the current item selected.
@@ -964,21 +1060,21 @@ PanelWindow {
                                             launcherWindow.recentKeyboardActive = true;
                                             recentGrid.currentIndex = Math.min(appGrid.currentIndex, recentModel.count - 1);
                                         } else {
-                                            appGrid.moveCurrentIndexUp(); 
+                                            appGrid.moveCurrentIndexUp();
                                         }
                                     } else if (launcherWindow.currentMode === 1 || launcherWindow.currentMode === 4 || launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) {
                                         if (launcherWindow.activeHeaderButton === 0) {
                                             var targetListUp = launcherWindow.currentMode === 1 ? fileList : (launcherWindow.currentMode === 4 ? sysList : (launcherWindow.currentMode === 5 ? wifiList : btList));
-                                            if (targetListUp.currentIndex === 0 || (targetListUp.currentIndex === 1 && filteredModel.get(0).type === "dummy")) { 
-                                                launcherWindow.activeHeaderButton = 1; 
+                                            if (targetListUp.currentIndex === 0 || (targetListUp.currentIndex === 1 && filteredModel.get(0).type === "dummy")) {
+                                                launcherWindow.activeHeaderButton = 1;
                                             } else {
                                                 do { targetListUp.decrementCurrentIndex(); } while (filteredModel.get(targetListUp.currentIndex).type === "dummy" && targetListUp.currentIndex > 0);
                                             }
                                         }
                                     }
-                                    event.accepted = true; 
+                                    event.accepted = true;
                                 }
-                                
+
                                 if (event.key === Qt.Key_Right) {
                                     if (launcherWindow.currentMode === 0) {
                                         if (launcherWindow.recentKeyboardActive) {
@@ -987,13 +1083,12 @@ PanelWindow {
                                         } else {
                                             appGrid.moveCurrentIndexRight();
                                         }
-                                    }
-                                    else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                    } else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         launcherWindow.activeHeaderButton = Math.min(3, launcherWindow.activeHeaderButton + 1);
                                     }
                                     event.accepted = true;
                                 }
-                                
+
                                 if (event.key === Qt.Key_Left) {
                                     if (launcherWindow.currentMode === 0) {
                                         if (launcherWindow.recentKeyboardActive) {
@@ -1002,26 +1097,77 @@ PanelWindow {
                                         } else {
                                             appGrid.moveCurrentIndexLeft();
                                         }
-                                    }
-                                    else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
+                                    } else if ((launcherWindow.currentMode === 5 || launcherWindow.currentMode === 6) && launcherWindow.activeHeaderButton > 0) {
                                         launcherWindow.activeHeaderButton = Math.max(1, launcherWindow.activeHeaderButton - 1);
                                     }
                                     event.accepted = true;
                                 }
 
                                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                    // 1. FORZAR BÚSQUEDA DE ARCHIVOS (Ctrl + Enter)
-                                    if (event.modifiers & Qt.ControlModifier && searchInput.text !== "" && launcherWindow.currentMode === 0) {
-                                        launcherWindow.isFileLoading = true;
-                                        launcherWindow.currentMode = 1; 
-                                        loadTabData("--search-files", searchInput.text);
-                                        event.accepted = true; return;
-                                    }
-                                    
-                                    // 2. FORZAR BÚSQUEDA WEB (Shift + Enter)
-                                    if (event.modifiers & Qt.ShiftModifier && searchInput.text !== "" && launcherWindow.currentMode === 0) {
-                                        executeApp("firefox 'https://www.google.com/search?q=" + encodeURIComponent(searchInput.text) + "'", "Web Search");
-                                        event.accepted = true; return;
+                                    // Mode 0 shortcuts have strict, non-overlapping priorities:
+                                    // Ctrl+Enter = files; Shift+Enter = copy calculator (when
+                                    // available), otherwise web; plain Enter = selected app,
+                                    // falling back to Xavion ONLY with zero search results.
+                                    if (launcherWindow.currentMode === 0) {
+                                        var query = searchInput.text.trim()
+                                        var controlHeld = (event.modifiers & Qt.ControlModifier) !== 0
+                                        var shiftHeld = (event.modifiers & Qt.ShiftModifier) !== 0
+                                        var otherModifiers = (event.modifiers & (Qt.AltModifier | Qt.MetaModifier)) !== 0
+
+                                        if (controlHeld && !shiftHeld && !otherModifiers && query.length > 0) {
+                                            launcherWindow.isFileLoading = true
+                                            launcherWindow.currentMode = 1
+                                            loadTabData("--search-files", searchInput.text)
+                                            event.accepted = true
+                                            return
+                                        }
+
+                                        if (shiftHeld && !controlHeld && !otherModifiers) {
+                                            if (launcherWindow.calcResult !== "") {
+                                                copyCalculatorResult()
+                                            } else if (query.length > 0) {
+                                                executeApp("firefox 'https://www.google.com/search?q="
+                                                           + encodeURIComponent(query) + "'", "Web Search")
+                                            }
+                                            event.accepted = true
+                                            return
+                                        }
+
+                                        if (!controlHeld && !shiftHeld && !otherModifiers) {
+                                            // Calculator has its own result: Shift+Enter copies;
+                                            // Enter must not accidentally route it to Xavion.
+                                            if (launcherWindow.calcResult !== "") {
+                                                event.accepted = true
+                                                return
+                                            }
+
+                                            // Preserve Recent selection in the unfiltered home view.
+                                            if (query.length === 0 && launcherWindow.recentKeyboardActive
+                                                    && recentModel.count > 0 && recentGrid.currentIndex >= 0) {
+                                                var recentEntry = recentModel.get(recentGrid.currentIndex)
+                                                executeApp(recentEntry.exec, recentEntry.name)
+                                                event.accepted = true
+                                                return
+                                            }
+
+                                            // A matching app/command ALWAYS wins over Xavion.
+                                            if (filteredModel.count > 0) {
+                                                var selectedIndex = appGrid.currentIndex
+                                                if (selectedIndex < 0 || selectedIndex >= filteredModel.count)
+                                                    selectedIndex = 0
+                                                var selectedEntry = filteredModel.get(selectedIndex)
+                                                if (selectedEntry && selectedEntry.exec)
+                                                    executeApp(selectedEntry.exec, selectedEntry.name)
+                                                event.accepted = true
+                                                return
+                                            }
+
+                                            if (query.length > 0) {
+                                                launcherWindow.openXavion(query)
+                                                event.accepted = true
+                                                return
+                                            }
+                                        }
                                     }
 
                                     // 3. NAVEGACIÓN EN CABECERAS
@@ -1049,11 +1195,7 @@ PanelWindow {
                                         event.accepted = true; return;
                                     }
 
-                                    // 4. FALLBACK: SI NO HAY APPS, BUSCAR EN WEB
-                                    if (launcherWindow.currentMode === 0 && filteredModel.count === 0 && searchInput.text !== "" && launcherWindow.calcResult === "") {
-                                        executeApp("firefox 'https://www.google.com/search?q=" + encodeURIComponent(searchInput.text) + "'", "Web Search");
-                                        event.accepted = true; return;
-                                    }
+                                    // 4. Shortcuts for app search were handled above.
 
                                     // 5. EJECUCIÓN NORMAL
                                     if (launcherWindow.currentMode === 9) {
@@ -1062,8 +1204,9 @@ PanelWindow {
                                         netConnectProc.command = ["nmcli", "device", "wifi", "connect", targetWifiSsid, "password", searchInput.text];
                                         netConnectProc.running = true; searchInput.echoMode = TextInput.Normal; searchInput.text = ""; launcherWindow.currentMode = 5; 
                                     } else if (launcherWindow.calcResult !== "") {
-                                        execProc.command = ["/bin/bash", "-c", "wl-copy '" + launcherWindow.calcResult + "' && notify-send 'Calculator' 'Copied: " + launcherWindow.calcResult + "' -i accessories-calculator"];
-                                        execProc.running = true; toggle();
+                                        // Calculator result is copied only with Shift+Enter.
+                                        event.accepted = true;
+                                        return;
                                     } else {
                                         if (launcherWindow.currentMode === 0 && launcherWindow.recentKeyboardActive) {
                                             if (recentModel.count > 0 && recentGrid.currentIndex >= 0) {
@@ -1258,6 +1401,23 @@ PanelWindow {
                     netConnectProc.command = ["nmcli", "device", "wifi", "connect",
                                               ssid, "password", password]
                     netConnectProc.running = true
+                }
+            }
+
+            // Embedded Xavion (mode 14): same animated glass Launcher,
+            // reusing the service from shell.qml rather than another PanelWindow.
+            XavionEmbedded {
+                id: embeddedXavion
+                width: parent.width
+                height: visible
+                    ? Math.min(650, Math.max(330,
+                        (launcherWindow.screen ? launcherWindow.screen.height : 900) - 130))
+                    : 0
+                visible: launcherWindow.currentMode === launcherWindow.xavionMode
+                service: launcherWindow.xavionService
+                onRequestBack: {
+                    launcherWindow.showApps()
+                    Qt.callLater(function() { searchInput.forceActiveFocus() })
                 }
             }
 
@@ -2283,7 +2443,7 @@ PanelWindow {
                                     anchors.fill: parent
                                     visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__" && icon !== "__qs_timer__"
                                     source: visible
-                                        ? (icon.startsWith("/")
+                                        ? (String(icon || "").startsWith("/")
                                             ? "file://" + icon
                                             : "image://icon/" + icon)
                                         : ""
@@ -2373,7 +2533,7 @@ PanelWindow {
                                 anchors.fill: parent
                                 visible: icon !== "__qs_cleanup__" && icon !== "__qs_recording__" && icon !== "__qs_timer__"
                                 source: visible
-                                    ? (icon.startsWith("/")
+                                    ? (String(icon || "").startsWith("/")
                                         ? "file://" + icon
                                         : "image://icon/" + icon)
                                     : ""
@@ -2458,7 +2618,7 @@ PanelWindow {
                     color: (ListView.isCurrentItem && launcherWindow.activeHeaderButton === 0) ? Qt.alpha(Theme.white, 0.1) : "transparent"
                     Item {
                         anchors.fill: parent; anchors.margins: 10
-                        Image { id: sysIcon; width: 24; height: 24; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; source: icon.startsWith("/") ? "file://" + icon : "image://icon/" + icon }
+                        Image { id: sysIcon; width: 24; height: 24; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; source: String(icon || "").startsWith("/") ? "file://" + icon : "image://icon/" + icon }
                         Column {
                             anchors.left: sysIcon.right; anchors.leftMargin: 15; anchors.right: parent.right; anchors.rightMargin: 15; anchors.verticalCenter: parent.verticalCenter; spacing: 2
                             Text { width: parent.width; text: name; color: Theme.white; font.pixelSize: 15; font.bold: true; elide: Text.ElideRight }
@@ -2521,65 +2681,176 @@ PanelWindow {
                 Row {
                     anchors.fill: parent; anchors.margins: 15; spacing: 15
                     Rectangle { width: 45; height: 45; radius: 12; color: Theme.blue; anchors.verticalCenter: parent.verticalCenter; Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.bg0; font.pixelSize: 22 } }
-                    Column { anchors.verticalCenter: parent.verticalCenter; spacing: 2; Text { text: launcherWindow.calcResult; color: Theme.white; font.pixelSize: 24; font.bold: true } Text { text: "Press Enter to copy to clipboard"; color: Theme.grey1; font.pixelSize: 12 } }
+                    Column { anchors.verticalCenter: parent.verticalCenter; spacing: 2; Text { text: launcherWindow.calcResult; color: Theme.white; font.pixelSize: 24; font.bold: true } Text { text: "Shift + Enter to copy to clipboard"; color: Theme.grey1; font.pixelSize: 12 } }
                 }
             }
             
-            // NUEVO: FILA DISCRETA PARA FALLBACKS DE BÚSQUEDA
+            // Search shortcuts: the selected app is always the Enter default.
+            // Only when no apps match does an Ask Xavion card appear.
             Row {
-                width: parent.width; height: 75; spacing: 15
-                // Solo aparece cuando estás escribiendo algo y estás en la vista normal
-                visible: launcherWindow.currentMode === 0 && searchInput.text !== "" && launcherWindow.calcResult === ""
+                id: searchFallbackActions
+                width: parent.width
+                height: visible ? 75 : 0
+                spacing: 12
+                visible: launcherWindow.currentMode === 0
+                    && searchInput.text.trim().length > 0
+                    && launcherWindow.calcResult === ""
+                readonly property bool askVisible: filteredModel.count === 0
+                readonly property real actionWidth: askVisible
+                    ? (width - 2 * spacing) / 3 : (width - spacing) / 2
 
-                // TARJETA DE BÚSQUEDA WEB
                 Rectangle {
-                    width: (parent.width - 15) / 2; height: parent.height; radius: 16
-                    // Si no hay apps, se enciende en azul para avisarte de que es la acción por defecto
-                    color: (filteredModel.count === 0) ? Theme.blue : Qt.alpha(Theme.white, 0.05)
-                    border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
-                    
+                    visible: searchFallbackActions.askVisible
+                    width: visible ? searchFallbackActions.actionWidth : 0
+                    height: parent.height
+                    radius: 16
+                    color: Qt.alpha(launcherWindow.xavionService.gradientMid, 0.22)
+                    border.width: 1
+                    border.color: Qt.alpha(launcherWindow.xavionService.gradientMid, 0.50)
+
                     Row {
-                        anchors.fill: parent; anchors.margins: 15; spacing: 15
-                        Rectangle { 
-                            width: 45; height: 45; radius: 12; color: (filteredModel.count === 0) ? Theme.bg0 : Theme.blue; anchors.verticalCenter: parent.verticalCenter; 
-                            Text { anchors.centerIn: parent; text: "󰖟"; font.family: Theme.fontIcons; color: (filteredModel.count === 0) ? Theme.blue : Theme.bg0; font.pixelSize: 22 } 
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+                        Rectangle {
+                            width: 43; height: 43; radius: 12
+                            color: Qt.alpha(Theme.white, 0.11)
+                            anchors.verticalCenter: parent.verticalCenter
+                            Image {
+                                anchors.centerIn: parent
+                                width: 32; height: 32
+                                source: "../assets/xavion/chat.png"
+                                fillMode: Image.PreserveAspectFit
+                            }
                         }
-                        Column { 
-                            anchors.verticalCenter: parent.verticalCenter; spacing: 2; 
-                            Text { text: "Web Search"; color: (filteredModel.count === 0) ? Theme.bg0 : Theme.white; font.pixelSize: 16; font.bold: true; width: parent.width - 90; elide: Text.ElideRight } 
-                            Text { text: (filteredModel.count === 0) ? "Press Enter" : "Shift + Enter"; color: (filteredModel.count === 0) ? Qt.alpha(Theme.bg0, 0.8) : Theme.grey1; font.pixelSize: 12 } 
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Ask Xavion"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Press Enter"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                            }
                         }
                     }
-                    MouseArea { 
-                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
-                        onClicked: { executeApp("firefox 'https://www.google.com/search?q=" + encodeURIComponent(searchInput.text) + "'", "Web Search"); } 
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (filteredModel.count === 0 && launcherWindow.calcResult === "")
+                                launcherWindow.openXavion(searchInput.text)
+                        }
                     }
                 }
 
-                // TARJETA DE BÚSQUEDA DE ARCHIVOS
                 Rectangle {
-                    width: (parent.width - 15) / 2; height: parent.height; radius: 16
-                    color: Qt.alpha(Theme.white, 0.05); border.color: Qt.alpha(Theme.white, 0.15); border.width: 1
-                    
+                    width: searchFallbackActions.actionWidth
+                    height: parent.height
+                    radius: 16
+                    color: Qt.alpha(Theme.white, 0.05)
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.white, 0.15)
+
                     Row {
-                        anchors.fill: parent; anchors.margins: 15; spacing: 15
-                        Rectangle { 
-                            width: 45; height: 45; radius: 12; color: Theme.blue; anchors.verticalCenter: parent.verticalCenter; 
-                            Text { anchors.centerIn: parent; text: ""; font.family: Theme.fontIcons; color: Theme.bg0; font.pixelSize: 22 } 
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+                        Rectangle {
+                            width: 43; height: 43; radius: 12
+                            color: Theme.blue
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰖟"
+                                font.family: Theme.fontIcons
+                                color: Theme.bg0
+                                font.pixelSize: 21
+                            }
                         }
-                        Column { 
-                            anchors.verticalCenter: parent.verticalCenter; spacing: 2; 
-                            Text { text: "Find Files"; color: Theme.white; font.pixelSize: 16; font.bold: true; width: parent.width - 90; elide: Text.ElideRight } 
-                            Text { text: "Ctrl + Enter"; color: Theme.grey1; font.pixelSize: 12 } 
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Web Search"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Shift + Enter"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                            }
                         }
                     }
-                    MouseArea { 
-                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor; 
-                        onClicked: { 
-                            launcherWindow.isFileLoading = true;
-                            launcherWindow.currentMode = 1; 
-                            loadTabData("--search-files", searchInput.text); 
-                        } 
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: executeApp("firefox 'https://www.google.com/search?q="
+                                              + encodeURIComponent(searchInput.text.trim()) + "'", "Web Search")
+                    }
+                }
+
+                Rectangle {
+                    width: searchFallbackActions.actionWidth
+                    height: parent.height
+                    radius: 16
+                    color: Qt.alpha(Theme.white, 0.05)
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.white, 0.15)
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+                        Rectangle {
+                            width: 43; height: 43; radius: 12
+                            color: Theme.blue
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text {
+                                anchors.centerIn: parent
+                                text: ""
+                                font.family: Theme.fontIcons
+                                color: Theme.bg0
+                                font.pixelSize: 21
+                            }
+                        }
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 3
+                            Text {
+                                text: "Find Files"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Ctrl + Enter"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            launcherWindow.isFileLoading = true
+                            launcherWindow.currentMode = 1
+                            loadTabData("--search-files", searchInput.text)
+                        }
                     }
                 }
             }
@@ -2861,8 +3132,26 @@ PanelWindow {
         appGrid.currentIndex = 0;
     }
 
+    // Clipboard action for the calculator. Keep the value out of shell string
+    // interpolation by passing it as a positional argument.
+    function copyCalculatorResult() {
+        var value = launcherWindow.calcResult
+        if (value === "") return
+        execProc.running = false
+        execProc.command = ["/bin/bash", "-c",
+            "printf '%s' \"$1\" | wl-copy && notify-send 'Calculator' \"Copied: $1\" -i accessories-calculator",
+            "bash", value]
+        execProc.running = true
+        toggle()
+    }
+
     function executeApp(cmd, name) {
         if (!cmd || cmd === "") return;
+
+        if (cmd === "qs_xavion" || String(name).toLowerCase() === "xavion") {
+            launcherWindow.openXavion("");
+            return;
+        }
 
         // Every selectable launcher entry participates in Recent.
         rememberRecent(name);
@@ -3065,6 +3354,44 @@ PanelWindow {
         cleanupActionProc.output = "";
         cleanupActionProc.command = ["/home/javier/.local/bin/cleanup.py", "--clear-cache-json"];
         cleanupActionProc.running = true;
+    }
+
+    // Direct entry point for Super+X, the animated top-bar mascot,
+    // desktop app entries and prompts sent from the Launcher search bar.
+    function openXavion(message) {
+        var prompt = message === undefined || message === null
+            ? "" : String(message).trim();
+
+        // Reopen Launcher if closed; state changes happen synchronously, so
+        // the app-grid mode isn't presented as an intermediate screen.
+        if (!visible_state) {
+            toggle();
+        } else {
+            closeTimer.stop();
+        }
+
+        launcherWindow.currentMode = launcherWindow.xavionMode;
+        launcherWindow.activeHeaderButton = 0;
+        launcherWindow.recentKeyboardActive = false;
+        launcherWindow.calcResult = "";
+        searchInput.text = "";
+        launcherWindow.xavionService.ensureBackend();
+
+        if (prompt.length > 0)
+            embeddedXavion.sendFromLauncher(prompt);
+
+        Qt.callLater(function() {
+            if (launcherWindow.visible_state
+                    && launcherWindow.currentMode === launcherWindow.xavionMode)
+                embeddedXavion.focusInput();
+        });
+    }
+
+    function toggleXavion() {
+        if (visible_state && currentMode === launcherWindow.xavionMode)
+            toggle();
+        else
+            openXavion("");
     }
 
     function toggle() {
