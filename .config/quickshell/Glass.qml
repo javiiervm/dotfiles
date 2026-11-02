@@ -5,79 +5,79 @@ pragma Singleton
 QtObject {
     /*
      * =====================================================
-     *                  LIQUID GLASS
+     *              WINDOWS-INSPIRED ACRYLIC
      * =====================================================
      *
-     * Este archivo controla exclusivamente el aspecto
-     * de las superficies Quickshell.
+     * Single material used by the Quickshell surfaces.
+     * The real backdrop blur is provided by Quickshell's
+     * BackgroundEffect + the Hyprland compositor.
+     *
+     * This singleton controls only the translucent tint,
+     * fine lighting and edges. It deliberately leaves the
+     * original component geometry and animations untouched.
      */
 
     // ─────────────────────────────────────────────────────
-    // Base material
+    // Base material: dark, slightly blue-tinted acrylic
     // ─────────────────────────────────────────────────────
 
-    readonly property color tint: '#101013'
+    // Windows-style slate blue. Adjust this one value to
+    // adapt the material to a different wallpaper palette.
+    readonly property color tint: "#162c42"
 
-    // 0 = transparente
-    // 1 = opaco
-    readonly property real opacity: 0.38
+    // 0 = transparent; 1 = opaque.
+    // Moderate opacity allows the blurred wallpaper to show.
+    readonly property real opacity: 0.56
 
-    readonly property color background:
-        Qt.alpha(tint, opacity)
-
+    readonly property color background: Qt.alpha(tint, opacity)
 
     // ─────────────────────────────────────────────────────
-    // Background blur
+    // Real background blur (owned by compositor / windows)
     // ─────────────────────────────────────────────────────
 
     readonly property bool blurEnabled: true
 
-
-    // ─────────────────────────────────────────────────────
-    // Colour treatment
-    // ─────────────────────────────────────────────────────
-
-    // Para efectos QML internos / futuros shaders
+    // These parameters remain available to QML experiments.
+    // The actual Hyprland blur strength is configured there.
     readonly property real saturation: 0.15
     readonly property real brightness: 0.02
     readonly property real contrast: 0.03
 
+    // ─────────────────────────────────────────────────────
+    // Acrylic lighting
+    // ─────────────────────────────────────────────────────
+
+    // Very soft, static illumination. No shaders or timers.
+    readonly property real sheenTopOpacity: 0.075
+    readonly property real sheenMidOpacity: 0.026
+    readonly property real sheenBottomOpacity: 0.036
 
     // ─────────────────────────────────────────────────────
-    // Border
+    // Border: thin frosted edge
     // ─────────────────────────────────────────────────────
 
-    readonly property real borderOpacity: 0.2
+    readonly property real borderOpacity: 0.24
     readonly property real borderWidth: 1.0
-
-    readonly property color borderColor:
-        Qt.alpha("#ffffff", borderOpacity)
-
+    readonly property color borderColor: Qt.alpha("#e6f4ff", borderOpacity)
 
     // ─────────────────────────────────────────────────────
-    // Highlight
+    // Inner highlight, rounded to match the material
     // ─────────────────────────────────────────────────────
 
-    readonly property real highlightOpacity: 0.10
-
-    readonly property color highlightColor:
-        Qt.alpha("#ffffff", highlightOpacity)
-
+    readonly property real highlightOpacity: 0.085
+    readonly property color highlightColor: Qt.alpha("#ffffff", highlightOpacity)
 
     // ─────────────────────────────────────────────────────
-    // Shadow
+    // Shadow (retained for components which use it)
     // ─────────────────────────────────────────────────────
 
     readonly property real shadowOpacity: 0.30
     readonly property real shadowBlur: 0.65
     readonly property real shadowRadius: 24
-
-    readonly property color shadowColor:
-        Qt.alpha("#000000", shadowOpacity)
-
+    readonly property color shadowColor: Qt.alpha("#000000", shadowOpacity)
 
     // ─────────────────────────────────────────────────────
-    // Geometry
+    // Original geometry
     // ─────────────────────────────────────────────────────
 
     readonly property int radiusSmall: 10
