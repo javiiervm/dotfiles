@@ -1,0 +1,125 @@
+<div align="center">
+  <img width="850" height="300" alt="Dotfiles banner" src="https://github.com/user-attachments/assets/0efa7b2c-cf6b-4069-8b5a-6b0af2b8530c" />
+  <h1>Javier's Dotfiles</h1>
+  <p><strong>A custom CachyOS desktop built with Hyprland, Quickshell and Qt/QML.</strong></p>
+  <p>
+    <img src="https://img.shields.io/github/last-commit/javiiervm/dotfiles" alt="Last commit" />
+    <img src="https://img.shields.io/github/issues/javiiervm/dotfiles" alt="Issues" />
+    <img src="https://img.shields.io/github/stars/javiiervm/dotfiles" alt="Stars" />
+    <img src="https://img.shields.io/badge/platform-CachyOS%20%2F%20Arch-1793D1" alt="Platform" />
+    <img src="https://img.shields.io/badge/shell-Quickshell-41CD52" alt="Quickshell" />
+  </p>
+  <p>
+    <a href="#installation">Installation</a> ·
+    <a href="https://github.com/javiiervm/dotfiles/wiki">Wiki</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#architecture">Architecture</a>
+  </p>
+</div>
+
+![Desktop screenshot](https://github.com/user-attachments/assets/df4e39ca-52d6-478b-971a-6162642bf5a3)
+
+> **Personal configuration, public reference.** Primarily developed on CachyOS and Hyprland **0.55+ (Lua configuration)**. The desktop profile is not tested on every PC/GPU and requires some manual integration. Read the [installation guide](wiki/Installation.md) before replacing your existing Hyprland configuration.
+
+## Features
+
+| Area | Features |
+| --- | --- |
+| **Dynamic Island** | Media controls, notifications, timers, recording, app usage and contextual system indicators |
+| **Launcher** | Application search, recent apps, keyboard navigation, clipboard, system actions and integrated Xavion access |
+| **Control Center** | Wi-Fi, Bluetooth, audio, brightness, profiles, caffeine, airplane mode, night light and calendar |
+| **Desktop** | Floating dock, workspace indicator, custom Alt+Tab and overview, system tray and custom lock screen |
+| **Visuals** | Shared QML Glass material, Hyprland blur, wallpaper-based colors via Pywal, optional HyprGlass effects |
+| **Utilities** | AI Selection, custom screen recording, wallpaper carousel, Blip integration and helper scripts |
+
+## Installation
+
+**Recommended first step: review the plan before writing any files.**
+
+```bash
+git clone https://github.com/javiiervm/dotfiles.git
+cd dotfiles
+./install.sh --dry-run
+```
+
+Install **only the Quickshell configuration** (the default, safest option):
+
+```bash
+./install.sh --profile shell
+```
+
+Install the integrated Hyprland desktop and selected application configs (with portable monitor defaults):
+
+```bash
+./install.sh --profile desktop --dry-run
+./install.sh --profile desktop
+```
+
+To also install missing packages from configured Arch/CachyOS repositories:
+
+```bash
+./install.sh --profile desktop --packages
+```
+
+Install remaining user themes and shell settings (including replacing `~/.zshrc`):
+
+```bash
+./install.sh --profile all
+```
+
+The installer **copies** configurations, substitutes `/home/javier` paths in copied text files, and backs up existing targets under `~/.local/state/dotfiles-installer/backups/`. It does not install the system-wide SDDM theme, third-party plugins, AUR packages, GPU drivers, or enable services. Nothing is restarted automatically. The repository checkout remains untouched.
+
+**Read before logging into a newly installed desktop:** [Getting started](wiki/Getting-Started.md) · [Installation](wiki/Installation.md) · [Dependencies](wiki/Dependencies.md).
+
+## Architecture
+
+```text
+Hyprland (Wayland compositor / Lua configuration)
+  ├── shortcuts, monitor rules, blur and window management
+  └── session startup
+         ├── Quickshell main shell (shell.qml)
+         │     ├── Dynamic Island / Launcher / Control Center / Dock
+         │     ├── Xavion service and panels
+         │     ├── system backend (event driven)
+         │     └── notification service (D-Bus)
+         ├── AI Selection (separate Quickshell instance)
+         └── Workspace Overview (separate Quickshell instance)
+
+Pywal + awww → wallpaper and color integrations
+Theme.qml + Glass.qml + Hyprland → visual surfaces and blur
+```
+
+See [Architecture](wiki/Architecture.md), [Components](wiki/Components.md), and [Backends and IPC](wiki/Backends-and-IPC.md) for file-level details.
+
+## Customize
+
+| File | Purpose |
+| --- | --- |
+| `.config/quickshell/Theme.qml` | Shared colors and typography |
+| `.config/quickshell/Glass.qml` | Tint, opacity, border, shadow and radius tokens |
+| `.config/quickshell/components/GlassSurface.qml` | Reusable material surface |
+| `.config/hypr/hyprland.lua` | Monitors, input, keybinds, session startup |
+| `.config/hypr/quickshell_glass_test.lua` | HyprGlass/classic blur test rules |
+| `.config/hypr/scripts/set_wallpaper.sh` | Wallpaper and Pywal integration |
+
+See [Appearance and Theming](wiki/Appearance-and-Theming.md) and [Configuration](wiki/Configuration.md).
+
+## Compatibility and limitations
+
+- **Best supported:** CachyOS/Arch-like distributions, Hyprland with Lua support, Quickshell and Wayland.
+- **Machine-specific:** monitor names, DRM device ordering, installed apps, battery/lid handling and custom plugin integration.
+- **Optional:** HyprGlass and Xavion backend require separate setup; they are not provided by the installer.
+- **System configuration:** SDDM theme requires deliberate system-level installation; this script never writes to `/etc` or `/usr/share`.
+- **No guarantee:** installer passes local script tests, but the graphical session must be validated on actual target hardware.
+
+## Documentation
+
+The `wiki/` directory is the source for the long-form documentation. GitHub's **Wiki** tab is a **separate Git repository**: the pages are not published automatically by placing them in `wiki/`. See [Publishing the Wiki](wiki/Publishing-the-Wiki.md).
+
+## Contributing and licenses
+
+Issues with reproduction steps and relevant logs are welcome. See [Development](wiki/Development.md) and [Security and Limitations](wiki/Security-and-Limitations.md). No top-level open-source license is bundled in this draft: the repository owner should review third-party code and choose an appropriate license before inviting unrestricted reuse.
+
+### Acknowledgements
+
+[Quickshell](https://quickshell.org/) · [Hyprland](https://hypr.land/) · [Pywal](https://github.com/dylanaraps/pywal) · [awww](https://codeberg.org/LGFae/awww)
