@@ -1,9 +1,15 @@
 <div align="center">
   <img width="850" height="300" alt="image" src="https://github.com/user-attachments/assets/0efa7b2c-cf6b-4069-8b5a-6b0af2b8530c" />
-  <br />
+  <br /><br />
+  <p>
+    <a href="#installation">Installation</a> ·
+    <a href="https://github.com/javiiervm/dotfiles/wiki">Wiki</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#architecture">Architecture</a>
+  </p>
   <p>
     <img src="https://img.shields.io/github/last-commit/javiiervm/dotfiles" alt="Last Commit" />
-    <img src="https://img.shields.io/badge/platform-CachyOS-blue" alt="Platform" />
+    <img src="https://img.shields.io/badge/platform-CachyOS%20%2F%20Arch-1793D1" alt="Platform" />
     <img src="https://img.shields.io/github/issues/javiiervm/dotfiles" alt="Issues" />
     <img src="https://img.shields.io/github/stars/javiiervm/dotfiles" alt="Stars" />
     <br />
@@ -31,85 +37,34 @@ https://github.com/user-attachments/assets/38efdcf1-5b04-43eb-ac96-614ef85c7471
 
 ## Features
 
-### Dynamic Island
-
-The centerpiece of the setup.
-
-* Media controls and currently playing music
-* System stats
-* Timers
-* Screen recording status and controls
-* Application usage
-* Contextual system indicators and alerts
-* Touchpad gestures and mouse wheel navigation
-
-The island stays compact when idle and expands only when needed.
-
-### Control & Notification Center
-
-A macOS-inspired panel with quick access to:
-
-* Wi-Fi
-* Bluetooth
-* Airplane Mode
-* Caffeine
-* Night Light
-* Power profiles
-* Volume
-* Brightness
-* Notifications
-* Calendar
-
-### Launcher
-
-A custom application launcher with:
-
-* Application search
-* Recent apps
-* Keyboard navigation
-* Quick actions and utilities
-* Integrated clipboard history
-
-### Desktop Shell
-
-The setup also includes:
-
-* Workspace indicator
-* Custom battery indicator
-* Volume and system status
-* System tray
-* Custom Alt+Tab switcher
-* macOS-style dock
-* Workspace overview
-* Custom lock screen
-
-## Liquid Glass
-
-The UI uses custom translucent QML surfaces together with Hyprland blur to create a consistent glass-like appearance.
-
-Colors are designed to integrate with the rest of the desktop and can be adapted through the theme configuration.
-
-Main files:
-
-```text
-.config/quickshell/
-├── shell.qml
-├── Theme.qml
-├── Glass.qml
-├── DockConfig.qml
-│
-├── components/
-│   ├── DynamicIsland.qml
-│   ├── Launcher.qml
-│   ├── NotificationCenter.qml
-│   ├── AltTabOverlay.qml
-│   └── ...
-│
-├── overview/
-├── lock/
-├── scripts/
-└── assets/
-```
+<table>
+  <tbody>
+    <tr>
+      <td><strong>Dynamic Island</strong></td>
+      <td>Media controls, notifications, timers, recording, app usage and contextual system indicators</td>
+    </tr>
+    <tr>
+      <td><strong>Launcher</strong></td>
+      <td>Application search, recent apps, keyboard navigation, clipboard, system actions and integrated <a href=https://github.com/javiiervm/Xavion-AI>Xavion AI</a> access</td>
+    </tr>
+    <tr>
+      <td><strong>Control Center</strong></td>
+      <td>Wi-Fi, Bluetooth, audio, brightness, profiles, caffeine, airplane mode, night light and calendar</td>
+    </tr>
+    <tr>
+      <td><strong>Desktop</strong></td>
+      <td>Floating dock, workspace indicator, custom Alt+Tab and overview, system tray and custom lock screen</td>
+    </tr>
+    <tr>
+      <td><strong>Visuals</strong></td>
+      <td>Shared QML Glass material, Hyprland blur, wallpaper-based colors via Pywal, optional HyprGlass effects</td>
+    </tr>
+    <tr>
+      <td><strong>Utilities</strong></td>
+      <td>AI Selection, custom screen recording, wallpaper carousel, Blip integration and helper scripts</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Efficient by design
 
@@ -121,88 +76,92 @@ This keeps the shell responsive without unnecessarily waking up the CPU all the 
 
 ## Installation
 
-These dotfiles are designed for **Hyprland on Arch-based distributions**, especially CachyOS.
-
-First install Quickshell and the utilities required by the features you want to use.
-
-At minimum you will need:
-
-* Hyprland
-* Quickshell
-* PipeWire / WirePlumber
-* NetworkManager
-* BlueZ
-* power-profiles-daemon
-* Python
-* `wl-clipboard`
-* `cliphist`
-
-Some features additionally use tools such as `playerctl`, `brightnessctl`, CAVA and Wayland screenshot / screen-recording utilities.
-
-### 1. Clone the repository
+**Recommended first step: review the plan before writing any files.**
 
 ```bash
 git clone https://github.com/javiiervm/dotfiles.git
 cd dotfiles
+./install.sh --dry-run
 ```
 
-### 2. Copy the Quickshell configuration
+Install **only the Quickshell configuration** (the default, safest option):
 
 ```bash
-cp -r .config/quickshell ~/.config/
+./install.sh --profile shell
 ```
 
-If you want the full intended appearance and integration, also use the included Hyprland configuration:
+Install the integrated Hyprland desktop and selected application configs (with portable monitor defaults):
 
 ```bash
-cp -r .config/hypr ~/.config/
+./install.sh --profile desktop --dry-run
+./install.sh --profile desktop
 ```
 
-> **Warning**
->
-> These are personal dotfiles, not a universal installer.
->
-> Some files currently contain paths specific to my system, such as `/home/javier`. Search for these paths and replace them with your own home directory before using the configuration.
-
-### 3. Make the helper scripts executable
+To also install missing packages from configured Arch/CachyOS repositories:
 
 ```bash
-chmod +x ~/.config/quickshell/scripts/*.sh
-chmod +x ~/.config/quickshell/scripts/*.py
+./install.sh --profile desktop --packages
 ```
 
-### 4. Start Quickshell
+Install remaining user themes and shell settings (including replacing `~/.zshrc`):
 
 ```bash
-quickshell
+./install.sh --profile all
 ```
 
-The included Hyprland configuration already launches the main shell and overview automatically on login.
+The installer **copies** configurations, substitutes `/home/javier` paths in copied text files, and backs up existing targets under `~/.local/state/dotfiles-installer/backups/`. It does not install the system-wide SDDM theme, third-party plugins, AUR packages, GPU drivers, or enable services. Nothing is restarted automatically. The repository checkout remains untouched.
 
-## Customization
+**Read before logging into a newly installed desktop:** [Getting started](wiki/Getting-Started.md) · [Installation](wiki/Installation.md) · [Dependencies](wiki/Dependencies.md).
 
-Most visual settings live in:
+## Architecture
 
 ```text
-~/.config/quickshell/Theme.qml
-~/.config/quickshell/Glass.qml
+Hyprland (Wayland compositor / Lua configuration)
+  ├── shortcuts, monitor rules, blur and window management
+  └── session startup
+         ├── Quickshell main shell (shell.qml)
+         │     ├── Dynamic Island / Launcher / Control Center / Dock
+         │     ├── Xavion service and panels
+         │     ├── system backend (event driven)
+         │     └── notification service (D-Bus)
+         ├── AI Selection (separate Quickshell instance)
+         └── Workspace Overview (separate Quickshell instance)
+
+Pywal + awww → wallpaper and color integrations
+Theme.qml + Glass.qml + Hyprland → visual surfaces and blur
 ```
 
-The shell is intentionally modular, so individual parts such as the Dynamic Island, launcher, dock or notification center can be modified independently.
+See [Architecture](wiki/Architecture.md), [Components](wiki/Components.md), and [Backends and IPC](wiki/Backends-and-IPC.md) for file-level details.
 
-## Note
+## Customize
 
-This is my personal daily-driver configuration and is constantly evolving.
+| File | Purpose |
+| --- | --- |
+| `.config/quickshell/Theme.qml` | Shared colors and typography |
+| `.config/quickshell/Glass.qml` | Tint, opacity, border, shadow and radius tokens |
+| `.config/quickshell/components/GlassSurface.qml` | Reusable material surface |
+| `.config/hypr/hyprland.lua` | Monitors, input, keybinds, session startup |
+| `.config/hypr/quickshell_glass_test.lua` | HyprGlass/classic blur test rules |
+| `.config/hypr/scripts/set_wallpaper.sh` | Wallpaper and Pywal integration |
 
-It is primarily designed around **my hardware, workflow and Hyprland setup**, so some tweaking may be necessary on other systems.
+See [Appearance and Theming](wiki/Appearance-and-Theming.md) and [Configuration](wiki/Configuration.md).
 
-Feel free to use it as inspiration, copy parts of it or adapt the whole shell to your own setup.
+## Compatibility and limitations
 
-## Credits
+- **Best supported:** CachyOS/Arch-like distributions, Hyprland with Lua support, Quickshell and Wayland.
+- **Machine-specific:** monitor names, DRM device ordering, installed apps, battery/lid handling and custom plugin integration.
+- **Optional:** HyprGlass and Xavion backend require separate setup; they are not provided by the installer.
+- **System configuration:** SDDM theme requires deliberate system-level installation; this script never writes to `/etc` or `/usr/share`.
+- **No guarantee:** installer passes local script tests, but the graphical session must be validated on actual target hardware.
 
-Built with:
+## Documentation
 
-* [Quickshell](https://quickshell.org/)
-* [Hyprland](https://hypr.land/)
-* QML / Qt
+The `wiki/` directory is the source for the long-form documentation. GitHub's **Wiki** tab is a **separate Git repository**: the pages are not published automatically by placing them in `wiki/`. See [Publishing the Wiki](wiki/Publishing-the-Wiki.md).
 
+## Contributing and licenses
+
+Issues with reproduction steps and relevant logs are welcome. See [Development](wiki/Development.md) and [Security and Limitations](wiki/Security-and-Limitations.md). No top-level open-source license is bundled in this draft: the repository owner should review third-party code and choose an appropriate license before inviting unrestricted reuse.
+
+### Acknowledgements
+
+[Quickshell](https://quickshell.org/) · [Hyprland](https://hypr.land/) · [Pywal](https://github.com/dylanaraps/pywal) · [awww](https://codeberg.org/LGFae/awww)
