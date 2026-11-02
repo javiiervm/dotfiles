@@ -639,58 +639,22 @@ PanelWindow {
                             }
                         }
 
-                        // Vector AI magnifier with two sparkles: always available,
-                        // independent of Nerd Font glyph coverage. All strokes use
-                        // the same live Xavion gradient as the search-bar border.
-                        Canvas {
+                        // Nerd Fonts Codicon: search_sparkle (U+EC50).
+                        // The icon follows Xavion's dynamic accent palette.
+                        Text {
                             id: aiSearchIcon
                             width: 24
                             height: 24
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: -1.25
                             visible: launcherWindow.currentMode === 0
-                            antialiasing: true
-
-                            onPaint: {
-                                var ctx = getContext("2d")
-                                ctx.clearRect(0, 0, width, height)
-                                var ink = ctx.createLinearGradient(0, 0, width, height)
-                                ink.addColorStop(0, String(launcherWindow.xavionService.gradientStart))
-                                ink.addColorStop(0.53, String(launcherWindow.xavionService.gradientMid))
-                                ink.addColorStop(1, String(launcherWindow.xavionService.gradientEnd))
-                                ctx.strokeStyle = ink
-                                ctx.fillStyle = ink
-                                ctx.lineWidth = 1.75
-                                ctx.lineCap = "round"
-                                ctx.lineJoin = "round"
-
-                                ctx.beginPath()
-                                ctx.arc(9, 10.5, 5.25, 0, Math.PI * 2)
-                                ctx.stroke()
-                                ctx.beginPath()
-                                ctx.moveTo(13, 14.5)
-                                ctx.lineTo(18.1, 19.6)
-                                ctx.stroke()
-
-                                // Four-point sparkles are drawn directly so
-                                // no decorative font is required.
-                                function sparkle(cx, cy, radius) {
-                                    ctx.beginPath()
-                                    ctx.moveTo(cx, cy - radius)
-                                    ctx.quadraticCurveTo(cx + radius * 0.20, cy - radius * 0.20, cx + radius, cy)
-                                    ctx.quadraticCurveTo(cx + radius * 0.20, cy + radius * 0.20, cx, cy + radius)
-                                    ctx.quadraticCurveTo(cx - radius * 0.20, cy + radius * 0.20, cx - radius, cy)
-                                    ctx.quadraticCurveTo(cx - radius * 0.20, cy - radius * 0.20, cx, cy - radius)
-                                    ctx.closePath()
-                                    ctx.fill()
-                                }
-                                sparkle(19, 5, 3.4)
-                                sparkle(22, 11.5, 1.5)
-                            }
-
-                            Connections {
-                                target: launcherWindow.xavionService
-                                function onGradientIndexChanged() { aiSearchIcon.requestPaint() }
-                            }
+                            text: "\uec50"
+                            font.family: Theme.fontIcons
+                            font.pixelSize: 20
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            renderType: Text.NativeRendering
+                            color: launcherWindow.xavionService.gradientMid
                         }
 
                         TextInput {
