@@ -13,7 +13,55 @@ Item {
 
     focus: visible
     property bool settingsOpen: false
+    property bool historyOpen: false
+    property bool historySelectionMode: false
+    property var selectedSessionIds: []
+    property bool deleteConfirmationOpen: false
+    property var pendingDeletionIds: []
     property var queuedMessages: []
+
+    function exitHistorySelection() {
+        historySelectionMode = false
+        selectedSessionIds = []
+    }
+
+    function toggleSelectedSession(sessionId) {
+        const id = String(sessionId)
+        const updated = selectedSessionIds.slice()
+        const index = updated.indexOf(id)
+        if (index < 0)
+            updated.push(id)
+        else
+            updated.splice(index, 1)
+        selectedSessionIds = updated
+    }
+
+    function selectAllSessions() {
+        if (selectedSessionIds.length === service.savedSessions.length) {
+            selectedSessionIds = []
+            return
+        }
+        const allIds = []
+        for (let i = 0; i < service.savedSessions.length; i++)
+            allIds.push(String(service.savedSessions[i].id))
+        selectedSessionIds = allIds
+    }
+
+    // Called for both a row's trash icon and the bulk-delete action.
+    // Both paths use the same single confirmation dialog.
+    function requestDeletion(ids) {
+        if (!service.backendReady || service.busy || service.deletionPending)
+            return
+        if (!ids || ids.length === 0)
+            return
+        pendingDeletionIds = ids.slice()
+        deleteConfirmationOpen = true
+    }
+
+    function cancelDeletion() {
+        deleteConfirmationOpen = false
+        pendingDeletionIds = []
+    }
 
     readonly property color accent: service.gradientMid
     readonly property color accentSoft: Qt.alpha(service.gradientMid, 0.38)
@@ -34,7 +82,14 @@ Item {
     }
 
     function back() {
-        if (settingsOpen) {
+        if (deleteConfirmationOpen) {
+            cancelDeletion()
+        } else if (historyOpen && historySelectionMode) {
+            exitHistorySelection()
+        } else if (historyOpen) {
+            historyOpen = false
+            Qt.callLater(focusInput)
+        } else if (settingsOpen) {
             settingsOpen = false
             Qt.callLater(focusInput)
         } else {
@@ -43,7 +98,7 @@ Item {
     }
 
     function focusInput() {
-        if (visible && !settingsOpen && service.backendReady && !service.busy)
+        if (visible && !settingsOpen && !historyOpen && service.backendReady && !service.busy)
             composerInput.forceActiveFocus()
     }
 
@@ -82,6 +137,9 @@ Item {
             Qt.callLater(focusInput)
         } else {
             settingsOpen = false
+            historyOpen = false
+            exitHistorySelection()
+            cancelDeletion()
         }
     }
 
@@ -164,7 +222,44 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.service.newConversation()
+                    onClicked: {
+                        root.historyOpen = false
+                        root.exitHistorySelection()
+                        root.service.newConversation()
+                    }
+                }
+            }
+
+            // Local conversation history, between New chat and Settings.
+            Rectangle {
+                Layout.preferredWidth: 40
+                Layout.preferredHeight: 40
+                radius: 13
+                color: historyArea.containsMouse || root.historyOpen
+                       ? Qt.alpha(Theme.white, 0.16) : root.controlBackground
+                border.width: 1
+                border.color: root.historyOpen ? Qt.alpha(Theme.white, 0.20) : root.controlBorder
+                Text {
+                    anchors.centerIn: parent
+                    text: "󰋚"
+                    font.family: Theme.fontIcons
+                    font.pixelSize: 18
+                    color: Theme.white
+                }
+                MouseArea {
+                    id: historyArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.settingsOpen = false
+                        root.historyOpen = !root.historyOpen
+                        root.exitHistorySelection()
+                        if (root.historyOpen)
+                            root.service.listSessions()
+                        else
+                            Qt.callLater(root.focusInput)
+                    }
                 }
             }
 
@@ -189,6 +284,8 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
+                        root.historyOpen = false
+                        root.exitHistorySelection()
                         root.settingsOpen = !root.settingsOpen
                         if (root.settingsOpen && root.service.backendReady)
                             root.service.refreshModels()
@@ -211,13 +308,295 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
+            // History is kept by Xavion in local data/chat_*.json files.
+            Column {
+                anchors.fill: parent
+                visible: root.historyOpen
+                spacing: 10
+
+                RowLayout {
+                    width: parent.width
+                    height: 34
+                    spacing: 10
+
+                    Text {
+                        text: "Recent conversations"
+                        color: Theme.white
+                        font.family: Theme.fontMain
+                        font.pixelSize: 15
+                        font.bold: true
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        Layout.preferredWidth: selectionToggleLabel.implicitWidth + 24
+                        Layout.preferredHeight: 32
+                        radius: 10
+                        color: selectionToggleArea.containsMouse
+                               ? Qt.alpha(Theme.white, 0.15)
+                               : root.controlBackground
+                        border.width: 1
+                        border.color: root.controlBorder
+
+                        Text {
+                            id: selectionToggleLabel
+                            anchors.centerIn: parent
+                            text: root.historySelectionMode ? "Cancel" : "Select"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: selectionToggleArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: !root.service.deletionPending
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.historySelectionMode) {
+                                    root.exitHistorySelection()
+                                } else {
+                                    root.historySelectionMode = true
+                                    root.selectedSessionIds = []
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    width: parent.width
+                    height: visible ? 34 : 0
+                    visible: root.historySelectionMode
+                    spacing: 8
+
+                    Text {
+                        text: root.selectedSessionIds.length + " selected"
+                        color: Theme.grey1
+                        font.family: Theme.fontMain
+                        font.pixelSize: 11
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        Layout.preferredWidth: selectAllLabel.implicitWidth + 22
+                        Layout.preferredHeight: 32
+                        radius: 10
+                        color: selectAllArea.containsMouse
+                               ? Qt.alpha(Theme.white, 0.15)
+                               : root.controlBackground
+                        border.width: 1
+                        border.color: root.controlBorder
+
+                        Text {
+                            id: selectAllLabel
+                            anchors.centerIn: parent
+                            text: root.selectedSessionIds.length > 0
+                                  && root.selectedSessionIds.length === root.service.savedSessions.length
+                                  ? "Deselect all" : "Select all"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 11
+                        }
+                        MouseArea {
+                            id: selectAllArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: !root.service.deletionPending
+                                     && root.service.savedSessions.length > 0
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.selectAllSessions()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: deleteSelectedLabel.implicitWidth + 24
+                        Layout.preferredHeight: 32
+                        radius: 10
+                        color: deleteSelectedArea.containsMouse
+                               ? Qt.alpha(Theme.red, 0.23)
+                               : Qt.alpha(Theme.red, 0.13)
+                        opacity: root.selectedSessionIds.length > 0 ? 1 : 0.45
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.red, 0.40)
+
+                        Text {
+                            id: deleteSelectedLabel
+                            anchors.centerIn: parent
+                            text: "Delete (" + root.selectedSessionIds.length + ")"
+                            color: Theme.red
+                            font.family: Theme.fontMain
+                            font.pixelSize: 11
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: deleteSelectedArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: root.selectedSessionIds.length > 0
+                                     && !root.service.deletionPending
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.requestDeletion(root.selectedSessionIds)
+                        }
+                    }
+                }
+
+                Text {
+                    visible: root.service.lastError.length > 0
+                    width: parent.width
+                    text: root.service.lastError
+                    color: Theme.red
+                    font.family: Theme.fontMain
+                    font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                }
+
+                ListView {
+                    id: historyList
+                    width: parent.width
+                    height: Math.max(0, parent.height - (root.historySelectionMode ? 88 : 44)
+                                     - (root.service.lastError.length > 0 ? 24 : 0))
+                    clip: true
+                    spacing: 7
+                    boundsBehavior: Flickable.StopAtBounds
+                    model: root.service.savedSessions
+
+                    delegate: Rectangle {
+                        id: sessionRow
+                        required property var modelData
+                        readonly property string sessionId: String(modelData.id)
+                        readonly property bool selected: root.selectedSessionIds.indexOf(sessionId) !== -1
+                        width: historyList.width
+                        height: 62
+                        radius: 12
+                        color: selected
+                               ? Qt.alpha(root.accent, 0.19)
+                               : historyRow.containsMouse
+                                 ? Qt.alpha(Theme.white, 0.14)
+                                 : root.controlBackground
+                        border.width: 1
+                        border.color: selected ? root.accentSoft : root.controlBorder
+
+                        MouseArea {
+                            id: historyRow
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: !root.service.busy && !root.service.deletionPending
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.historySelectionMode)
+                                    root.toggleSelectedSession(sessionRow.sessionId)
+                                else
+                                    root.service.loadSession(sessionRow.sessionId)
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.historySelectionMode
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 22
+                            height: 22
+                            radius: 7
+                            color: sessionRow.selected
+                                   ? Qt.alpha(root.accent, 0.50)
+                                   : Qt.alpha(Theme.white, 0.06)
+                            border.width: 1
+                            border.color: sessionRow.selected
+                                          ? root.accent : root.controlBorder
+                            Text {
+                                anchors.centerIn: parent
+                                text: "✓"
+                                visible: sessionRow.selected
+                                font.family: Theme.fontMain
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: Theme.white
+                            }
+                        }
+
+                        Column {
+                            anchors.left: parent.left
+                            anchors.leftMargin: root.historySelectionMode ? 48 : 14
+                            anchors.right: parent.right
+                            anchors.rightMargin: root.historySelectionMode ? 14 : 55
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 4
+
+                            Text {
+                                width: parent.width
+                                text: String(modelData.title || "Untitled chat")
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                width: parent.width
+                                text: modelData.last_updated
+                                      ? Qt.formatDateTime(new Date(Number(modelData.last_updated) * 1000), "dd MMM yyyy · hh:mm")
+                                      : "Saved locally"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 10
+                            }
+                        }
+
+                        // A single click on a row's trash icon asks for one
+                        // confirmation, just like the bulk-delete action.
+                        Rectangle {
+                            visible: !root.historySelectionMode
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 34
+                            height: 34
+                            radius: 10
+                            color: historyDeleteArea.containsMouse
+                                   ? Qt.alpha(Theme.red, 0.20)
+                                   : Qt.alpha(Theme.white, 0.04)
+                            Text {
+                                anchors.centerIn: parent
+                                text: "󰆴"
+                                color: historyDeleteArea.containsMouse
+                                       ? Theme.red : Qt.alpha(Theme.white, 0.65)
+                                font.family: Theme.fontIcons
+                                font.pixelSize: 16
+                            }
+                            MouseArea {
+                                id: historyDeleteArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                enabled: !root.service.busy && !root.service.deletionPending
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.requestDeletion([sessionRow.sessionId])
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: root.historyOpen && root.service.savedSessions.length === 0
+                text: "No saved conversations yet"
+                color: Theme.grey1
+                font.family: Theme.fontMain
+                font.pixelSize: 12
+            }
+
             // Chat view: messages float directly on the Launcher's glass.
             ListView {
                 id: messageList
                 anchors.fill: parent
                 anchors.topMargin: 9
                 anchors.bottomMargin: 7
-                visible: !root.settingsOpen
+                visible: !root.settingsOpen && !root.historyOpen
                 clip: true
                 spacing: 11
                 model: root.service.messages
@@ -355,7 +734,7 @@ Item {
             Column {
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: -10
-                visible: !root.settingsOpen && root.service.messages.count === 0
+                visible: !root.settingsOpen && !root.historyOpen && root.service.messages.count === 0
                 spacing: 12
 
                 Image {
@@ -617,7 +996,7 @@ Item {
 
         // Neutral, Launcher-themed message composer (not the search bar).
         Item {
-            visible: !root.settingsOpen
+            visible: !root.settingsOpen && !root.historyOpen
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 74 : 0
 
@@ -707,6 +1086,137 @@ Item {
                 font.family: Theme.fontMain
                 font.pixelSize: 10
             }
+        }
+    }
+
+    // One confirmation dialog for individual and multi-conversation deletion.
+    Item {
+        anchors.fill: parent
+        z: 30
+        visible: root.deleteConfirmationOpen
+
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.alpha(Theme.bg0, 0.68)
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {} // Keep the dialog modal; use Cancel to dismiss.
+            }
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 48, 420)
+            height: 218
+            radius: 19
+            color: Qt.alpha(Theme.bg1, 0.98)
+            border.width: 1
+            border.color: Qt.alpha(Theme.white, 0.18)
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 23
+                spacing: 12
+
+                Text {
+                    text: root.pendingDeletionIds.length === 1
+                          ? "Delete conversation?"
+                          : "Delete " + root.pendingDeletionIds.length + " conversations?"
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 17
+                    font.bold: true
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.pendingDeletionIds.length === 1
+                          ? "This conversation will be permanently removed from local history. This cannot be undone."
+                          : "The selected conversations will be permanently removed from local history. This cannot be undone."
+                    color: Theme.grey1
+                    font.family: Theme.fontMain
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                }
+
+                Item { Layout.fillHeight: true }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        Layout.preferredWidth: 93
+                        Layout.preferredHeight: 38
+                        radius: 11
+                        color: cancelDeleteArea.containsMouse
+                               ? Qt.alpha(Theme.white, 0.16)
+                               : root.controlBackgroundStrong
+                        border.width: 1
+                        border.color: root.controlBorder
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Cancel"
+                            color: Theme.white
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                        }
+                        MouseArea {
+                            id: cancelDeleteArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.cancelDeletion()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 93
+                        Layout.preferredHeight: 38
+                        radius: 11
+                        color: confirmDeleteArea.containsMouse
+                               ? Qt.alpha(Theme.red, 0.32)
+                               : Qt.alpha(Theme.red, 0.19)
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.red, 0.58)
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Delete"
+                            color: Theme.red
+                            font.family: Theme.fontMain
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+                        MouseArea {
+                            id: confirmDeleteArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: !root.service.deletionPending
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.service.deleteSessions(root.pendingDeletionIds))
+                                    root.cancelDeletion()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: root.service
+        function onSessionLoaded() {
+            root.historyOpen = false
+            root.exitHistorySelection()
+            Qt.callLater(root.focusInput)
+            Qt.callLater(function() { messageList.positionViewAtEnd() })
+        }
+        function onSessionsDeleted(deleted, failed) {
+            // The service has already refreshed the list. The history panel
+            // stays open and a failed deletion is visible as an error there.
+            root.exitHistorySelection()
         }
     }
 

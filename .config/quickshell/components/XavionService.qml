@@ -111,6 +111,12 @@ Scope {
 
     property alias messages: messageModel
 
+    property var savedSessions: []
+    property bool deletionPending: false
+    signal sessionsUpdated()
+    signal sessionLoaded()
+    signal sessionsDeleted(var deleted, var failed)
+
     readonly property string configuredRoot:
         Quickshell.env("XAVION_ROOT")
         ? String(Quickshell.env("XAVION_ROOT"))
@@ -422,8 +428,44 @@ Scope {
         return true
     }
 
-    function newConversation(): void {
+    function listSessions(): void {
+        ensureBackend()
+        if (backendReady && !busy)
+            sendCommand({ type: "list_sessions" })
+    }
+
+    function loadSession(sessionId): void {
         if (!backendReady || busy)
+            return
+        sendCommand({ type: "load_session", session_id: String(sessionId) })
+    }
+
+    // One backend command deletes an entire selection after the UI has
+    // obtained a single confirmation from the user.
+    function deleteSessions(sessionIds): bool {
+        if (!backendReady || busy || deletionPending || !Array.isArray(sessionIds))
+            return false
+
+        var uniqueIds = []
+        for (var i = 0; i < sessionIds.length; ++i) {
+            var id = String(sessionIds[i])
+            if (id.length > 0 && uniqueIds.indexOf(id) === -1)
+                uniqueIds.push(id)
+        }
+        if (uniqueIds.length === 0)
+            return false
+
+        lastError = ""
+        deletionPending = true
+        if (!sendCommand({ type: "delete_sessions", session_ids: uniqueIds })) {
+            deletionPending = false
+            return false
+        }
+        return true
+    }
+
+    function newConversation(): void {
+        if (!backendReady || busy || deletionPending)
             return
 
         sendCommand({
@@ -471,6 +513,7 @@ Scope {
 
             applyModelPreference()
             applyReasoningPreference()
+            listSessions()
             break
 
         case "models":
@@ -595,6 +638,7 @@ Scope {
             break
 
         case "error":
+            deletionPending = false
             lastError =
                 event.message !== undefined
                 ? String(event.message)
@@ -632,6 +676,52 @@ Scope {
             awaitingFirstChunk = false
             thinking = false
             busy = false
+            streamUpdated()
+            break
+
+        case "sessions":
+            savedSessions = event.sessions || []
+            sessionsUpdated()
+            break
+
+        case "sessions_deleted":
+            deletionPending = false
+            savedSessions = event.sessions || []
+            if (event.active_reset) {
+                messageModel.clear()
+                currentAssistantIndex = -1
+                awaitingFirstChunk = false
+                thinking = false
+                busy = false
+                streamUpdated()
+            }
+            var deleted = event.deleted || []
+            var failed = event.failed || []
+            lastError = failed.length > 0
+                ? "Could not delete " + failed.length + " conversation(s)."
+                : ""
+            sessionsUpdated()
+            sessionsDeleted(deleted, failed)
+            break
+
+        case "session_loaded":
+            messageModel.clear()
+            var loaded = event.messages || []
+            for (var i = 0; i < loaded.length; i++) {
+                messageModel.append({
+                    role: String(loaded[i].role),
+                    text: String(loaded[i].text),
+                    streaming: false
+                })
+            }
+            currentAssistantIndex = -1
+            awaitingFirstChunk = false
+            thinking = false
+            busy = false
+            lastError = ""
+            if (event.model !== undefined)
+                activeModel = String(event.model)
+            sessionLoaded()
             streamUpdated()
             break
 
@@ -784,6 +874,7 @@ Scope {
         }
 
         onExited: function(exitCode) {
+            service.deletionPending = false
             service.backendReady = false
             service.awaitingFirstChunk = false
             service.thinking = false
