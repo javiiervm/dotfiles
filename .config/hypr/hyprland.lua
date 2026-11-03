@@ -66,6 +66,9 @@ hl.env("WLR_DRM_DEVICES", "/dev/dri/card2:/dev/dri/card1")
 
 hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
 
+-- Workaround for GTK 4.24 / Hyprland background blur
+hl.env("GDK_WAYLAND_DISABLE", "ext_background_effect_manager_v1")
+
 hl.on("hyprland.start", function ()
 	hl.exec_cmd("hyprpm reload && hyprctl reload")
     -- macOS mode is validated synchronously later in this file.
