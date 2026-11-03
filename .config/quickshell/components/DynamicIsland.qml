@@ -4126,9 +4126,10 @@ PanelWindow {
                                     anchors.fill: parent
                                     anchors.margins: 8
                                     spacing: 4
+                                    uniformCellSizes: true
 
                                     Repeater {
-                                        model: weekChartData 
+                                        model: weekChartData
                                         
                                         ColumnLayout {
                                             Layout.fillWidth: true
