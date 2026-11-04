@@ -19,3 +19,5 @@ Desktop/
 ~/.config/quickshell/secrets.env
 .config/quickshell/secrets.env
 *.bak*
+
+~/.config/quickshell/state/
