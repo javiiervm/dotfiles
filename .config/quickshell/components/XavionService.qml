@@ -15,6 +15,18 @@ Scope {
     property string activeModel: ""
     property string lastError: ""
     property int currentAssistantIndex: -1
+    property int currentUserIndex: -1
+
+    // Capabilities come from Ollama /api/show through Xavion's Python backend.
+    // Do not guess from the model name.
+    property var modelCapabilities: ({})
+    readonly property bool visionSupported:
+        backendReady
+        && activeModel.length > 0
+        && (selectedModel.length === 0 || selectedModel === activeModel)
+        && modelCapabilities.available === true
+        && modelCapabilities.vision === true
+
 
     // ============================================================
     // PERSISTED SETTINGS
@@ -390,40 +402,86 @@ Scope {
         return true
     }
 
-    function sendMessage(message): bool {
-        var content = String(message).trim()
+    // Stored attachments are validated and persisted by the Python core.
+    // The bridge exposes image ID/MIME metadata, not binary image contents.
+    function _savedImageUrls(attachments): var {
+        var urls = []
+        var items = Array.isArray(attachments) ? attachments : []
+        for (var i = 0; i < items.length; ++i) {
+            var item = items[i]
+            var id = String(item.id || "")
+            var mime = String(item.mime_type || "")
+            if (!/^[0-9a-f]{32}$/.test(id))
+                continue
+            var extension = mime === "image/png" ? ".png"
+                          : mime === "image/jpeg" ? ".jpg"
+                          : mime === "image/webp" ? ".webp" : ""
+            if (!extension.length)
+                continue
+            urls.push("file://" + xavionRoot + "/data/images/" + id + extension)
+        }
+        return urls
+    }
 
-        if (content.length === 0)
+    function _applyCapabilities(capabilities): void {
+        modelCapabilities = (capabilities && typeof capabilities === "object")
+            ? capabilities : ({})
+    }
+
+    // images is an array of {path: string, url: string}, supplied by the UI.
+    // Other clients (launcher and sidebar) may continue to call sendMessage(text).
+    function sendMessage(message, images): bool {
+        var content = String(message === undefined || message === null ? "" : message).trim()
+        var attachments = Array.isArray(images) ? images : []
+        if (!content.length && attachments.length === 0)
             return false
-
         if (!backendReady || busy)
             return false
+        if (attachments.length > 4) {
+            lastError = "You can attach up to 4 images per message."
+            return false
+        }
+        if (attachments.length && !visionSupported) {
+            lastError = "The selected model does not support image input."
+            return false
+        }
 
+        var sources = []
+        var previews = []
+        for (var i = 0; i < attachments.length; ++i) {
+            var path = String(attachments[i].path || "")
+            var url = String(attachments[i].url || "")
+            if (!path.length || !url.length) {
+                lastError = "Invalid image attachment."
+                return false
+            }
+            sources.push({path: path})
+            previews.push(url)
+        }
+
+        var command = {
+            type: "chat",
+            message: content,
+            images: sources,
+            intent_mode: intentMode,
+            tone_mode: toneMode
+        }
         lastError = ""
+        if (!sendCommand(command))
+            return false
 
+        // This role is kept as JSON text for consistent ListModel behavior.
         messageModel.append({
             role: "user",
             text: content,
+            imagesJson: JSON.stringify(previews),
             streaming: false
         })
-
+        currentUserIndex = messageModel.count - 1
         currentAssistantIndex = -1
         awaitingFirstChunk = true
         thinking = false
         busy = true
-
-        if (!sendCommand({
-            type: "chat",
-            message: content,
-            intent_mode: intentMode,
-            tone_mode: toneMode
-        })) {
-            awaitingFirstChunk = false
-            thinking = false
-            busy = false
-            return false
-        }
-
         streamUpdated()
         return true
     }
@@ -505,6 +563,8 @@ Scope {
             if (event.models !== undefined)
                 availableModels = event.models
 
+            _applyCapabilities(event.capabilities)
+
             if (event.reasoning_supported !== undefined)
                 reasoningSupported = Boolean(event.reasoning_supported)
 
@@ -523,6 +583,8 @@ Scope {
             if (event.active_model !== undefined)
                 activeModel = String(event.active_model)
 
+            _applyCapabilities(event.capabilities)
+
             if (event.reasoning_supported !== undefined)
                 reasoningSupported = Boolean(event.reasoning_supported)
 
@@ -539,6 +601,8 @@ Scope {
                 selectedModel = activeModel
             }
 
+            _applyCapabilities(event.capabilities)
+
             if (event.models !== undefined)
                 availableModels = event.models
 
@@ -552,6 +616,10 @@ Scope {
 
             thinking = false
             applyReasoningPreference()
+            break
+
+        case "capabilities":
+            _applyCapabilities(event.capabilities)
             break
 
         case "reasoning_changed":
@@ -591,6 +659,7 @@ Scope {
                 messageModel.append({
                     role: "assistant",
                     text: "",
+                    imagesJson: "[]",
                     streaming: true
                 })
 
@@ -617,6 +686,12 @@ Scope {
             break
 
         case "done":
+            if (currentUserIndex >= 0 && currentUserIndex < messageModel.count
+                && event.images !== undefined) {
+                messageModel.setProperty(currentUserIndex, "imagesJson",
+                    JSON.stringify(_savedImageUrls(event.images)))
+            }
+            currentUserIndex = -1
             if (
                 currentAssistantIndex >= 0
                 && currentAssistantIndex < messageModel.count
@@ -638,6 +713,7 @@ Scope {
             break
 
         case "error":
+            currentUserIndex = -1
             deletionPending = false
             lastError =
                 event.message !== undefined
@@ -668,6 +744,7 @@ Scope {
                 messageModel.append({
                     role: "assistant",
                     text: "Error: " + lastError,
+                    imagesJson: "[]",
                     streaming: false
                 })
             }
@@ -711,6 +788,7 @@ Scope {
                 messageModel.append({
                     role: String(loaded[i].role),
                     text: String(loaded[i].text),
+                    imagesJson: JSON.stringify(_savedImageUrls(loaded[i].images)),
                     streaming: false
                 })
             }
@@ -721,6 +799,8 @@ Scope {
             lastError = ""
             if (event.model !== undefined)
                 activeModel = String(event.model)
+            _applyCapabilities(event.capabilities)
+            currentUserIndex = -1
             sessionLoaded()
             streamUpdated()
             break
@@ -880,6 +960,8 @@ Scope {
             service.thinking = false
             service.busy = false
             service.reasoningSupported = false
+            service.modelCapabilities = ({})
+            service.currentUserIndex = -1
 
             if (service.panelOpen) {
                 service.lastError =

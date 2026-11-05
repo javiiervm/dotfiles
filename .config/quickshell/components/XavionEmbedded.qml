@@ -19,6 +19,41 @@ Item {
     property bool deleteConfirmationOpen: false
     property var pendingDeletionIds: []
     property var queuedMessages: []
+    // A draft belongs to this view. Only paths are sent to the backend.
+    property var pendingImages: []
+    readonly property int maxImages: 4
+
+    function addImageFile(fileUrl) {
+        if (!service.visionSupported || pendingImages.length >= maxImages)
+            return
+        const url = String(fileUrl)
+        if (!url.startsWith("file:///"))
+            return
+        let path
+        try {
+            path = decodeURIComponent(url.substring("file://".length))
+        } catch (error) {
+            console.warn("Xavion: invalid image file URL", error)
+            return
+        }
+        if (!/\.(png|jpe?g|webp)$/i.test(path))
+            return
+        for (let i = 0; i < pendingImages.length; ++i) {
+            if (pendingImages[i].path === path)
+                return
+        }
+        const updated = pendingImages.slice()
+        updated.push({path: path, url: url})
+        pendingImages = updated
+    }
+
+    function removePendingImage(index) {
+        const updated = pendingImages.slice()
+        if (index >= 0 && index < updated.length) {
+            updated.splice(index, 1)
+            pendingImages = updated
+        }
+    }
 
     function exitHistorySelection() {
         historySelectionMode = false
@@ -82,7 +117,9 @@ Item {
     }
 
     function back() {
-        if (deleteConfirmationOpen) {
+        if (imagePicker.visible) {
+            imagePicker.cancel()
+        } else if (deleteConfirmationOpen) {
             cancelDeletion()
         } else if (historyOpen && historySelectionMode) {
             exitHistorySelection()
@@ -98,16 +135,20 @@ Item {
     }
 
     function focusInput() {
-        if (visible && !settingsOpen && !historyOpen && service.backendReady && !service.busy)
+        if (visible && !settingsOpen && !historyOpen && !imagePicker.visible
+            && service.backendReady && !service.busy)
             composerInput.forceActiveFocus()
     }
 
     function sendMessage() {
         const content = composerInput.text.trim()
-        if (!content.length || !service.backendReady || service.busy)
+        if ((!content.length && pendingImages.length === 0)
+            || !service.backendReady || service.busy)
             return
-        if (service.sendMessage(content)) {
+        const attachments = pendingImages.slice()
+        if (service.sendMessage(content, attachments)) {
             composerInput.text = ""
+            pendingImages = []
             Qt.callLater(function() { messageList.positionViewAtEnd() })
         }
     }
@@ -140,7 +181,23 @@ Item {
             historyOpen = false
             exitHistorySelection()
             cancelDeletion()
+            imagePicker.cancel()
         }
+    }
+
+    // A modal picker rendered inside the same Launcher item. There is no
+    // platform FileDialog, so focus never leaves the Xavion chat surface.
+    XavionImagePicker {
+        id: imagePicker
+        anchors.fill: parent
+        z: 35
+        maxImages: root.maxImages
+        accentColor: root.accent
+        onAccepted: function(images) {
+            root.pendingImages = images
+            Qt.callLater(root.focusInput)
+        }
+        onCanceled: Qt.callLater(root.focusInput)
     }
 
     // The parent Launcher supplies the ONLY background. No opaque red panel,
@@ -607,10 +664,12 @@ Item {
                     required property string role
                     required property string text
                     required property bool streaming
+                    required property string imagesJson
                     readonly property bool fromUser: role === "user"
 
                     width: messageList.width
-                    height: fromUser ? userBubble.height + 10 : assistantRow.height + 10
+                    height: fromUser ? userContent.implicitHeight + 10
+                                     : assistantRow.height + 10
 
                     // Measure the text without constraining it to the bubble width.
                     // TextEdit.implicitWidth is unsuitable here because the edit's
@@ -624,36 +683,81 @@ Item {
                         textFormat: Text.PlainText
                     }
 
-                    Rectangle {
-                        id: userBubble
+                    // Like ChatGPT: attached images sit above the user's bubble,
+                    // not inside the text's gradient background.
+                    Column {
+                        id: userContent
                         visible: messageDelegate.fromUser
                         anchors.right: parent.right
-                        // Fit short messages to their actual text; cap long ones
-                        // so they wrap normally instead of stretching the chat.
+                        spacing: 7
                         width: Math.min(messageList.width * 0.78,
-                                        Math.max(50, userWidthProbe.implicitWidth + 30))
-                        height: userText.implicitHeight + 24
-                        radius: 18
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: root.service.gradientStart }
-                            GradientStop { position: 0.52; color: root.service.gradientMid }
-                            GradientStop { position: 1; color: root.service.gradientEnd }
+                                        Math.max(userWidthProbe.implicitWidth + 30,
+                                                 imageRow.implicitWidth, 50))
+
+                        Row {
+                            id: imageRow
+                            anchors.right: parent.right
+                            spacing: 6
+                            readonly property var sources:
+                                JSON.parse(messageDelegate.imagesJson || "[]")
+                            readonly property real imageSize:
+                                Math.min(88, Math.max(48,
+                                    (messageList.width * 0.78 - 18) / 4))
+                            visible: sources.length > 0
+
+                            Repeater {
+                                model: imageRow.sources
+                                Rectangle {
+                                    required property string modelData
+                                    width: imageRow.imageSize
+                                    height: imageRow.imageSize
+                                    radius: 12
+                                    clip: true
+                                    color: root.controlBackgroundStrong
+                                    border.width: 1
+                                    border.color: root.controlBorder
+                                    Image {
+                                        anchors.fill: parent
+                                        source: modelData
+                                        fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
+                                        cache: true
+                                        smooth: true
+                                        mipmap: true
+                                    }
+                                }
+                            }
                         }
-                        TextEdit {
-                            id: userText
-                            x: 15
-                            y: 11
-                            width: parent.width - 30
-                            text: messageDelegate.fromUser ? messageDelegate.text : ""
-                            color: Theme.white
-                            font.family: Theme.fontMain
-                            font.pixelSize: 13
-                            wrapMode: TextEdit.Wrap
-                            textFormat: TextEdit.PlainText
-                            readOnly: true
-                            selectByMouse: true
-                            selectionColor: Qt.alpha(Theme.white, 0.25)
+
+                        Rectangle {
+                            id: userBubble
+                            visible: messageDelegate.text.length > 0
+                            anchors.right: parent.right
+                            width: Math.min(messageList.width * 0.78,
+                                            Math.max(50, userWidthProbe.implicitWidth + 30))
+                            height: userText.implicitHeight + 24
+                            radius: 18
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0; color: root.service.gradientStart }
+                                GradientStop { position: 0.52; color: root.service.gradientMid }
+                                GradientStop { position: 1; color: root.service.gradientEnd }
+                            }
+                            TextEdit {
+                                id: userText
+                                x: 15
+                                y: 11
+                                width: parent.width - 30
+                                text: messageDelegate.fromUser ? messageDelegate.text : ""
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 13
+                                wrapMode: TextEdit.Wrap
+                                textFormat: TextEdit.PlainText
+                                readOnly: true
+                                selectByMouse: true
+                                selectionColor: Qt.alpha(Theme.white, 0.25)
+                            }
                         }
                     }
 
@@ -994,11 +1098,12 @@ Item {
             }
         }
 
-        // Neutral, Launcher-themed message composer (not the search bar).
+        // The composer grows vertically only while attachments are pending.
+        // Attached thumbnails and text entry share one glass surface.
         Item {
             visible: !root.settingsOpen && !root.historyOpen
             Layout.fillWidth: true
-            Layout.preferredHeight: visible ? 74 : 0
+            Layout.preferredHeight: visible ? (74 + (root.pendingImages.length ? 70 : 0)) : 0
 
             Rectangle {
                 id: composerBar
@@ -1006,21 +1111,110 @@ Item {
                 anchors.top: parent.top
                 anchors.topMargin: 7
                 width: Math.min(parent.width, 540)
-                height: 44
-                radius: height / 2
+                height: 44 + (root.pendingImages.length ? 70 : 0)
+                radius: root.pendingImages.length ? 19 : height / 2
                 color: root.controlBackgroundStrong
                 border.width: 1
                 border.color: composerInput.activeFocus
                               ? Qt.alpha(Theme.white, 0.22) : root.controlBorder
+                Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                Behavior on radius { NumberAnimation { duration: 160 } }
+
+                Row {
+                    id: pendingStrip
+                    visible: root.pendingImages.length > 0
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.leftMargin: 11
+                    anchors.topMargin: 8
+                    spacing: 8
+
+                    Repeater {
+                        model: root.pendingImages
+                        Rectangle {
+                            id: previewTile
+                            required property int index
+                            required property var modelData
+                            width: 54
+                            height: 54
+                            radius: 10
+                            clip: true
+                            color: root.controlBackground
+                            border.width: 1
+                            border.color: root.controlBorder
+
+                            Image {
+                                anchors.fill: parent
+                                source: previewTile.modelData.url
+                                fillMode: Image.PreserveAspectCrop
+                                smooth: true
+                                asynchronous: true
+                                mipmap: true
+                            }
+                            Rectangle {
+                                width: 17
+                                height: 17
+                                radius: 9
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 3
+                                color: Qt.alpha(Theme.bg0, 0.86)
+                                border.width: 1
+                                border.color: Qt.alpha(Theme.white, 0.3)
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "×"
+                                    color: Theme.white
+                                    font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.removePendingImage(previewTile.index)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: attachButton
+                    visible: root.service.visionSupported
+                    anchors.left: parent.left
+                    anchors.leftMargin: 7
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
+                    width: 32
+                    height: 32
+                    radius: 16
+                    color: attachArea.containsMouse
+                           ? Qt.alpha(Theme.white, 0.13) : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "󰏢" // nf-md-paperclip
+                        color: Theme.white
+                        font.family: Theme.fontIcons
+                        font.pixelSize: 18
+                    }
+                    MouseArea {
+                        id: attachArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: root.service.backendReady && !root.service.busy
+                                 && root.pendingImages.length < root.maxImages
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: imagePicker.openWith(root.pendingImages)
+                    }
+                }
 
                 TextInput {
                     id: composerInput
-                    anchors.left: parent.left
-                    anchors.leftMargin: 18
+                    anchors.left: attachButton.visible ? attachButton.right : parent.left
+                    anchors.leftMargin: attachButton.visible ? 9 : 18
                     anchors.right: sendButton.left
                     anchors.rightMargin: 11
-                    anchors.top: parent.top
                     anchors.bottom: parent.bottom
+                    height: 44
                     verticalAlignment: TextInput.AlignVCenter
                     enabled: root.service.backendReady && !root.service.busy
                     clip: true
@@ -1051,13 +1245,15 @@ Item {
                     id: sendButton
                     anchors.right: parent.right
                     anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 6
                     width: 32
                     height: 32
                     radius: 16
                     readonly property bool canSend: root.service.backendReady
                                                     && !root.service.busy
-                                                    && composerInput.text.trim().length > 0
+                                                    && (composerInput.text.trim().length > 0
+                                                        || root.pendingImages.length > 0)
                     color: canSend ? Qt.alpha(Theme.white, 0.14) : Qt.alpha(Theme.white, 0.06)
                     border.width: 1
                     border.color: canSend ? Qt.alpha(Theme.white, 0.18) : root.controlBorder
@@ -1081,10 +1277,17 @@ Item {
                 anchors.top: composerBar.bottom
                 anchors.topMargin: 7
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "Enter to send  ·  Esc to return"
-                color: Qt.alpha(Theme.white, 0.36)
+                text: root.service.lastError.length > 0
+                    ? root.service.lastError
+                    : "Enter to send  ·  Esc to return"
+                color: root.service.lastError.length > 0
+                       ? Theme.red : Qt.alpha(Theme.white, 0.36)
                 font.family: Theme.fontMain
                 font.pixelSize: 10
+                width: Math.min(parent.width - 20, 540)
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
             }
         }
     }
@@ -1228,6 +1431,12 @@ Item {
         function onBackendReadyChanged() {
             root.flushQueuedMessage()
             Qt.callLater(root.focusInput)
+        }
+        function onVisionSupportedChanged() {
+            if (!root.service.visionSupported) {
+                root.pendingImages = []
+                imagePicker.cancel()
+            }
         }
         function onBusyChanged() {
             if (!root.service.busy) {
