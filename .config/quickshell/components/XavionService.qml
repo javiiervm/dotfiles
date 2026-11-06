@@ -20,6 +20,12 @@ Scope {
     // its enabled reasoning mode. Image analysis takes priority in the UI.
     // Empty status means a normal pre-response wait: show only three dots.
     property int pendingImageCount: 0
+
+    // An AI Selection capture is a pending draft, NOT a chat message.
+    // The separate overlay passes the image path over Quickshell IPC.
+    property string selectionCapturePath: ""
+    property bool selectionNewChatPending: false
+    signal selectionImageReady(string imagePath)
     readonly property string pendingStatus:
         pendingImageCount > 1 ? "Analyzing images"
         : pendingImageCount === 1 ? "Analyzing image"
@@ -579,6 +585,40 @@ Scope {
         })
     }
 
+    // Called by shell.qml after AI Selection crops its frozen screenshot.
+    // The backend may still be starting or responding to another message.
+    // Keep the capture pending until we can safely create a new session.
+    function acceptSelectionCapture(imagePath): void {
+        var path = String(imagePath)
+        if (!path.startsWith("/") || !/\.png$/i.test(path)) {
+            lastError = "Invalid AI Selection screenshot path."
+            return
+        }
+        selectionCapturePath = path
+        lastError = ""
+        ensureBackend()
+        _startSelectionConversation()
+    }
+
+    function _startSelectionConversation(): void {
+        if (!selectionCapturePath.length || selectionNewChatPending
+                || !backendReady || busy || deletionPending)
+            return
+
+        // A saved model preference may still be switching after startup.
+        if (selectedModel.length && selectedModel !== activeModel)
+            return
+
+        if (!visionSupported) {
+            lastError = "Choose a vision-capable model to use Ask Xavion."
+            selectionCapturePath = ""
+            return
+        }
+
+        if (sendCommand({ type: "new" }))
+            selectionNewChatPending = true
+    }
+
     function handleBackendLine(data): void {
         var line = String(data).trim()
 
@@ -622,6 +662,7 @@ Scope {
             applyModelPreference()
             applyReasoningPreference()
             listSessions()
+            _startSelectionConversation()
             break
 
         case "models":
@@ -641,6 +682,7 @@ Scope {
 
             applyModelPreference()
             applyReasoningPreference()
+            _startSelectionConversation()
             break
 
         case "model_changed":
@@ -664,6 +706,7 @@ Scope {
 
             thinking = false
             applyReasoningPreference()
+            _startSelectionConversation()
             break
 
         case "capabilities":
@@ -759,6 +802,7 @@ Scope {
 
             streamUpdated()
             responseFinished()
+            _startSelectionConversation()
             break
 
         case "error":
@@ -803,6 +847,12 @@ Scope {
             awaitingFirstChunk = false
             thinking = false
             busy = false
+            if (selectionNewChatPending) {
+                selectionNewChatPending = false
+                selectionCapturePath = ""
+            } else {
+                _startSelectionConversation()
+            }
             streamUpdated()
             break
 
@@ -861,11 +911,19 @@ Scope {
             pendingImageCount = 0
             messageModel.clear()
             currentAssistantIndex = -1
+            currentUserIndex = -1
             awaitingFirstChunk = false
             thinking = false
             busy = false
             lastError = ""
             streamUpdated()
+            if (selectionNewChatPending) {
+                selectionNewChatPending = false
+                var capturedPath = selectionCapturePath
+                selectionCapturePath = ""
+                if (capturedPath.length)
+                    selectionImageReady(capturedPath)
+            }
             break
 
         case "reset_done":
@@ -1031,6 +1089,7 @@ Scope {
             service.modelCapabilities = ({})
             service.currentUserIndex = -1
             service.pendingImageCount = 0
+            service.selectionNewChatPending = false
 
             if (service.panelOpen) {
                 service.lastError =

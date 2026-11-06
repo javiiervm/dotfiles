@@ -554,6 +554,21 @@ ShellRoot {
         id: xavionService
     }
 
+    // AI Selection -> Xavion. AI Selection runs in a separate Quickshell
+    // process, so receive its cropped image path through IPC and reuse the
+    // existing Launcher and Xavion service.
+    IpcHandler {
+        target: "xavioncapture"
+
+        function open(imagePath: string): void {
+            var path = String(imagePath)
+            if (!path.startsWith("/") || !/\.png$/i.test(path))
+                return
+            mainLauncher.openXavion("")
+            xavionService.acceptSelectionCapture(path)
+        }
+    }
+
     ControlCenter {
         id: controlCenterPanel
         screen: root.primaryUiScreen

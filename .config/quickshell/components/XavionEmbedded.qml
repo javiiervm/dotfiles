@@ -1711,6 +1711,18 @@ Item {
             Qt.callLater(root.focusInput)
             messageList.jumpToLatest()
         }
+        function onSelectionImageReady(imagePath) {
+            root.settingsOpen = false
+            root.historyOpen = false
+            root.exitHistorySelection()
+            root.cancelDeletion()
+            imagePicker.cancel()
+            composerInput.text = ""
+            root.pendingImages = []
+            root.addImageFile("file://" + encodeURI(String(imagePath)))
+            messageList.jumpToLatest()
+            Qt.callLater(root.focusInput)
+        }
         function onSessionsDeleted(deleted, failed) {
             // The service has already refreshed the list. The history panel
             // stays open and a failed deletion is visible as an error there.

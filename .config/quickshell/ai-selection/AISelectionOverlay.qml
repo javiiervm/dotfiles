@@ -39,6 +39,8 @@ Scope {
         property bool selecting: false
         property bool hasSelection: false
         property bool saving: false
+        property string xavionCapturePath: ""
+        property int xavionCaptureSession: -1
         property bool localSelectionCompleted: false
         property real introProgress: 0
 
@@ -400,6 +402,51 @@ Scope {
             ])
         }
 
+        function askXavion() {
+            if (!hasSelection || saving || framePath === "")
+                return
+
+            const sx = frozenImage.sourceSize.width / panel.width
+            const sy = frozenImage.sourceSize.height / panel.height
+            const x = Math.max(0, Math.round(leftEdge * sx))
+            const y = Math.max(0, Math.round(topEdge * sy))
+            const w = Math.min(frozenImage.sourceSize.width - x,
+                               Math.max(1, Math.round(selectionWidth * sx)))
+            const h = Math.min(frozenImage.sourceSize.height - y,
+                               Math.max(1, Math.round(selectionHeight * sy)))
+            if (w < 2 || h < 2)
+                return
+
+            const runtime = Quickshell.env("XDG_RUNTIME_DIR") || "/tmp"
+            const suffix = Date.now() + "-" + Math.floor(Math.random() * 1000000000)
+            xavionCapturePath = runtime + "/xavion-ai-selection-" + suffix + ".png"
+            xavionCaptureSession = controller.session
+            saving = true
+            xavionCropProcess.exec([
+                "bash", "-c",
+                "set -euo pipefail\n" +
+                "umask 077\n" +
+                "source=$1; x=$2; y=$3; w=$4; h=$5; out=$6\n" +
+                "if command -v magick >/dev/null 2>&1; then\n" +
+                "  magick \"$source\" -crop \"${w}x${h}+${x}+${y}\" +repage \"$out\"\n" +
+                "else\n" +
+                "  convert \"$source\" -crop \"${w}x${h}+${x}+${y}\" +repage \"$out\"\n" +
+                "fi\n" +
+                "test -s \"$out\"\n" +
+                "size=$(stat -c %s \"$out\")\n" +
+                "if (( size > 8 * 1024 * 1024 )); then\n" +
+                "  if command -v magick >/dev/null 2>&1; then\n" +
+                "    magick \"$out\" -resize '1920x1920>' -strip \"$out\"\n" +
+                "  else\n" +
+                "    convert \"$out\" -resize '1920x1920>' -strip \"$out\"\n" +
+                "  fi\n" +
+                "fi\n" +
+                "test $(stat -c %s \"$out\") -le $((8 * 1024 * 1024))\n",
+                "ai-selection-xavion", framePath, String(x), String(y),
+                String(w), String(h), xavionCapturePath
+            ])
+        }
+
         function saveSelection() {
             if (!hasSelection || saving || framePath === "")
                 return
@@ -512,6 +559,39 @@ Scope {
                 }
                 panel.saving = false
                 panel.controller.abortSelection()
+            }
+        }
+
+        Process {
+            id: xavionCropProcess
+            onExited: function(exitCode, exitStatus) {
+                // The user may have pressed Escape while cropping.
+                if (panel.xavionCaptureSession !== panel.controller.session
+                        || !panel.controller.active)
+                    return
+                if (exitCode !== 0) {
+                    panel.saving = false
+                    errorProcess.exec(["notify-send", "AI Selection",
+                        "Could not prepare the selected image for Xavion."])
+                    return
+                }
+                const capture = panel.xavionCapturePath
+                // Close the exclusive-focus selection surface BEFORE opening
+                // the Launcher; otherwise it would immediately lose focus.
+                panel.controller.abortSelection()
+                xavionIpcProcess.exec([
+                    "qs", "ipc", "-p", Quickshell.env("HOME") + "/.config/quickshell",
+                    "call", "xavioncapture", "open", capture
+                ])
+            }
+        }
+
+        Process {
+            id: xavionIpcProcess
+            onExited: function(exitCode, exitStatus) {
+                if (exitCode !== 0)
+                    errorProcess.exec(["notify-send", "AI Selection",
+                        "Could not open Xavion. Is the main Quickshell instance running?"])
             }
         }
 
@@ -999,22 +1079,23 @@ Scope {
                 }
             }
 
-            // Ask Xavion remains a placeholder. OCR and Capture are now functional.
+            // Ask Xavion sends the cropped original image to a new draft.
             Row {
                 anchors.centerIn: parent
                 spacing: 5
 
-                // Placeholder: a future request will send the selected
-                // screenshot to the local Xavion assistant.
+                // Ask Xavion: create the crop and open the integrated chat.
                 Rectangle {
                     id: askXavionButton
                     width: 126
                     height: 36
                     radius: 18
-                    color: Qt.alpha(panel.menuWhite, panel.menuIdleButtonOpacity)
+                    color: askXavionArea.containsMouse
+                           ? Qt.alpha(panel.menuWhite, panel.menuHoverButtonOpacity)
+                           : Qt.alpha(panel.menuWhite, panel.menuIdleButtonOpacity)
                     border.width: 1
                     border.color: Qt.alpha(panel.menuWhite, panel.menuButtonBorderOpacity)
-                    opacity: 0.78 // Ask Xavion is still a placeholder.
+                    Behavior on color { ColorAnimation { duration: 120 } }
 
                     Text {
                         anchors.centerIn: parent
@@ -1023,6 +1104,15 @@ Scope {
                         font.family: panel.menuFont
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
+                    }
+
+                    MouseArea {
+                        id: askXavionArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        enabled: !panel.saving
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panel.askXavion()
                     }
                 }
 
