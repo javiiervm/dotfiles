@@ -149,7 +149,7 @@ Item {
         if (service.sendMessage(content, attachments)) {
             composerInput.text = ""
             pendingImages = []
-            Qt.callLater(function() { messageList.positionViewAtEnd() })
+            messageList.jumpToLatest()
         }
     }
 
@@ -168,8 +168,10 @@ Item {
     function flushQueuedMessage() {
         if (!queuedMessages.length || !service.backendReady || service.busy)
             return
-        if (service.sendMessage(queuedMessages[0]))
+        if (service.sendMessage(queuedMessages[0])) {
             queuedMessages = queuedMessages.slice(1)
+            messageList.jumpToLatest()
+        }
     }
 
     onVisibleChanged: {
@@ -659,6 +661,34 @@ Item {
                 model: root.service.messages
                 boundsBehavior: Flickable.StopAtBounds
 
+                // Follow tokens only while the reader is at the bottom.
+                // A user scrolling upward immediately takes control back.
+                property bool followOutput: true
+                function jumpToLatest() {
+                    followOutput = true
+                    Qt.callLater(function() { messageList.positionViewAtEnd() })
+                }
+                onMovementStarted: followOutput = false
+                onMovementEnded: {
+                    if (atYEnd)
+                        followOutput = true
+                }
+                onContentYChanged: {
+                    if (!moving && atYEnd && !followOutput)
+                        followOutput = true
+                }
+                onContentHeightChanged: {
+                    if (followOutput && !moving)
+                        Qt.callLater(function() {
+                            if (messageList.followOutput && !messageList.moving)
+                                messageList.positionViewAtEnd()
+                        })
+                }
+                onCountChanged: {
+                    if (followOutput)
+                        Qt.callLater(function() { messageList.positionViewAtEnd() })
+                }
+
                 delegate: Item {
                     id: messageDelegate
                     required property string role
@@ -765,8 +795,9 @@ Item {
                         id: assistantRow
                         visible: !messageDelegate.fromUser
                         spacing: 11
-                        width: parent.width
-                        height: Math.max(30, assistantText.implicitHeight + 6)
+                        // Match the max width of user messages for readable lines.
+                        width: Math.min(parent.width * 0.78, 740)
+                        height: Math.max(30, assistantMarkdown.implicitHeight + 6)
 
                         Image {
                             width: 29
@@ -777,61 +808,107 @@ Item {
                             mipmap: true
                         }
 
-                        TextEdit {
-                            id: assistantText
+                        XavionMarkdown {
+                            id: assistantMarkdown
                             width: Math.max(0, assistantRow.width - 40)
-                            text: messageDelegate.fromUser ? "" : messageDelegate.text
-                                  + (messageDelegate.streaming ? " ▌" : "")
-                            color: Qt.alpha(Theme.white, 0.92)
-                            font.family: Theme.fontMain
-                            font.pixelSize: 13
-                            wrapMode: TextEdit.Wrap
-                            textFormat: TextEdit.MarkdownText
-                            readOnly: true
-                            selectByMouse: true
-                            selectionColor: root.accentSoft
+                            markdown: messageDelegate.fromUser ? "" : messageDelegate.text
+                            streaming: messageDelegate.streaming
+                            textColor: Qt.alpha(Theme.white, 0.94)
+                            mutedColor: Theme.grey1
+                            accentStart: root.service.gradientStart
+                            accentMid: root.service.gradientMid
+                            accentEnd: root.service.gradientEnd
+                            bodyFont: Theme.fontMain
+                            bodySize: 13
                         }
                     }
                 }
 
                 footer: Item {
                     width: messageList.width
-                    height: root.service.awaitingFirstChunk ? 36 : 0
+                    height: root.service.awaitingFirstChunk ? 48 : 0
                     visible: root.service.awaitingFirstChunk
-                    Row {
+                    RowLayout {
                         anchors.left: parent.left
                         anchors.leftMargin: 42
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 7
+                        spacing: 10
+
+                        Rectangle {
+                            Layout.alignment: Qt.AlignVCenter
+                            width: 4
+                            height: 24
+                            radius: 2
+                            gradient: Gradient {
+                                GradientStop { position: 0; color: root.service.gradientStart }
+                                GradientStop { position: 0.5; color: root.service.gradientMid }
+                                GradientStop { position: 1; color: root.service.gradientEnd }
+                            }
+                            SequentialAnimation on opacity {
+                                running: root.service.awaitingFirstChunk
+                                loops: Animation.Infinite
+                                NumberAnimation { from: 0.38; to: 1; duration: 700 }
+                                NumberAnimation { from: 1; to: 0.38; duration: 700 }
+                            }
+                        }
                         Text {
-                            visible: root.service.thinking
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Thinking"
-                            color: Theme.grey1
+                            Layout.alignment: Qt.AlignVCenter
+                            text: root.service.pendingStatus
+                            color: root.accent
                             font.family: Theme.fontMain
-                            font.pixelSize: 12
+                            font.pixelSize: 13
+                            font.bold: true
                         }
                         Repeater {
                             model: 3
                             Rectangle {
                                 required property int index
-                                width: 6
-                                height: 6
+                                Layout.alignment: Qt.AlignVCenter
+                                width: 5
+                                height: 5
                                 radius: 3
-                                color: root.accent
+                                color: index === 0 ? root.service.gradientStart
+                                      : index === 1 ? root.service.gradientMid
+                                      : root.service.gradientEnd
                                 SequentialAnimation on opacity {
                                     running: root.service.awaitingFirstChunk
                                     loops: Animation.Infinite
-                                    PauseAnimation { duration: index * 130 }
-                                    NumberAnimation { from: 0.3; to: 1; duration: 230 }
-                                    NumberAnimation { from: 1; to: 0.3; duration: 230 }
+                                    PauseAnimation { duration: index * 135 }
+                                    NumberAnimation { from: 0.28; to: 1; duration: 270 }
+                                    NumberAnimation { from: 1; to: 0.28; duration: 270 }
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                onCountChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
+            // Visible only after the reader has scrolled away from new tokens.
+            Rectangle {
+                z: 3
+                visible: !root.settingsOpen && !root.historyOpen
+                         && root.service.messages.count > 0 && !messageList.followOutput
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 15
+                width: 138
+                height: 32
+                radius: 16
+                color: Qt.alpha(Theme.bg1, 0.96)
+                border.width: 1
+                border.color: Qt.alpha(root.accent, 0.50)
+                Text {
+                    anchors.centerIn: parent
+                    text: "↓  Latest message"
+                    color: Theme.white
+                    font.family: Theme.fontMain
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: messageList.jumpToLatest()
+                }
             }
 
             // Clean Launcher-style empty state: the avatar is the only artwork.
@@ -892,41 +969,178 @@ Item {
                         font.bold: true
                     }
                     Text {
-                        text: "Accent colors for Xavion messages and controls"
+                        text: "Choose your message gradient — or create your own"
                         color: Theme.grey1
                         font.family: Theme.fontMain
                         font.pixelSize: 12
                     }
 
-                    Row {
+                    // Flow, not Row: palettes wrap gracefully on narrow Launchers.
+                    Flow {
+                        width: parent.width
                         spacing: 10
                         Repeater {
                             model: root.service.gradientPresets.length
-                            Rectangle {
+                            Item {
                                 required property int index
                                 readonly property var preset: root.service.gradientPresets[index]
-                                width: 45
-                                height: 45
-                                radius: 14
-                                color: root.controlBackground
-                                border.width: root.service.gradientIndex === index ? 2 : 1
-                                border.color: root.service.gradientIndex === index
-                                              ? root.accent : root.controlBorder
+                                width: 56
+                                height: 67
+
                                 Rectangle {
-                                    anchors.centerIn: parent
-                                    width: 27
-                                    height: 27
-                                    radius: 9
-                                    gradient: Gradient {
-                                        GradientStop { position: 0; color: preset.start }
-                                        GradientStop { position: 0.5; color: preset.mid }
-                                        GradientStop { position: 1; color: preset.end }
+                                    id: paletteTile
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    width: 48
+                                    height: 48
+                                    radius: 14
+                                    color: root.controlBackground
+                                    border.width: root.service.gradientIndex === index ? 2 : 1
+                                    border.color: root.service.gradientIndex === index
+                                                  ? root.accent : root.controlBorder
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 30
+                                        height: 30
+                                        radius: 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0; color: preset.start }
+                                            GradientStop { position: 0.5; color: preset.mid }
+                                            GradientStop { position: 1; color: preset.end }
+                                        }
+                                        Text {
+                                            visible: preset.name === "Custom"
+                                            anchors.centerIn: parent
+                                            text: "+"
+                                            color: Theme.white
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 19
+                                            font.bold: true
+                                        }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.service.setGradient(index)
                                     }
                                 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.service.setGradient(index)
+                                Text {
+                                    anchors.top: paletteTile.bottom
+                                    anchors.topMargin: 5
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    width: 60
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: preset.name
+                                    elide: Text.ElideRight
+                                    color: root.service.gradientIndex === index
+                                           ? Theme.white : Theme.grey1
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 9
+                                }
+                            }
+                        }
+                    }
+
+                    // Make the custom palette useful without opening an external
+                    // color picker (which would dismiss the Launcher on Hyprland).
+                    Rectangle {
+                        visible: root.service.gradientIndex === root.service.customGradientIndex
+                        width: parent.width
+                        height: visible ? customEditor.implicitHeight + 24 : 0
+                        radius: 14
+                        color: root.controlBackground
+                        border.width: 1
+                        border.color: root.controlBorder
+
+                        Column {
+                            id: customEditor
+                            x: 12
+                            y: 12
+                            width: parent.width - 24
+                            spacing: 10
+
+                            Text {
+                                text: "Custom gradient"
+                                color: Theme.white
+                                font.family: Theme.fontMain
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                            Text {
+                                text: "Enter HEX colors and press Enter to apply each stop"
+                                color: Theme.grey1
+                                font.family: Theme.fontMain
+                                font.pixelSize: 11
+                            }
+                            Rectangle {
+                                width: parent.width
+                                height: 24
+                                radius: 12
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0; color: root.service.customGradientStart }
+                                    GradientStop { position: 0.5; color: root.service.customGradientMid }
+                                    GradientStop { position: 1; color: root.service.customGradientEnd }
+                                }
+                            }
+                            Flow {
+                                width: parent.width
+                                spacing: 10
+                                Repeater {
+                                    model: ["Start", "Middle", "End"]
+                                    Column {
+                                        id: stopEditor
+                                        required property int index
+                                        required property string modelData
+                                        readonly property string currentValue:
+                                            index === 0 ? root.service.customGradientStart
+                                            : index === 1 ? root.service.customGradientMid
+                                            : root.service.customGradientEnd
+                                        spacing: 5
+                                        Text {
+                                            text: stopEditor.modelData
+                                            color: Theme.grey1
+                                            font.family: Theme.fontMain
+                                            font.pixelSize: 10
+                                        }
+                                        Rectangle {
+                                            width: 125
+                                            height: 32
+                                            radius: 9
+                                            color: Qt.alpha(Theme.bg0, 0.32)
+                                            border.width: 1
+                                            border.color: hexInput.activeFocus
+                                                          ? root.accentSoft : root.controlBorder
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 8
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 15
+                                                height: 15
+                                                radius: 5
+                                                color: stopEditor.currentValue
+                                            }
+                                            TextInput {
+                                                id: hexInput
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 29
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 5
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: stopEditor.currentValue
+                                                maximumLength: 7
+                                                font.family: Theme.fontMain
+                                                font.pixelSize: 11
+                                                color: Theme.white
+                                                selectByMouse: true
+                                                selectionColor: root.accentSoft
+                                                onEditingFinished: {
+                                                    if (!root.service.setCustomGradientStop(
+                                                            stopEditor.index, text))
+                                                        text = stopEditor.currentValue
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1414,7 +1628,7 @@ Item {
             root.historyOpen = false
             root.exitHistorySelection()
             Qt.callLater(root.focusInput)
-            Qt.callLater(function() { messageList.positionViewAtEnd() })
+            messageList.jumpToLatest()
         }
         function onSessionsDeleted(deleted, failed) {
             // The service has already refreshed the list. The history panel
@@ -1425,9 +1639,8 @@ Item {
 
     Connections {
         target: root.service
-        function onStreamUpdated() {
-            Qt.callLater(function() { messageList.positionViewAtEnd() })
-        }
+        // Output growth is handled by ListView.followOutput. Never force the
+        // view to the bottom while the user is inspecting an earlier message.
         function onBackendReadyChanged() {
             root.flushQueuedMessage()
             Qt.callLater(root.focusInput)

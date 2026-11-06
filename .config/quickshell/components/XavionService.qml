@@ -16,6 +16,11 @@ Scope {
     property string lastError: ""
     property int currentAssistantIndex: -1
     property int currentUserIndex: -1
+    // Used only by the frontend's pre-token progress indicator.
+    property int pendingImageCount: 0
+    readonly property string pendingStatus:
+        pendingImageCount > 1 ? "Analyzing images"
+        : pendingImageCount === 1 ? "Analyzing image" : "Thinking"
 
     // Capabilities come from Ollama /api/show through Xavion's Python backend.
     // Do not guess from the model name.
@@ -33,6 +38,10 @@ Scope {
     // ============================================================
 
     property int gradientIndex: 0
+    // Stored separately so switching themes never discards the custom palette.
+    property string customGradientStart: "#8B5CF6"
+    property string customGradientMid: "#D946EF"
+    property string customGradientEnd: "#FB7185"
 
     // These values mirror the options exposed by Xavion dev.
     property string toneMode: "adaptive"
@@ -109,8 +118,23 @@ Scope {
             start: "#4338CA",
             mid: "#6366F1",
             end: "#8B5CF6"
+        },
+        { name: "Rose Gold", start: "#9F365B", mid: "#C2416E", end: "#D66B66" },
+        { name: "Cyberpunk", start: "#C026D3", mid: "#7C3AED", end: "#06B6D4" },
+        { name: "Arctic", start: "#075985", mid: "#0369A1", end: "#0891B2" },
+        { name: "Golden", start: "#92400E", mid: "#B45309", end: "#D97706" },
+        { name: "Aurora", start: "#047857", mid: "#059669", end: "#16A34A" },
+        { name: "Candy", start: "#9D174D", mid: "#BE185D", end: "#7C3AED" },
+        { name: "Graphite", start: "#475569", mid: "#64748B", end: "#94A3B8" },
+        {
+            name: "Custom",
+            start: customGradientStart,
+            mid: customGradientMid,
+            end: customGradientEnd
         }
     ]
+
+    readonly property int customGradientIndex: gradientPresets.length - 1
 
     readonly property color gradientStart:
         gradientPresets[gradientIndex].start
@@ -220,6 +244,26 @@ Scope {
             "xavion-gradient",
             gradientIndex
         )
+    }
+
+    // Three editable gradient stops. Validate and persist every accepted change.
+    function setCustomGradientStop(stop, colorValue): bool {
+        var hex = String(colorValue).trim().toUpperCase()
+        if (!/^#[0-9A-F]{6}$/.test(hex))
+            return false
+        if (stop === 0)
+            customGradientStart = hex
+        else if (stop === 1)
+            customGradientMid = hex
+        else if (stop === 2)
+            customGradientEnd = hex
+        else
+            return false
+
+        _writeSetting(customGradientSave, "xavion-custom-gradient",
+            customGradientStart + "," + customGradientMid + "," + customGradientEnd)
+        setGradient(customGradientIndex)
+        return true
     }
 
     function setTone(value): void {
@@ -478,6 +522,7 @@ Scope {
             streaming: false
         })
         currentUserIndex = messageModel.count - 1
+        pendingImageCount = attachments.length
         currentAssistantIndex = -1
         awaitingFirstChunk = true
         thinking = false
@@ -692,6 +737,7 @@ Scope {
                     JSON.stringify(_savedImageUrls(event.images)))
             }
             currentUserIndex = -1
+            pendingImageCount = 0
             if (
                 currentAssistantIndex >= 0
                 && currentAssistantIndex < messageModel.count
@@ -714,6 +760,7 @@ Scope {
 
         case "error":
             currentUserIndex = -1
+            pendingImageCount = 0
             deletionPending = false
             lastError =
                 event.message !== undefined
@@ -765,6 +812,7 @@ Scope {
             deletionPending = false
             savedSessions = event.sessions || []
             if (event.active_reset) {
+                pendingImageCount = 0
                 messageModel.clear()
                 currentAssistantIndex = -1
                 awaitingFirstChunk = false
@@ -782,6 +830,7 @@ Scope {
             break
 
         case "session_loaded":
+            pendingImageCount = 0
             messageModel.clear()
             var loaded = event.messages || []
             for (var i = 0; i < loaded.length; i++) {
@@ -806,6 +855,7 @@ Scope {
             break
 
         case "new_done":
+            pendingImageCount = 0
             messageModel.clear()
             currentAssistantIndex = -1
             awaitingFirstChunk = false
@@ -816,6 +866,7 @@ Scope {
             break
 
         case "reset_done":
+            pendingImageCount = 0
             messageModel.clear()
             currentAssistantIndex = -1
             awaitingFirstChunk = false
@@ -845,6 +896,7 @@ Scope {
             + "  if [ -r \"$file\" ]; then cat \"$file\"; else printf '%s' \"$fallback\"; fi; "
             + "}; "
             + "printf 'gradient|%s\\n' \"$(readv xavion-gradient 0)\"; "
+            + "printf 'custom|%s\\n' \"$(readv xavion-custom-gradient '#8B5CF6,#D946EF,#FB7185')\"; "
             + "printf 'tone|%s\\n' \"$(readv xavion-tone adaptive)\"; "
             + "printf 'mode|%s\\n' \"$(readv xavion-mode auto)\"; "
             + "printf 'model|%s\\n' \"$(readv xavion-model '')\"; "
@@ -862,7 +914,16 @@ Scope {
                 var key = line.substring(0, separator)
                 var value = line.substring(separator + 1)
 
-                if (key === "gradient") {
+                if (key === "custom") {
+                    var colors = value.split(",")
+                    if (colors.length === 3 && /^#[0-9a-fA-F]{6}$/.test(colors[0])
+                        && /^#[0-9a-fA-F]{6}$/.test(colors[1])
+                        && /^#[0-9a-fA-F]{6}$/.test(colors[2])) {
+                        service.customGradientStart = colors[0]
+                        service.customGradientMid = colors[1]
+                        service.customGradientEnd = colors[2]
+                    }
+                } else if (key === "gradient") {
                     var index = parseInt(value)
 
                     if (
@@ -898,6 +959,10 @@ Scope {
 
     Process {
         id: gradientSave
+    }
+
+    Process {
+        id: customGradientSave
     }
 
     Process {
@@ -962,6 +1027,7 @@ Scope {
             service.reasoningSupported = false
             service.modelCapabilities = ({})
             service.currentUserIndex = -1
+            service.pendingImageCount = 0
 
             if (service.panelOpen) {
                 service.lastError =
