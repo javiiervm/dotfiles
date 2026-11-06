@@ -1,6 +1,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import Quickshell.Io
 import ".."
 
 // Xavion is an actual Launcher view, not a separate window or glass card.
@@ -22,6 +23,43 @@ Item {
     // A draft belongs to this view. Only paths are sent to the backend.
     property var pendingImages: []
     readonly property int maxImages: 4
+
+    // A UI preference, not part of any conversation. The last choice applies
+    // to every future Thinking panel, even after restarting Quickshell.
+    property bool reasoningExpanded: false
+
+    Process {
+        id: reasoningExpansionLoad
+        running: true
+        command: [
+            "bash", "-c",
+            "file=\"$HOME/.config/quickshell/state/xavion-thinking-expanded\"; "
+            + "if [ -r \"$file\" ]; then cat \"$file\"; else printf '0\\n'; fi"
+        ]
+        stdout: SplitParser {
+            onRead: function(data) {
+                const saved = String(data).trim()
+                if (saved === "0" || saved === "1")
+                    root.reasoningExpanded = saved === "1"
+            }
+        }
+    }
+
+    Process {
+        id: reasoningExpansionSave
+    }
+
+    function toggleReasoningExpanded() {
+        reasoningExpanded = !reasoningExpanded
+        reasoningExpansionSave.running = false
+        reasoningExpansionSave.command = [
+            "bash", "-c",
+            "mkdir -p \"$HOME/.config/quickshell/state\"; "
+            + "printf '%s\\n' \"$1\" > \"$HOME/.config/quickshell/state/xavion-thinking-expanded\"",
+            "_", reasoningExpanded ? "1" : "0"
+        ]
+        reasoningExpansionSave.running = true
+    }
 
     function addImageFile(fileUrl) {
         if (!service.visionSupported || pendingImages.length >= maxImages)
@@ -828,16 +866,21 @@ Item {
                 // only for verified reasoning or attached image analysis.
                 // Otherwise the animated three dots are enough.
                 footer: Item {
+                    id: thinkingFooter
                     width: messageList.width
-                    height: root.service.awaitingFirstChunk ? 48 : 0
+                    // Expand inside the chat list, rather than floating above
+                    // other content or obscuring the message composer.
+                    height: !root.service.awaitingFirstChunk ? 0
+                            : (root.reasoningExpanded && root.service.thinking ? 224 : 48)
                     visible: root.service.awaitingFirstChunk
 
                     Row {
                         id: pendingIndicator
                         anchors.left: parent.left
                         anchors.leftMargin: 42
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 0
+                        anchors.top: parent.top
+                        anchors.topMargin: 12
+                        spacing: 7
 
                         readonly property string actionText: root.service.pendingStatus
                         property real gradientPhase: 0
@@ -928,6 +971,119 @@ Item {
                                         NumberAnimation { from: 0.28; to: 1; duration: 270 }
                                         NumberAnimation { from: 1; to: 0.28; duration: 270 }
                                     }
+                                }
+                            }
+                        }
+
+                        // A small, ChatGPT-like expander is available only
+                        // while the model actually streams reasoning tokens.
+                        Item {
+                            width: visible ? 22 : 0
+                            height: 24
+                            visible: root.service.thinking
+
+                            // Draw the chevron geometrically. Font glyphs such
+                            // as ⌃/⌄ have asymmetric bearings and sit too high.
+                            Canvas {
+                                id: reasoningChevron
+                                anchors.centerIn: parent
+                                width: 16
+                                height: 16
+                                antialiasing: true
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.strokeStyle = "rgba(255,255,255,0.82)"
+                                    ctx.lineWidth = 1.8
+                                    ctx.lineCap = "round"
+                                    ctx.lineJoin = "round"
+                                    ctx.beginPath()
+                                    ctx.moveTo(4.25, root.reasoningExpanded ? 10 : 6)
+                                    ctx.lineTo(8, root.reasoningExpanded ? 6 : 10)
+                                    ctx.lineTo(11.75, root.reasoningExpanded ? 10 : 6)
+                                    ctx.stroke()
+                                }
+                                Connections {
+                                    target: root
+                                    function onReasoningExpandedChanged() {
+                                        reasoningChevron.requestPaint()
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.toggleReasoningExpanded()
+                                    if (root.reasoningExpanded)
+                                        messageList.jumpToLatest()
+                                }
+                            }
+                        }
+                    }
+
+                    // Live model-generated reasoning, visually distinct from
+                    // the assistant answer. The text is ephemeral; only the
+                    // viewer's open/closed preference is saved.
+                    Rectangle {
+                        id: reasoningViewer
+                        visible: root.reasoningExpanded
+                                 && root.service.thinking
+                                 && root.service.awaitingFirstChunk
+                        anchors.left: parent.left
+                        anchors.leftMargin: 42
+                        anchors.top: pendingIndicator.bottom
+                        anchors.topMargin: 9
+                        width: Math.max(0, Math.min(parent.width - 55, 700))
+                        height: 164
+                        radius: 12
+                        color: Qt.alpha(Theme.bg1, 0.60)
+                        border.width: 1
+                        border.color: Qt.alpha(root.service.gradientMid, 0.26)
+                        clip: true
+
+                        Flickable {
+                            id: reasoningScroll
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            contentWidth: width
+                            contentHeight: Math.max(height, reasoningDetails.implicitHeight)
+
+                            TextEdit {
+                                id: reasoningDetails
+                                width: reasoningScroll.width
+                                text: root.service.reasoningText.length > 0
+                                      ? root.service.reasoningText
+                                        + (root.service.reasoningTraceTruncated
+                                           ? "\n\n… (reasoning preview truncated)" : "")
+                                      : "Waiting for reasoning output…"
+                                color: Qt.alpha(Theme.white, 0.72)
+                                font.family: Theme.fontMain
+                                font.pixelSize: 12
+                                wrapMode: TextEdit.Wrap
+                                textFormat: TextEdit.PlainText
+                                readOnly: true
+                                selectByMouse: true
+                                selectionColor: Qt.alpha(root.service.gradientMid, 0.4)
+                            }
+                        }
+
+                        Connections {
+                            target: root.service
+                            function onReasoningTextChanged() {
+                                // Follow incoming reasoning only when the user
+                                // isn't manually scrolling through it.
+                                if (reasoningViewer.visible && !reasoningScroll.moving) {
+                                    Qt.callLater(function() {
+                                        if (reasoningViewer.visible && !reasoningScroll.moving)
+                                            reasoningScroll.contentY = Math.max(
+                                                0,
+                                                reasoningScroll.contentHeight
+                                                - reasoningScroll.height)
+                                    })
                                 }
                             }
                         }

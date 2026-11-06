@@ -10,15 +10,25 @@ Scope {
     property bool busy: false
     property bool awaitingFirstChunk: false
     property bool thinking: false
+    // Ephemeral model-generated reasoning. Visible only while it streams;
+    // never added to conversation messages or persisted on disk.
+    property string reasoningText: ""
+    property bool reasoningTraceTruncated: false
+    readonly property int maxReasoningCharacters: 24000
+
+    function clearReasoningTrace(): void {
+        reasoningText = ""
+        reasoningTraceTruncated = false
+    }
     property bool settingsLoaded: false
 
     property string activeModel: ""
     property string lastError: ""
     property int currentAssistantIndex: -1
     property int currentUserIndex: -1
-    // The bridge reports `thinking` only when the active model actually uses
-    // its enabled reasoning mode. Image analysis takes priority in the UI.
-    // Empty status means a normal pre-response wait: show only three dots.
+    // Only actual reasoning_start/reasoning_end events control 'thinking'.
+    // Image analysis takes priority in the UI; otherwise pending requests
+    // without reasoning show the original three animated dots.
     property int pendingImageCount: 0
 
     // An AI Selection capture is a pending draft, NOT a chat message.
@@ -59,11 +69,14 @@ Scope {
     // Empty means "use the backend default" until settings are loaded.
     property string selectedModel: ""
 
-    // Reasoning preference is kept independently from model support so that
-    // switching temporarily to a non-thinking model does not discard it.
+    // The persistent preference lives in Xavion's backend config.json.
+    // Neither changing models nor restarting Quickshell resets the mode.
     property string reasoningMode: "off"
     property string activeReasoningMode: "off"
     property bool reasoningSupported: false
+    property string pendingReasoningMode: ""
+    property bool requestReasoningEnabled: false
+    property string requestReasoningReason: ""
 
     property var availableModels: []
 
@@ -83,10 +96,8 @@ Scope {
         { value: "translate", label: "Translate" }
     ]
 
-    // Auto is intentionally present in the UI contract already, but disabled
-    // until Xavion gains per-request adaptive reasoning.
     readonly property var reasoningOptions: [
-        { value: "auto", label: "Auto", enabled: false },
+        { value: "auto", label: "Auto", enabled: true },
         { value: "on", label: "On", enabled: true },
         { value: "off", label: "Off", enabled: true }
     ]
@@ -312,29 +323,21 @@ Scope {
     }
 
     function setReasoning(value): void {
-        var target = String(value)
-
-        // Auto is part of the UI now, but is deliberately not selectable yet.
-        if (target !== "on" && target !== "off")
+        var target = String(value).toLowerCase()
+        if (target !== "auto" && target !== "on" && target !== "off")
             return
 
-        reasoningMode = target
+        if (!backendReady || !reasoningSupported)
+            return
 
-        _writeSetting(
-            reasoningSave,
-            "xavion-reasoning",
-            reasoningMode
-        )
+        if (target === reasoningMode && pendingReasoningMode.length === 0)
+            return
 
-        if (
-            backendReady
-            && reasoningSupported
-            && activeReasoningMode !== reasoningMode
-        ) {
-            sendCommand({
-                type: "set_reasoning",
-                mode: reasoningMode
-            })
+        // The Python engine persists the mode. Quickshell does not write a
+        // second preference file that could override the backend on startup.
+        if (sendCommand({ type: "set_reasoning", mode: target })) {
+            pendingReasoningMode = target
+            reasoningMode = target
         }
     }
 
@@ -397,26 +400,6 @@ Scope {
             "xavion-model",
             selectedModel
         )
-    }
-
-    function applyReasoningPreference(): void {
-        if (
-            !backendReady
-            || !settingsLoaded
-            || !reasoningSupported
-        ) {
-            return
-        }
-
-        if (reasoningMode !== "on" && reasoningMode !== "off")
-            reasoningMode = "off"
-
-        if (activeReasoningMode !== reasoningMode) {
-            sendCommand({
-                type: "set_reasoning",
-                mode: reasoningMode
-            })
-        }
     }
 
     // ============================================================
@@ -535,6 +518,7 @@ Scope {
         currentAssistantIndex = -1
         awaitingFirstChunk = true
         thinking = false
+        clearReasoningTrace()
         busy = true
         streamUpdated()
         return true
@@ -643,6 +627,7 @@ Scope {
             busy = false
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             lastError = ""
 
             if (event.model !== undefined)
@@ -656,11 +641,13 @@ Scope {
             if (event.reasoning_supported !== undefined)
                 reasoningSupported = Boolean(event.reasoning_supported)
 
-            if (event.reasoning_mode !== undefined)
+            if (event.reasoning_mode !== undefined) {
                 activeReasoningMode = String(event.reasoning_mode)
+                reasoningMode = activeReasoningMode
+                pendingReasoningMode = ""
+            }
 
             applyModelPreference()
-            applyReasoningPreference()
             listSessions()
             _startSelectionConversation()
             break
@@ -677,11 +664,13 @@ Scope {
             if (event.reasoning_supported !== undefined)
                 reasoningSupported = Boolean(event.reasoning_supported)
 
-            if (event.reasoning_mode !== undefined)
+            if (event.reasoning_mode !== undefined) {
                 activeReasoningMode = String(event.reasoning_mode)
+                reasoningMode = activeReasoningMode
+                pendingReasoningMode = ""
+            }
 
             applyModelPreference()
-            applyReasoningPreference()
             _startSelectionConversation()
             break
 
@@ -701,11 +690,13 @@ Scope {
             else
                 reasoningSupported = false
 
-            if (event.reasoning_mode !== undefined)
+            if (event.reasoning_mode !== undefined) {
                 activeReasoningMode = String(event.reasoning_mode)
+                reasoningMode = activeReasoningMode
+                pendingReasoningMode = ""
+            }
 
             thinking = false
-            applyReasoningPreference()
             _startSelectionConversation()
             break
 
@@ -718,6 +709,7 @@ Scope {
                 activeReasoningMode = String(event.mode)
                 reasoningMode = activeReasoningMode
             }
+            pendingReasoningMode = ""
 
             if (event.supported !== undefined)
                 reasoningSupported = Boolean(event.supported)
@@ -727,10 +719,37 @@ Scope {
         case "start":
             busy = true
             awaitingFirstChunk = true
-            thinking =
-                event.thinking !== undefined
-                ? Boolean(event.thinking)
-                : false
+            thinking = false
+            clearReasoningTrace()
+            requestReasoningEnabled = Boolean(event.reasoning_enabled)
+            requestReasoningReason =
+                event.reasoning_reason !== undefined
+                ? String(event.reasoning_reason) : ""
+            break
+
+        case "reasoning_start":
+            // Only the first *actual* thinking token enables the indicator.
+            if (busy && awaitingFirstChunk)
+                thinking = true
+            break
+
+        case "reasoning_chunk":
+            // Display the model's actual streamed reasoning in the temporary
+            // expandable viewer, never in the final message or saved history.
+            if (busy && awaitingFirstChunk && event.text !== undefined) {
+                var textPart = String(event.text)
+                var remaining = maxReasoningCharacters - reasoningText.length
+                if (remaining > 0)
+                    reasoningText += textPart.slice(0, remaining)
+                if (textPart.length > remaining)
+                    reasoningTraceTruncated = true
+            }
+            break
+
+        case "reasoning_end":
+        case "response_start":
+            thinking = false
+            clearReasoningTrace()
             break
 
         case "chunk":
@@ -742,11 +761,11 @@ Scope {
             if (chunk.length === 0)
                 break
 
-            // The first visible response token marks the end of the hidden
-            // reasoning phase.
+            // The first final-answer token closes the temporary viewer.
             thinking = false
 
             if (currentAssistantIndex < 0) {
+                clearReasoningTrace()
                 messageModel.append({
                     role: "assistant",
                     text: "",
@@ -798,6 +817,7 @@ Scope {
             currentAssistantIndex = -1
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             busy = false
 
             streamUpdated()
@@ -806,6 +826,12 @@ Scope {
             break
 
         case "error":
+            // Roll back only an unconfirmed reasoning toggle. The backend
+            // remains the source of truth when it rejects a request.
+            if (pendingReasoningMode.length > 0) {
+                reasoningMode = activeReasoningMode
+                pendingReasoningMode = ""
+            }
             currentUserIndex = -1
             pendingImageCount = 0
             deletionPending = false
@@ -846,6 +872,7 @@ Scope {
             currentAssistantIndex = -1
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             busy = false
             if (selectionNewChatPending) {
                 selectionNewChatPending = false
@@ -897,11 +924,19 @@ Scope {
             currentAssistantIndex = -1
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             busy = false
             lastError = ""
             if (event.model !== undefined)
                 activeModel = String(event.model)
             _applyCapabilities(event.capabilities)
+            if (event.reasoning_supported !== undefined)
+                reasoningSupported = Boolean(event.reasoning_supported)
+            if (event.reasoning_mode !== undefined) {
+                activeReasoningMode = String(event.reasoning_mode)
+                reasoningMode = activeReasoningMode
+                pendingReasoningMode = ""
+            }
             currentUserIndex = -1
             sessionLoaded()
             streamUpdated()
@@ -914,6 +949,7 @@ Scope {
             currentUserIndex = -1
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             busy = false
             lastError = ""
             streamUpdated()
@@ -932,6 +968,7 @@ Scope {
             currentAssistantIndex = -1
             awaitingFirstChunk = false
             thinking = false
+            clearReasoningTrace()
             busy = false
             streamUpdated()
             break
@@ -960,8 +997,7 @@ Scope {
             + "printf 'custom|%s\\n' \"$(readv xavion-custom-gradient '#8B5CF6,#D946EF,#FB7185')\"; "
             + "printf 'tone|%s\\n' \"$(readv xavion-tone adaptive)\"; "
             + "printf 'mode|%s\\n' \"$(readv xavion-mode auto)\"; "
-            + "printf 'model|%s\\n' \"$(readv xavion-model '')\"; "
-            + "printf 'reasoning|%s\\n' \"$(readv xavion-reasoning off)\""
+            + "printf 'model|%s\\n' \"$(readv xavion-model '')\""
         ]
 
         stdout: SplitParser {
@@ -1000,11 +1036,6 @@ Scope {
                     service.intentMode = value
                 } else if (key === "model") {
                     service.selectedModel = value
-                } else if (key === "reasoning") {
-                    service.reasoningMode =
-                        value === "on"
-                        ? "on"
-                        : "off"
                 }
             }
         }
@@ -1013,7 +1044,6 @@ Scope {
             if (!running) {
                 service.settingsLoaded = true
                 service.applyModelPreference()
-                service.applyReasoningPreference()
             }
         }
     }
@@ -1036,10 +1066,6 @@ Scope {
 
     Process {
         id: modelSave
-    }
-
-    Process {
-        id: reasoningSave
     }
 
     // ============================================================
@@ -1084,8 +1110,12 @@ Scope {
             service.backendReady = false
             service.awaitingFirstChunk = false
             service.thinking = false
+            service.clearReasoningTrace()
             service.busy = false
             service.reasoningSupported = false
+            service.pendingReasoningMode = ""
+            service.requestReasoningEnabled = false
+            service.requestReasoningReason = ""
             service.modelCapabilities = ({})
             service.currentUserIndex = -1
             service.pendingImageCount = 0
