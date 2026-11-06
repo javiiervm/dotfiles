@@ -1021,73 +1021,101 @@ Item {
                         font.pixelSize: 15
                         font.bold: true
                     }
-                    Text {
-                        text: "Choose your message gradient — or create your own"
-                        color: Theme.grey1
-                        font.family: Theme.fontMain
-                        font.pixelSize: 12
-                    }
-
-                    // Flow, not Row: palettes wrap gracefully on narrow Launchers.
-                    Flow {
+                    // Balanced, responsive palette gallery.
+                    // Rows have almost the same number of tiles and each row is centered.
+                    // At standard Launcher widths, 14 gradients become two rows of seven.
+                    Column {
+                        id: gradientGallery
                         width: parent.width
-                        spacing: 10
-                        Repeater {
-                            model: root.service.gradientPresets.length
-                            Item {
-                                required property int index
-                                readonly property var preset: root.service.gradientPresets[index]
-                                width: 56
-                                height: 67
+                        spacing: 11
 
-                                Rectangle {
-                                    id: paletteTile
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: 48
-                                    height: 48
-                                    radius: 14
-                                    color: root.controlBackground
-                                    border.width: root.service.gradientIndex === index ? 2 : 1
-                                    border.color: root.service.gradientIndex === index
-                                                  ? root.accent : root.controlBorder
-                                    Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 30
-                                        height: 30
-                                        radius: 10
-                                        gradient: Gradient {
-                                            GradientStop { position: 0; color: preset.start }
-                                            GradientStop { position: 0.5; color: preset.mid }
-                                            GradientStop { position: 1; color: preset.end }
+                        readonly property int presetCount: root.service.gradientPresets.length
+                        readonly property int maxColumns: Math.max(1, Math.min(7, Math.floor(width / 84)))
+                        readonly property int rowCount: Math.max(1, Math.ceil(presetCount / maxColumns))
+                        readonly property int itemsPerRow: Math.floor(presetCount / rowCount)
+                        readonly property int extraItems: presetCount % rowCount
+                        readonly property real columnGap: Math.max(8, Math.min(14, width * 0.015))
+                        readonly property real cellWidth: (width - (maxColumns - 1) * columnGap) / maxColumns
+
+                        function rowSize(row) {
+                            return itemsPerRow + (row < extraItems ? 1 : 0)
+                        }
+
+                        function rowStart(row) {
+                            return row * itemsPerRow + Math.min(row, extraItems)
+                        }
+
+                        Repeater {
+                            model: gradientGallery.rowCount
+
+                            Row {
+                                id: paletteRow
+                                required property int index
+                                readonly property int firstPreset: gradientGallery.rowStart(index)
+
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                spacing: gradientGallery.columnGap
+
+                                Repeater {
+                                    model: gradientGallery.rowSize(paletteRow.index)
+
+                                    Item {
+                                        required property int index
+                                        readonly property int presetIndex: paletteRow.firstPreset + index
+                                        readonly property var preset: root.service.gradientPresets[presetIndex]
+                                        width: gradientGallery.cellWidth
+                                        height: 67
+
+                                        Rectangle {
+                                            id: paletteTile
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: 48
+                                            height: 48
+                                            radius: 14
+                                            color: root.controlBackground
+                                            border.width: root.service.gradientIndex === presetIndex ? 2 : 1
+                                            border.color: root.service.gradientIndex === presetIndex
+                                                          ? root.accent : root.controlBorder
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 30
+                                                height: 30
+                                                radius: 10
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0; color: preset.start }
+                                                    GradientStop { position: 0.5; color: preset.mid }
+                                                    GradientStop { position: 1; color: preset.end }
+                                                }
+                                                Text {
+                                                    visible: preset.name === "Custom"
+                                                    anchors.centerIn: parent
+                                                    text: "+"
+                                                    color: Theme.white
+                                                    font.family: Theme.fontMain
+                                                    font.pixelSize: 19
+                                                    font.bold: true
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.service.setGradient(presetIndex)
+                                            }
                                         }
                                         Text {
-                                            visible: preset.name === "Custom"
-                                            anchors.centerIn: parent
-                                            text: "+"
-                                            color: Theme.white
+                                            anchors.top: paletteTile.bottom
+                                            anchors.topMargin: 5
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            width: Math.max(60, Math.min(parent.width, 86))
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: preset.name
+                                            elide: Text.ElideRight
+                                            color: root.service.gradientIndex === presetIndex
+                                                   ? Theme.white : Theme.grey1
                                             font.family: Theme.fontMain
-                                            font.pixelSize: 19
-                                            font.bold: true
+                                            font.pixelSize: 9
                                         }
                                     }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.service.setGradient(index)
-                                    }
-                                }
-                                Text {
-                                    anchors.top: paletteTile.bottom
-                                    anchors.topMargin: 5
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    width: 60
-                                    horizontalAlignment: Text.AlignHCenter
-                                    text: preset.name
-                                    elide: Text.ElideRight
-                                    color: root.service.gradientIndex === index
-                                           ? Theme.white : Theme.grey1
-                                    font.family: Theme.fontMain
-                                    font.pixelSize: 9
                                 }
                             }
                         }
