@@ -16,11 +16,14 @@ Scope {
     property string lastError: ""
     property int currentAssistantIndex: -1
     property int currentUserIndex: -1
-    // Used only by the frontend's pre-token progress indicator.
+    // The bridge reports `thinking` only when the active model actually uses
+    // its enabled reasoning mode. Image analysis takes priority in the UI.
+    // Empty status means a normal pre-response wait: show only three dots.
     property int pendingImageCount: 0
     readonly property string pendingStatus:
         pendingImageCount > 1 ? "Analyzing images"
-        : pendingImageCount === 1 ? "Analyzing image" : "Thinking"
+        : pendingImageCount === 1 ? "Analyzing image"
+        : thinking ? "Thinking" : ""
 
     // Capabilities come from Ollama /api/show through Xavion's Python backend.
     // Do not guess from the model name.

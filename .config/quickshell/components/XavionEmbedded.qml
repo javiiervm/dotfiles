@@ -824,64 +824,117 @@ Item {
                     }
                 }
 
+                // Waiting for the first response token. Show an action label
+                // only for verified reasoning or attached image analysis.
+                // Otherwise the animated three dots are enough.
                 footer: Item {
                     width: messageList.width
                     height: root.service.awaitingFirstChunk ? 48 : 0
                     visible: root.service.awaitingFirstChunk
-                    RowLayout {
+
+                    Row {
+                        id: pendingIndicator
                         anchors.left: parent.left
                         anchors.leftMargin: 42
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: 10
+                        spacing: 0
 
-                        Rectangle {
-                            Layout.alignment: Qt.AlignVCenter
-                            width: 4
+                        readonly property string actionText: root.service.pendingStatus
+                        property real gradientPhase: 0
+
+                        // Cycle across start -> mid -> end -> mid -> start.
+                        // The first and last colors coincide, so the loop is
+                        // seamless, including for user-defined gradients.
+                        function blendColors(first, second, progress) {
+                            const t = Math.max(0, Math.min(1, progress))
+                            return Qt.rgba(
+                                first.r + (second.r - first.r) * t,
+                                first.g + (second.g - first.g) * t,
+                                first.b + (second.b - first.b) * t,
+                                first.a + (second.a - first.a) * t
+                            )
+                        }
+
+                        function waveColor(characterIndex, count) {
+                            const phase = (gradientPhase
+                                           + characterIndex / Math.max(count, 1) * 0.70) % 1
+                            const segment = phase * 4
+                            if (segment < 1)
+                                return blendColors(root.service.gradientStart,
+                                                   root.service.gradientMid, segment)
+                            if (segment < 2)
+                                return blendColors(root.service.gradientMid,
+                                                   root.service.gradientEnd, segment - 1)
+                            if (segment < 3)
+                                return blendColors(root.service.gradientEnd,
+                                                   root.service.gradientMid, segment - 2)
+                            return blendColors(root.service.gradientMid,
+                                               root.service.gradientStart, segment - 3)
+                        }
+
+                        NumberAnimation on gradientPhase {
+                            from: 0
+                            to: 1
+                            duration: 2500
+                            loops: Animation.Infinite
+                            running: root.service.awaitingFirstChunk
+                                     && pendingIndicator.actionText.length > 0
+                        }
+
+                        // A single gradient-animated action label, without
+                        // any vertical accent bar or trailing dots.
+                        Row {
                             height: 24
-                            radius: 2
-                            gradient: Gradient {
-                                GradientStop { position: 0; color: root.service.gradientStart }
-                                GradientStop { position: 0.5; color: root.service.gradientMid }
-                                GradientStop { position: 1; color: root.service.gradientEnd }
-                            }
-                            SequentialAnimation on opacity {
-                                running: root.service.awaitingFirstChunk
-                                loops: Animation.Infinite
-                                NumberAnimation { from: 0.38; to: 1; duration: 700 }
-                                NumberAnimation { from: 1; to: 0.38; duration: 700 }
+                            spacing: 0
+                            visible: pendingIndicator.actionText.length > 0
+
+                            Repeater {
+                                model: pendingIndicator.actionText.length
+                                Text {
+                                    required property int index
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: pendingIndicator.actionText.charAt(index)
+                                    color: pendingIndicator.waveColor(
+                                        index, pendingIndicator.actionText.length)
+                                    font.family: Theme.fontMain
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
                             }
                         }
-                        Text {
-                            Layout.alignment: Qt.AlignVCenter
-                            text: root.service.pendingStatus
-                            color: root.accent
-                            font.family: Theme.fontMain
-                            font.pixelSize: 13
-                            font.bold: true
-                        }
-                        Repeater {
-                            model: 3
-                            Rectangle {
-                                required property int index
-                                Layout.alignment: Qt.AlignVCenter
-                                width: 5
-                                height: 5
-                                radius: 3
-                                color: index === 0 ? root.service.gradientStart
-                                      : index === 1 ? root.service.gradientMid
-                                      : root.service.gradientEnd
-                                SequentialAnimation on opacity {
-                                    running: root.service.awaitingFirstChunk
-                                    loops: Animation.Infinite
-                                    PauseAnimation { duration: index * 135 }
-                                    NumberAnimation { from: 0.28; to: 1; duration: 270 }
-                                    NumberAnimation { from: 1; to: 0.28; duration: 270 }
+
+                        // Default wait: no action-specific text, only dots.
+                        Row {
+                            height: 24
+                            spacing: 8
+                            visible: pendingIndicator.actionText.length === 0
+
+                            Repeater {
+                                model: 3
+                                Rectangle {
+                                    required property int index
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: index === 0 ? root.service.gradientStart
+                                          : index === 1 ? root.service.gradientMid
+                                          : root.service.gradientEnd
+                                    SequentialAnimation on opacity {
+                                        running: root.service.awaitingFirstChunk
+                                                 && pendingIndicator.actionText.length === 0
+                                        loops: Animation.Infinite
+                                        PauseAnimation { duration: index * 135 }
+                                        NumberAnimation { from: 0.28; to: 1; duration: 270 }
+                                        NumberAnimation { from: 1; to: 0.28; duration: 270 }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+
 
             // Visible only after the reader has scrolled away from new tokens.
             Rectangle {
