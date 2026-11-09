@@ -88,7 +88,7 @@ def resolve_local_file(value):
     except (OSError, RuntimeError) as exc:
         raise BlipError("The selected file no longer exists.") from exc
     if not path.is_file():
-        raise BlipError("Select a regular file, not a folder.")
+        raise BlipError("Select regular files, not folders.")
     return path
 
 
@@ -98,45 +98,61 @@ def list_devices():
     respond(ok=True, devices=remote_devices(data, own_id))
 
 
-def send_file(device_id, file_url):
+def send_files(device_id, file_urls):
     if not UUID_PATTERN.fullmatch(device_id):
         raise BlipError("Invalid destination device.")
+    if not file_urls:
+        raise BlipError("Select at least one file.")
+
     data = read_state()
     user_id, own_id = local_identity(data)
     devices = remote_devices(data, own_id)
     target = next((d for d in devices if d["id"] == device_id.lower()), None)
     if target is None:
         raise BlipError("Destination device is no longer in Blip's local state.")
-    file_path = resolve_local_file(file_url)
-    try:
-        result = subprocess.run(
-            ["blip", f"--peer={user_id}:{target['id']}", f"--file={file_path}"],
-            capture_output=True,
-            timeout=25,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise BlipError("Blip is not installed or is missing from PATH.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise BlipError("Blip did not respond within 25 seconds.") from exc
-    if result.returncode != 0:
-        raise BlipError("Blip rejected the transfer command.")
-    respond(ok=True, status="dispatched", device=target["name"])
+
+    # Validate every file before starting any transfer to avoid predictable
+    # partial batches when one of the dropped paths no longer exists.
+    paths = [resolve_local_file(file_url) for file_url in file_urls]
+    total = len(paths)
+    for index, file_path in enumerate(paths, start=1):
+        try:
+            result = subprocess.run(
+                ["blip", f"--peer={user_id}:{target['id']}", f"--file={file_path}"],
+                capture_output=True,
+                timeout=25,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise BlipError("Blip is not installed or is missing from PATH.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise BlipError(
+                f"Blip did not respond for file {index}/{total}; "
+                f"{index - 1} request(s) were sent."
+            ) from exc
+        if result.returncode != 0:
+            raise BlipError(
+                f"Blip rejected file {index}/{total}; "
+                f"{index - 1} request(s) were sent."
+            )
+        respond(ok=True, status="progress", completed=index, total=total)
+
+    respond(ok=True, status="dispatched", device=target["name"], count=total)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("list", help="List device records cached by Blip")
-    send = sub.add_parser("send", help="Request a file transfer")
+    send = sub.add_parser("send", help="Request one or more file transfers")
     send.add_argument("device_id", help="Target device UUID")
-    send.add_argument("file_url", help="Local file path or file:// URL")
+    send.add_argument("file_urls", nargs="+", help="Local file paths or file:// URLs")
     args = parser.parse_args()
     try:
         if args.action == "list":
             list_devices()
         else:
-            send_file(args.device_id, args.file_url)
+            send_files(args.device_id, args.file_urls)
     except BlipError as exc:
         respond(ok=False, error=str(exc))
         return 1

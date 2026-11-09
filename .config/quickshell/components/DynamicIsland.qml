@@ -68,13 +68,17 @@ PanelWindow {
     property string blipMessage: ""
 
     function blipFileLabel() {
-        if (blipFileUrls.length !== 1)
-            return "No file selected"
-        var url = String(blipFileUrls[0])
+        if (blipFileUrls.length === 0)
+            return "No file selected";
+
+        if (blipFileUrls.length > 1)
+            return blipFileUrls.length + " files selected";
+
+        var url = String(blipFileUrls[0]);
         try {
-            return decodeURIComponent(url.substring(url.lastIndexOf("/") + 1))
+            return decodeURIComponent(url.substring(url.lastIndexOf("/") + 1));
         } catch (e) {
-            return url.substring(url.lastIndexOf("/") + 1)
+            return url.substring(url.lastIndexOf("/") + 1);
         }
     }
 
@@ -93,37 +97,46 @@ PanelWindow {
     }
 
     function acceptBlipDrop(urls) {
-        blipDragHover = false
-        blipMode = true
-        blipDispatched = false
-        blipFailed = false
-        blipDevices = []
-        blipFileUrls = urls
+        blipDragHover = false;
+        blipMode = true;
+        blipDispatched = false;
+        blipFailed = false;
+        blipDevices = [];
+        blipFileUrls = urls;
 
-        if (urls.length !== 1) {
-            blipMessage = "Drop one local file at a time"
-            blipFailed = true
-            return
+        if (!urls || urls.length === 0) {
+            blipMessage = "Drop at least one local file";
+            blipFailed = true;
+            return;
         }
 
-        blipMessage = "Reading saved devices..."
-        blipLoading = true
+        blipMessage = "Reading saved devices...";
+        blipLoading = true;
         if (!blipDeviceProc.running)
-            blipDeviceProc.running = true
+            blipDeviceProc.running = true;
     }
 
     function sendBlipTo(deviceId) {
-        if (blipSending || blipLoading || blipFileUrls.length !== 1)
-            return
-        blipSending = true
-        blipDispatched = false
-        blipFailed = false
-        blipMessage = "Requesting transfer..."
-        blipSendProc.command = [
-            "python3", Quickshell.shellDir + "/scripts/blip_island.py",
-            "send", deviceId, String(blipFileUrls[0])
-        ]
-        blipSendProc.running = true
+        if (blipSending || blipLoading || blipFileUrls.length === 0)
+            return;
+
+        blipSending = true;
+        blipDispatched = false;
+        blipFailed = false;
+        blipMessage = "Requesting transfers...";
+
+        var args = [
+            "python3",
+            Quickshell.shellDir + "/scripts/blip_island.py",
+            "send",
+            deviceId
+        ];
+
+        for (var i = 0; i < blipFileUrls.length; i++)
+            args.push(String(blipFileUrls[i]));
+
+        blipSendProc.command = args;
+        blipSendProc.running = true;
     }
 
     Process {
@@ -160,21 +173,29 @@ PanelWindow {
 
     Process {
         id: blipSendProc
-        running: false
+        running: false        
         stdout: SplitParser {
             onRead: function(line) {
                 try {
-                    var result = JSON.parse(line.trim())
-                    if (result.ok && result.status === "dispatched") {
-                        islandWindow.blipDispatched = true
-                        islandWindow.blipMessage = "Sent request to " + result.device
+                    var result = JSON.parse(line.trim());
+
+                    if (result.ok && result.status === "progress") {
+                        islandWindow.blipMessage =
+                            "Requested " + result.completed +
+                            "/" + result.total + " files";
+                    } else if (result.ok && result.status === "dispatched") {
+                        islandWindow.blipDispatched = true;
+                        islandWindow.blipMessage =
+                            result.count + " transfer requests sent to " +
+                            result.device;
                     } else {
-                        islandWindow.blipFailed = true
-                        islandWindow.blipMessage = result.error || "Blip could not start the transfer"
+                        islandWindow.blipFailed = true;
+                        islandWindow.blipMessage =
+                            result.error || "Blip could not start the transfers";
                     }
                 } catch (e) {
-                    islandWindow.blipFailed = true
-                    islandWindow.blipMessage = "Invalid response from Blip adapter"
+                    islandWindow.blipFailed = true;
+                    islandWindow.blipMessage = "Invalid response from Blip adapter";
                 }
             }
         }
