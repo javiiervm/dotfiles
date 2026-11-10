@@ -25,6 +25,7 @@ set -u
 DISPLAY_SYNC="$HOME/.config/hypr/scripts/display_power_profile.sh"
 
 LAST_STATE=""
+LAST_DISPLAY_PROFILE=""
 
 
 # ============================================================
@@ -51,12 +52,24 @@ get_power_state() {
 
 
 sync_display() {
-    local profile
+    local profile="${1:-}"
 
-    profile="$(powerprofilesctl get 2>/dev/null || echo balanced)"
+    # For D-Bus events, read the actual profile. For power-source changes,
+    # handle_power() already knows the target and passes it directly.
+    if [ -z "$profile" ]; then
+        profile="$(powerprofilesctl get 2>/dev/null || echo balanced)"
+    fi
+
+    # A powerprofilesctl set from handle_power() also emits a D-Bus event.
+    # Avoid invoking the monitor controller twice for the same profile.
+    if [ "$profile" = "$LAST_DISPLAY_PROFILE" ]; then
+        return
+    fi
 
     if [ -x "$DISPLAY_SYNC" ]; then
-        "$DISPLAY_SYNC" "$profile"
+        if "$DISPLAY_SYNC" "$profile"; then
+            LAST_DISPLAY_PROFILE="$profile"
+        fi
     fi
 }
 
@@ -89,9 +102,9 @@ handle_power() {
         powerprofilesctl set "$target_profile"
     fi
 
-    if [ -x "$DISPLAY_SYNC" ]; then
-        "$DISPLAY_SYNC" "$target_profile"
-    fi
+    # This also caches the profile, so the resulting D-Bus notification
+    # does not repeat the same display check.
+    sync_display "$target_profile"
 
     LAST_STATE="$current_state"
 }
