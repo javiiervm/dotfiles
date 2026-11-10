@@ -13,6 +13,7 @@ exec 3<> "$FIFO"
 CAP=100; STAT="Unknown"; VOL=0; MUTE="false"; SINK_DESC="Speakers"
 SSID="Disconnected"; SIGNAL="0"; FREQ="0"; BT_STAT="off"; BT_DEV="None"
 PERF="balanced"; DND="false"; COUNT="0"; AC_ONLINE=0
+TICK_COUNT=0
 
 BAT_PATH=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -n 1)
 
@@ -134,8 +135,10 @@ emit_state
 # automatic power_mode.sh changes and manual button changes appear immediately.
 ( dbus-monitor --system "type='signal',interface='org.freedesktop.DBus.Properties',path='/net/hadess/PowerProfiles'" 2>/dev/null | grep --line-buffered "PropertiesChanged" | while read -r _; do echo "PERF" >&3; done ) &
 
-# 6. Latido de respaldo (existing behaviour).
-# Se conserva el chequeo silencioso cada 30 segundos del backend original.
+# 6. Latido de respaldo.
+# Batería, cargador y señal Wi-Fi siguen actualizándose cada 30 s.
+# Bluetooth y perfil energético se revalidan cada 10 ticks (5 min),
+# ya que sus monitores de eventos proporcionan actualizaciones inmediatas.
 ( while true; do sleep 30; echo "TICK" >&3; done ) &
 
 # Limpiamos todos los subprocesos de fondo y el FIFO si se cierra Quickshell.
@@ -151,7 +154,16 @@ while read -r event <&3; do
         "BT")   update_bt ;;
         "BAT")  update_bat; update_ac ;;
         "PERF") update_perf ;;
-        "TICK") update_bat; update_ac; update_net; update_bt; update_perf ;;
+        "TICK")
+            update_bat
+            update_ac
+            update_net
+            TICK_COUNT=$((TICK_COUNT + 1))
+            if (( TICK_COUNT % 10 == 0 )); then
+                update_bt
+                update_perf
+            fi
+            ;;
     esac
 
     emit_state
