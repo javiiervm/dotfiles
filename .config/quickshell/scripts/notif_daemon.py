@@ -13,6 +13,8 @@ from PIL import Image
 DBusGMainLoop(set_as_default=True)
 
 DND_STATE_FILE = "/tmp/qs_dnd_state"
+# Keep a bounded pending-notification history. Newest entries are kept first.
+MAX_NOTIFICATIONS = 100
 
 class NotificationServer(dbus.service.Object):
     def __init__(self):
@@ -29,6 +31,7 @@ class NotificationServer(dbus.service.Object):
         except Exception:
             self.dnd = False
         self.next_id = 1
+        self.write_dnd_state()
         self.emit_state()
 
     def safe_print(self, msg):
@@ -36,6 +39,17 @@ class NotificationServer(dbus.service.Object):
             print(msg, flush=True)
         except BrokenPipeError:
             os._exit(0)
+
+    @staticmethod
+    def cleanup_cached_icon(notification):
+        """Delete only temporary image-data icons created by this daemon."""
+        expected = f"/tmp/qs_notif_icon_{notification['id']}.png"
+        if notification.get("icon") != expected:
+            return
+        try:
+            os.remove(expected)
+        except OSError:
+            pass
 
     @dbus.service.signal('org.freedesktop.Notifications', signature='us')
     def ActionInvoked(self, id, action_key):
@@ -89,9 +103,20 @@ class NotificationServer(dbus.service.Object):
 
         existing = next((i for i, n in enumerate(self.notifications) if n["id"] == notif_id), -1)
         if existing >= 0:
+            previous = self.notifications[existing]
+            if previous["icon"] != notif["icon"]:
+                self.cleanup_cached_icon(previous)
             self.notifications[existing] = notif
         else:
             self.notifications.insert(0, notif)
+
+        # Bound RAM, serialized STATE payloads and the QML ListModel.
+        # When the limit is reached, discard the oldest pending entry.
+        if len(self.notifications) > MAX_NOTIFICATIONS:
+            expired = self.notifications[MAX_NOTIFICATIONS:]
+            del self.notifications[MAX_NOTIFICATIONS:]
+            for old in expired:
+                self.cleanup_cached_icon(old)
 
         self.emit_state()
 
@@ -121,7 +146,12 @@ class NotificationServer(dbus.service.Object):
         pass
 
     def remove_notif(self, nid):
+        removed = [n for n in self.notifications if n["id"] == nid]
+        if not removed:
+            return
         self.notifications = [n for n in self.notifications if n["id"] != nid]
+        for notif in removed:
+            self.cleanup_cached_icon(notif)
         self.emit_state()
 
     def write_dnd_state(self):
@@ -134,7 +164,6 @@ class NotificationServer(dbus.service.Object):
             pass
 
     def emit_state(self):
-        self.write_dnd_state()
         state = {
             "dnd": self.dnd,
             "count": len(self.notifications),
@@ -143,13 +172,17 @@ class NotificationServer(dbus.service.Object):
         self.safe_print(f"STATE|{json.dumps(state)}")
 
     def clear_all(self):
+        old_notifications = self.notifications
         self.notifications = []
+        for notif in old_notifications:
+            self.cleanup_cached_icon(notif)
         self.emit_state()
 
     def set_dnd(self, enabled):
         enabled = bool(enabled)
         if self.dnd != enabled:
             self.dnd = enabled
+            self.write_dnd_state()
         self.emit_state()
 
     def toggle_dnd(self):
