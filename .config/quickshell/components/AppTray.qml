@@ -20,30 +20,48 @@ Item {
     // Proceso auxiliar para matar aplicaciones
     Process { id: killProc }
 
-    // --- MONITOR DE PROCESOS (Eficiente y Confiable) ---
-    // pidof es rapidísimo. Un sleep de 3s aquí no despertará los núcleos pesados de la CPU.
+    // --- MONITOR DE APLICACIONES ---
+    // Una única consulta a /proc por ciclo, sin shell persistente.
     Process {
         id: processMonitor
+
         command: [
-            "bash", "-c", 
-            "while true; do " +
-            "  s=$(pidof spotify >/dev/null && echo 1 || echo 0); " +
-            "  d=$( (pidof Discord || pidof discord || pidof DiscordCore || pidof vesktop) >/dev/null && echo 1 || echo 0); " +
-            "  o=$(pidof obs >/dev/null && echo 1 || echo 0); " +
-            "  echo \"$s;$d;$o\"; " +
-            "  sleep 3; " +
-            "done"
+            "pgrep", "-l", "-x",
+            "spotify|Discord|discord|DiscordCore|vesktop|obs"
         ]
+
+        // Primera comprobación inmediata al iniciar Quickshell.
         running: true
-        stdout: SplitParser {
-            onRead: (line) => {
-                var parts = line.trim().split(";");
-                if (parts.length >= 3) {
-                    trayRoot.appSpotify = parts[0] === "1";
-                    trayRoot.appDiscord = parts[1] === "1";
-                    trayRoot.appObs     = parts[2] === "1";
-                }
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const names = this.text.trim()
+                    .split("\n")
+                    .map(line => line.replace(/^\d+\s+/, "").trim());
+
+                trayRoot.appSpotify = names.includes("spotify");
+
+                trayRoot.appDiscord =
+                    names.includes("Discord") ||
+                    names.includes("discord") ||
+                    names.includes("DiscordCore") ||
+                    names.includes("vesktop");
+
+                trayRoot.appObs = names.includes("obs");
             }
+        }
+    }
+
+    // Comprobaciones periódicas sin mantener Bash ejecutándose.
+    Timer {
+        id: processMonitorTimer
+        interval: 5000
+        running: true
+        repeat: true
+
+        onTriggered: {
+            if (!processMonitor.running)
+                processMonitor.running = true;
         }
     }
 
