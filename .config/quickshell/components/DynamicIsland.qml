@@ -1383,8 +1383,23 @@ PanelWindow {
         command: [
             "bash", "-c",
             "LC_ALL=C; " +
+            
             "prev_total=0; prev_idle=0; prev_rx=0; tick=0; gu=0; gt=0; st_free=0; st_total=0; " +
+
+            // Identificar la GPU NVIDIA una sola vez.
+            "nvidia_dev=''; " +
+            "for d in /sys/bus/pci/devices/*; do " +
+            "  [ -r \"$d/vendor\" ] && [ -r \"$d/class\" ] || continue; " +
+            "  read -r vendor < \"$d/vendor\"; " +
+            "  read -r class < \"$d/class\"; " +
+            "  [ \"$vendor\" = '0x10de' ] || continue; " +
+            "  case \"$class\" in " +
+            "    0x030000|0x030200) nvidia_dev=\"$d\"; break ;; " +
+            "  esac; " +
+            "done; " +
+
             "while true; do " +
+
             "  tick=$((tick+1)); " +
             // CPU usage from /proc/stat, no top/awk.
             "  read _ user nice system idle iowait irq softirq steal _ < /proc/stat; " +
@@ -1401,8 +1416,34 @@ PanelWindow {
             "  if [ $prev_rx -gt 0 ] && [ $rx -ge $prev_rx ]; then dl=$((rx-prev_rx)); else dl=0; fi; prev_rx=$rx; " +
             // System load and uptime from procfs.
             "  read load1 _ < /proc/loadavg; read up _ < /proc/uptime; up=${up%%.*}; " +
-            // dGPU: one nvidia-smi every 2 seconds, and only while this Process exists.
-            "  if [ $((tick%2)) -eq 1 ]; then gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits 2>/dev/null); if [ -n \"$gpu_info\" ]; then IFS=',' read -r gu gt <<< \"$gpu_info\"; gu=${gu// /}; gt=${gt// /}; else gu=0; gt=0; fi; fi; " +
+            
+            // dGPU: consultar NVIDIA solo si ya está activa.
+            // No despertarla únicamente para mostrar estadísticas.
+            "  if [ $((tick%2)) -eq 1 ]; then " +
+            "    gu=0; gt=0; " +
+
+            "    if [ -n \"$nvidia_dev\" ] && " +
+            "       [ -r \"$nvidia_dev/power/runtime_status\" ]; then " +
+
+            "      read -r gpu_runtime < \"$nvidia_dev/power/runtime_status\"; " +
+
+            "      case \"$gpu_runtime\" in " +
+            "        active|unsupported) " +
+
+            "          gpu_info=$(nvidia-smi " +
+            "--query-gpu=utilization.gpu,temperature.gpu " +
+            "--format=csv,noheader,nounits 2>/dev/null); " +
+
+            "          if [ -n \"$gpu_info\" ]; then " +
+            "            IFS=',' read -r gu gt <<< \"$gpu_info\"; " +
+            "            gu=${gu// /}; gt=${gt// /}; " +
+            "          fi; " +
+
+            "          ;; " +
+            "      esac; " +
+            "    fi; " +
+            "  fi; " +
+
             // Storage changes slowly; refresh every 5 seconds instead of every frame.
             "  if [ $tick -eq 1 ] || [ $((tick%5)) -eq 0 ]; then while read a b; do [ \"$a\" = \"Size\" ] && continue; st_total=${a%G}; st_free=${b%G}; done < <(df -BG --output=size,avail / 2>/dev/null); st_total=${st_total:-0}; st_free=${st_free:-0}; fi; " +
             "  echo \"${cu:-0};${ct:-0};${gu:-0};${gt:-0};${mu:-0};${mt:-1};${rp:-0};${dl:-0};${st_free:-0};${st_total:-0};${load1:-0};${up:-0}\"; " +
