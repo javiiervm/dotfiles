@@ -46,6 +46,7 @@ ShellRoot {
     property int vol: 0
     property bool volMute: false
     property string volDesc: ""
+    property bool audioStateReady: false
     property string wifiSsid: ""
     property bool wifiRadioEnabled: false
     property string wifiSig: ""
@@ -661,6 +662,7 @@ ShellRoot {
                     root.cpuUsage = parseInt(fields[13]) || 0
                     root.memUsage = parseInt(fields[14]) || 0
                     root.onAcPower = (fields[15].trim() === "1")
+                    root.audioStateReady = true
                 }
             }
         }
@@ -1354,6 +1356,11 @@ ShellRoot {
             // Estado compartido de batería: sin monitor propio.
             batCap: root.batCap
             batStatus: root.batStat
+
+            // Estado compartido de audio.
+            audioVolume: root.vol / 100.0
+            audioMuted: root.volMute
+            audioReady: root.audioStateReady
 
             // Notifications are now a native optional DynamicIsland tab.
             // DynamicIsland owns the carousel, hover lifecycle and closing

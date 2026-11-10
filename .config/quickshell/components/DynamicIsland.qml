@@ -1065,50 +1065,150 @@ PanelWindow {
         notifQueue.push({ "icon": icon, "text": text, "progress": 0, "muted": false, "color": customColor ? customColor : Theme.white });
         processQueue();
     }
+    
+    // =========================================================
+    // MOTORES DE EVENTOS Y MONITORIZACIÓN
+    // =========================================================
 
-    // =========================================================
-    // MOTORES DE EVENTOS Y MONITORIZACIÓN (0% CPU BACKGROUND)
-    // =========================================================
+    // Volumen compartido desde shell.qml.
+    property real audioVolume: 0.0
+    property bool audioMuted: false
+    property bool audioReady: false
+
     property real lastVol: 0
     property bool lastVolMuted: false
+    property bool firstVolumeReadComplete: false
+
+    // Micrófono y brillo.
     property real lastBri: 0
     property real lastMic: 0
     property bool lastMicMuted: false
     property bool firstReadComplete: false
 
-    // 1. EVENTOS OSD (Volumen, Micrófono, Brillo, y punto indicador de Micro activo)
+    // 1. OSD de volumen mediante el backend compartido.
+    function checkVolumeOsd() {
+        if (!audioReady)
+            return;
+
+        var volume = Math.max(0, Number(audioVolume) || 0);
+        var muted = audioMuted;
+
+        if (firstVolumeReadComplete &&
+            (Math.abs(volume - lastVol) > 0.005 ||
+             muted !== lastVolMuted)) {
+
+            triggerProgressNotification(
+                muted ? "󰝟" : "󰕾",
+                volume,
+                muted,
+                null
+            );
+        }
+
+        lastVol = volume;
+        lastVolMuted = muted;
+        firstVolumeReadComplete = true;
+    }
+
+    // Agrupar los cambios de volumen y mute del mismo evento.
+    onAudioVolumeChanged:
+        Qt.callLater(islandWindow.checkVolumeOsd)
+
+    onAudioMutedChanged:
+        Qt.callLater(islandWindow.checkVolumeOsd)
+
+    onAudioReadyChanged:
+        Qt.callLater(islandWindow.checkVolumeOsd)
+
+    Component.onCompleted:
+        Qt.callLater(islandWindow.checkVolumeOsd)
+
+    // 2. Monitor de micrófono y brillo.
+    // Ya no escucha eventos de los altavoces.
     Process {
         id: osdEventProc
+
         command: [
             "bash", "-c",
-            "LC_ALL=C; F=/tmp/qs_osd_fifo; rm -f $F; mkfifo $F; exec 3<> $F; " +
-            "pactl subscribe 2>/dev/null | grep --line-buffered -E '(sink|source)' | while read -r _; do echo 'SND' >&3; done & " +
-            "udevadm monitor --subsystem-match=backlight 2>/dev/null | grep --line-buffered 'change' | while read -r _; do echo 'BRI' >&3; done & " +
-            "trap 'kill $(jobs -p) 2>/dev/null; rm -f $F' EXIT; " +
+            "LC_ALL=C; F=/tmp/qs_osd_fifo; " +
+            "rm -f \"$F\"; mkfifo \"$F\"; exec 3<> \"$F\"; " +
+
+            "pactl subscribe 2>/dev/null | " +
+            "grep --line-buffered 'source' | " +
+            "while read -r _; do echo 'MIC' >&3; done & " +
+
+            "udevadm monitor --subsystem-match=backlight " +
+            "2>/dev/null | " +
+            "grep --line-buffered 'change' | " +
+            "while read -r _; do echo 'BRI' >&3; done & " +
+
+            "trap 'kill $(jobs -p) 2>/dev/null; " +
+            "rm -f \"$F\"' EXIT; " +
+
             "check_osd() { " +
-            "  vf=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo '0 0'); vol=${vf#* }; vol=${vol% \\[MUTED\\]}; [[ \"$vf\" == *MUTED* ]] && vm=1 || vm=0; " +
-            "  mf=$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || echo '0 0'); mic=${mf#* }; mic=${mic% \\[MUTED\\]}; [[ \"$mf\" == *MUTED* ]] && mm=1 || mm=0; " +
-            "  b_raw=$(brightnessctl -m 2>/dev/null || echo '0,0,0,0%'); IFS=, read -r c d v p m <<< \"$b_raw\"; bri=${p%%%}; " +
-            "  mic_active=$(pactl list source-outputs 2>/dev/null | awk 'tolower($0)~/application\\.name =/ && tolower($0)!~/cava/ {c++} END {print c+0}'); " +
-            "  echo \"$vol;$vm;$mic;$mm;$bri;$mic_active\"; " +
-            "}; check_osd; while read -r _ <&3; do check_osd; done"
+
+            "  mf=$(wpctl get-volume " +
+            "@DEFAULT_AUDIO_SOURCE@ 2>/dev/null " +
+            "|| echo 'Volume: 0.00'); " +
+
+            "  mic=${mf#* }; " +
+            "  mic=${mic% \\[MUTED\\]}; " +
+            "  [[ \"$mf\" == *MUTED* ]] && mm=1 || mm=0; " +
+
+            "  b_raw=$(brightnessctl -m 2>/dev/null " +
+            "|| echo '0,0,0,0%'); " +
+            "  IFS=, read -r c d v p m <<< \"$b_raw\"; " +
+            "  bri=${p%%%}; " +
+
+            "  mic_active=$(pactl list source-outputs " +
+            "2>/dev/null | awk " +
+            "'tolower($0)~/application\\.name =/ " +
+            "&& tolower($0)!~/cava/ {c++} " +
+            "END {print c+0}'); " +
+
+            "  echo \"$mic;$mm;$bri;$mic_active\"; " +
+
+            "}; " +
+
+            "check_osd; " +
+            "while read -r _ <&3; do check_osd; done"
         ]
+
         running: true
+
         stdout: SplitParser {
             onRead: function(data) {
                 var p = data.trim().split(";");
-                if (p.length >= 6) {
-                    var v = parseFloat(p[0]) || 0; var vm = p[1] === "1";
-                    var m = parseFloat(p[2]) || 0; var mm = p[3] === "1";
-                    var b = (parseFloat(p[4]) || 0) / 100;
-                    globalMicActive = parseInt(p[5]) > 0;
+
+                if (p.length >= 4) {
+                    var mic = parseFloat(p[0]) || 0;
+                    var micMuted = p[1] === "1";
+                    var brightness =
+                        (parseFloat(p[2]) || 0) / 100;
+
+                    globalMicActive = parseInt(p[3]) > 0;
 
                     if (firstReadComplete) {
-                        if (Math.abs(v - lastVol) > 0.005 || vm !== lastVolMuted) triggerProgressNotification(vm ? "󰝟" : "󰕾", v, vm, null);
-                        else if (Math.abs(b - lastBri) > 0.005) triggerProgressNotification("󰃠", b, false, null);
-                        else if (Math.abs(m - lastMic) > 0.005 || mm !== lastMicMuted) triggerProgressNotification(mm ? "󰍭" : "󰍬", m, mm, null);
+                        if (Math.abs(brightness - lastBri) > 0.005) {
+                            triggerProgressNotification(
+                                "󰃠", brightness, false, null
+                            );
+                        } else if (
+                            Math.abs(mic - lastMic) > 0.005 ||
+                            micMuted !== lastMicMuted
+                        ) {
+                            triggerProgressNotification(
+                                micMuted ? "󰍭" : "󰍬",
+                                mic,
+                                micMuted,
+                                null
+                            );
+                        }
                     }
-                    lastVol = v; lastVolMuted = vm; lastBri = b; lastMic = m; lastMicMuted = mm;
+
+                    lastBri = brightness;
+                    lastMic = mic;
+                    lastMicMuted = micMuted;
                     firstReadComplete = true;
                 }
             }
