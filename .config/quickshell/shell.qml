@@ -1351,6 +1351,10 @@ ShellRoot {
         DynamicIsland {
             id: islandWidget
 
+            // Estado compartido de batería: sin monitor propio.
+            batCap: root.batCap
+            batStatus: root.batStat
+
             // Notifications are now a native optional DynamicIsland tab.
             // DynamicIsland owns the carousel, hover lifecycle and closing
             // behaviour; shell.qml only supplies the shared data/actions.

@@ -1115,55 +1115,65 @@ PanelWindow {
         }
     }
 
-    // 2. EVENTOS DE BATERÍA
+    // 2. ESTADO DE BATERÍA COMPARTIDO
+    // Los datos llegan desde shell.qml, que ya utiliza
+    // backend_daemon.sh para monitorizar power_supply.
     property real batCap: 100
     property string batStatus: "Unknown"
+
     property string lastBatStat: ""
     property bool lowBatNotified: false
     property bool fullBatNotified: false
 
-    Process {
-        id: batEventProc
-        command: [
-            "bash", "-c",
-            "F=/tmp/qs_bat_fifo; rm -f $F; mkfifo $F; exec 3<> $F; " +
-            "udevadm monitor --subsystem-match=power_supply 2>/dev/null | grep --line-buffered 'change' | while read -r _; do echo 'BAT' >&3; done & " +
-            "trap 'kill $(jobs -p) 2>/dev/null; rm -f $F' EXIT; " +
-            "check_bat() { " +
-            "  read cap < /sys/class/power_supply/BAT*/capacity 2>/dev/null || cap=100; " +
-            "  read stat < /sys/class/power_supply/BAT*/status 2>/dev/null || stat=\"Unknown\"; " +
-            "  echo \"$cap;$stat\"; " +
-            // Comprobación híbrida: reaccionamos inmediatamente a eventos udev,
-            // pero como algunos drivers no emiten un evento al cambiar solo el
-            // porcentaje, despertamos este MISMO bash cada 30 s como respaldo.
-            // `read -t` es un builtin de bash: no crea procesos periódicos extra.
-            "}; check_bat; while true; do read -r -t 30 _ <&3 || true; check_bat; done"
-        ]
-        running: true
-        stdout: SplitParser {
-            onRead: function(data) {
-                var p = data.trim().split(";");
-                if (p.length >= 2) {
-                    batCap = parseFloat(p[0]) || 100;
-                    batStatus = p[1].trim();
+    function checkBatteryAlerts() {
+        // Evitar alertas durante la inicialización del backend.
+        if (batStatus === "" || batStatus === "Unknown")
+            return;
 
-                    if (lastBatStat !== "" && batStatus !== lastBatStat) {
-                        if (batStatus === "Charging" || batStatus === "Full") triggerTextNotification("󱐋", "Power connected", "#30d158");
-                        else if (batStatus === "Discharging") triggerTextNotification("󱐋", "Power disconnected", "white");
-                    }
-                    lastBatStat = batStatus;
-                    
-                    if (batCap <= 20 && batStatus === "Discharging") {
-                        if (!lowBatNotified) { triggerTextNotification("󰂃", "Low battery, please charge", "#ff3b30"); lowBatNotified = true; }
-                    } else lowBatNotified = false;
-
-                    if (batCap >= 85 && batStatus === "Charging") {
-                        if (!fullBatNotified) { triggerTextNotification("󰂄", "Battery charged (85%)", "#30d158"); fullBatNotified = true; }
-                    } else fullBatNotified = false;
-                }
+        // Notificaciones de conexión y desconexión.
+        if (lastBatStat !== "" && batStatus !== lastBatStat) {
+            if (batStatus === "Charging" || batStatus === "Full") {
+                triggerTextNotification(
+                    "󱐋", "Power connected", "#30d158"
+                );
+            } else if (batStatus === "Discharging") {
+                triggerTextNotification(
+                    "󱐋", "Power disconnected", "white"
+                );
             }
         }
+
+        lastBatStat = batStatus;
+
+        // Aviso de batería baja.
+        if (batCap <= 20 && batStatus === "Discharging") {
+            if (!lowBatNotified) {
+                triggerTextNotification(
+                    "󰂃", "Low battery, please charge", "#ff3b30"
+                );
+                lowBatNotified = true;
+            }
+        } else {
+            lowBatNotified = false;
+        }
+
+        // Aviso de carga al 85%.
+        if (batCap >= 85 && batStatus === "Charging") {
+            if (!fullBatNotified) {
+                triggerTextNotification(
+                    "󰂄", "Battery charged (85%)", "#30d158"
+                );
+                fullBatNotified = true;
+            }
+        } else {
+            fullBatNotified = false;
+        }
     }
+
+    // Evaluar las propiedades juntas cuando se actualicen,
+    // evitando procesar estados parcialmente actualizados.
+    onBatCapChanged: Qt.callLater(checkBatteryAlerts)
+    onBatStatusChanged: Qt.callLater(checkBatteryAlerts)
 
     // 3. EVENTOS DE CÁMARA (Shutter)
     Process {
