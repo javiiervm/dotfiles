@@ -110,8 +110,7 @@ ShellRoot {
     }
 
     // --- ESTADOS PARA CAVA VISUALIZER ---
-    property bool isPlayingMedia: false
-
+    
     // Native, reactive Hyprland state.
     // No bash/socat/hyprctl watcher is needed.
     readonly property bool isWorkspaceEmpty:
@@ -445,24 +444,6 @@ ShellRoot {
     }
 
     // --- MONITOR DE MEDIOS ---
-    Process {
-        id: mediaMonitorProc
-        command: [
-            "bash", "-c",
-            "playerctl status --follow 2>/dev/null | while read -r status; do " +
-            "  if [ \"$status\" = \"Playing\" ]; then echo 1; else echo 0; fi; " +
-            "done"
-        ]
-        running: true
-        stdout: SplitParser {
-            onRead: (data) => {
-                var val = data.trim();
-                if (val === "1" || val === "0") {
-                    root.isPlayingMedia = (val === "1");
-                }
-            }
-        }
-    }
 
     // Motor de Visualización (Cava)
     Process {
