@@ -50,15 +50,38 @@ update_vol() {
 }
 
 update_net() {
-    WIFI_INFO=$(nmcli -t -f ACTIVE,SSID,SIGNAL,FREQ device wifi 2>/dev/null | awk -F: '$1=="yes" {print $2":"$3":"$4; exit}')
-    if [ -n "$WIFI_INFO" ]; then
-        SSID=$(echo "$WIFI_INFO" | cut -d: -f1)
-        SIGNAL=$(echo "$WIFI_INFO" | cut -d: -f2)
-        FREQ_RAW=$(echo "$WIFI_INFO" | cut -d: -f3)
-        FREQ=$(echo "$FREQ_RAW" | tr -dc '0-9')
-    else
-        SSID="Disconnected"; SIGNAL="0"; FREQ="0"
-    fi
+    local row raw_freq
+
+    SSID="Disconnected"
+    SIGNAL="0"
+    FREQ="0"
+
+    while IFS= read -r row; do
+        [[ "$row" == yes:* ]] || continue
+
+        # Eliminar el indicador de conexión activa.
+        row="${row#yes:}"
+
+        # Extraer los campos desde el final para admitir
+        # nombres de redes que contengan dos puntos (:).
+        raw_freq="${row##*:}"
+        row="${row%:*}"
+
+        SIGNAL="${row##*:}"
+        SSID="${row%:*}"
+
+        # Conservar únicamente los dígitos de la frecuencia.
+        FREQ="${raw_freq//[^0-9]/}"
+
+        # El protocolo de shell.qml utiliza | como separador.
+        SSID="${SSID//|/ }"
+
+        return 0
+    done < <(
+        LC_ALL=C nmcli -t --escape no \
+            -f ACTIVE,SSID,SIGNAL,FREQ \
+            device wifi list --rescan no 2>/dev/null
+    )
 }
 
 update_bt() {
