@@ -16,6 +16,14 @@ PanelWindow {
     // One shared Xavion backend for the Launcher and its embedded chat.
     required property var xavionService
     readonly property int xavionMode: 14
+
+    // Xavion se instancia al abrirlo por primera vez.
+    // Después permanece cargado para conservar su estado.
+    property bool xavionViewCreated: false
+
+    // Mensajes recibidos mientras se crea la interfaz.
+    property var xavionPendingPrompts: []
+
     property string calcResult: "" 
     
     // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording
@@ -1413,21 +1421,61 @@ PanelWindow {
                     }
                 }
             }
-
-            // Embedded Xavion (mode 14): same animated glass Launcher,
-            // reusing the service from shell.qml rather than another PanelWindow.
-            XavionEmbedded {
+            
+            // ------------------------------------------
+            // XAVION: CARGA DIFERIDA
+            // ------------------------------------------
+            Loader {
                 id: embeddedXavion
+
                 width: parent.width
+
                 height: visible
-                    ? Math.min(650, Math.max(330,
-                        (launcherWindow.screen ? launcherWindow.screen.height : 900) - 130))
+                    ? Math.min(
+                        650,
+                        Math.max(
+                            330,
+                            (launcherWindow.screen
+                                ? launcherWindow.screen.height
+                                : 900) - 130
+                        )
+                    )
                     : 0
-                visible: launcherWindow.currentMode === launcherWindow.xavionMode
-                service: launcherWindow.xavionService
-                onRequestBack: {
-                    launcherWindow.showApps()
-                    Qt.callLater(function() { searchInput.forceActiveFocus() })
+
+                visible:
+                    launcherWindow.currentMode ===
+                    launcherWindow.xavionMode
+
+                // No se crea al iniciar Quickshell.
+                // Después de la primera carga permanece vivo.
+                active:
+                    launcherWindow.xavionViewCreated ||
+                    launcherWindow.currentMode ===
+                    launcherWindow.xavionMode
+
+                // Priorizar la apertura inmediata.
+                asynchronous: false
+
+                onLoaded: {
+                    launcherWindow.xavionViewCreated = true
+
+                    // Entregar mensajes recibidos mientras
+                    // se estaba creando el componente.
+                    Qt.callLater(
+                        launcherWindow.flushXavionPrompts
+                    )
+                }
+
+                sourceComponent: XavionEmbedded {
+                    service: launcherWindow.xavionService
+
+                    onRequestBack: {
+                        launcherWindow.showApps()
+
+                        Qt.callLater(function() {
+                            searchInput.forceActiveFocus()
+                        })
+                    }
                 }
             }
 
@@ -3365,15 +3413,27 @@ PanelWindow {
         cleanupActionProc.command = ["/home/javier/.local/bin/cleanup.py", "--clear-cache-json"];
         cleanupActionProc.running = true;
     }
+    
+    // Entrega los mensajes pendientes a la interfaz.
+    function flushXavionPrompts() {
+        var view = embeddedXavion.item
 
-    // Direct entry point for Super+X, the animated top-bar mascot,
-    // desktop app entries and prompts sent from the Launcher search bar.
+        if (!view || launcherWindow.xavionPendingPrompts.length === 0)
+            return;
+
+        var prompts = launcherWindow.xavionPendingPrompts.slice();
+        launcherWindow.xavionPendingPrompts = [];
+
+        for (var i = 0; i < prompts.length; i++)
+            view.sendFromLauncher(prompts[i]);
+    }
+
+    // Entrada desde Super+X, Launcher, mascota y AI Selection.
     function openXavion(message) {
         var prompt = message === undefined || message === null
-            ? "" : String(message).trim();
+            ? ""
+            : String(message).trim();
 
-        // Reopen Launcher if closed; state changes happen synchronously, so
-        // the app-grid mode isn't presented as an intermediate screen.
         if (!visible_state) {
             toggle();
         } else {
@@ -3385,15 +3445,27 @@ PanelWindow {
         launcherWindow.recentKeyboardActive = false;
         launcherWindow.calcResult = "";
         searchInput.text = "";
+
+        // El servicio sigue existiendo independientemente
+        // de cuándo se cargue su interfaz.
         launcherWindow.xavionService.ensureBackend();
 
-        if (prompt.length > 0)
-            embeddedXavion.sendFromLauncher(prompt);
+        if (prompt.length > 0) {
+            var pending = launcherWindow.xavionPendingPrompts.slice();
+            pending.push(prompt);
+            launcherWindow.xavionPendingPrompts = pending;
+        }
 
         Qt.callLater(function() {
-            if (launcherWindow.visible_state
-                    && launcherWindow.currentMode === launcherWindow.xavionMode)
-                embeddedXavion.focusInput();
+            launcherWindow.flushXavionPrompts();
+
+            var view = embeddedXavion.item;
+
+            if (view &&
+                launcherWindow.visible_state &&
+                launcherWindow.currentMode === launcherWindow.xavionMode) {
+                view.focusInput();
+            }
         });
     }
 
