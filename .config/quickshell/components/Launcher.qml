@@ -24,6 +24,83 @@ PanelWindow {
     // Mensajes recibidos mientras se crea la interfaz.
     property var xavionPendingPrompts: []
 
+    // ==========================================
+    // XAVION: LIBERACIÓN DE MEMORIA EN REPOSO
+    // ==========================================
+
+    // Dos minutos sin utilizar Xavion.
+    readonly property int xavionIdleTimeout: 120000
+
+    Timer {
+        id: xavionIdleUnloadTimer
+        interval: launcherWindow.xavionIdleTimeout
+        repeat: false
+        running: false
+
+        onTriggered: launcherWindow.unloadXavionIfSafe()
+    }
+
+    function updateXavionIdleUnload() {
+        // Si Xavion nunca se ha creado, no hay nada que liberar.
+        if (!xavionViewCreated) {
+            xavionIdleUnloadTimer.stop()
+            return
+        }
+
+        // Mientras se utiliza, mantener la interfaz cargada.
+        if (visible_state && currentMode === xavionMode) {
+            xavionIdleUnloadTimer.stop()
+            return
+        }
+
+        // Iniciar o reiniciar el periodo de inactividad.
+        xavionIdleUnloadTimer.restart()
+    }
+
+    function unloadXavionIfSafe() {
+        if (!xavionViewCreated)
+            return
+
+        // Nunca descargar una interfaz que se esté mostrando.
+        if (visible_state && currentMode === xavionMode)
+            return
+
+        var service = launcherWindow.xavionService
+
+        // Proteger las operaciones en curso y las capturas
+        // que todavía se están preparando.
+        if (service.busy
+            || service.deletionPending
+            || service.selectionNewChatPending
+            || service.selectionCapturePath.length > 0
+            || xavionPendingPrompts.length > 0) {
+
+            // Volver a comprobar más adelante.
+            xavionIdleUnloadTimer.restart()
+            return
+        }
+
+        var view = embeddedXavion.item
+
+        if (!view)
+            return
+
+        // No perder borradores, imágenes, mensajes pendientes
+        // ni posiciones de lectura del historial.
+        if (view.hasPendingUiState)
+            return
+
+        // La conversación permanece en XavionService.
+        // Solo destruimos la interfaz QML.
+        console.log("Launcher: releasing idle Xavion UI")
+        xavionViewCreated = false
+    }
+
+    // Observar cuándo se abre/cierra Launcher y cuándo
+    // el usuario cambia de pantalla.
+    onVisible_stateChanged: updateXavionIdleUnload()
+    onCurrentModeChanged: updateXavionIdleUnload()
+
     property string calcResult: "" 
     
     // Modos: 0: Apps, 1: Files Search, 4: System, 5: Wi-Fi, 6: Bluetooth, 9: Password, 10: Cleanup, 11: Recording

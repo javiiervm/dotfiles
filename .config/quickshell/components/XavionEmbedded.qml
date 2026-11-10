@@ -12,6 +12,14 @@ Item {
     required property var service
     signal requestBack()
 
+    // Evitar liberar la interfaz cuando hay estado local
+    // que todavía debemos conservar.
+    readonly property bool hasPendingUiState:
+        composerInput.text.length > 0
+        || pendingImages.length > 0
+        || queuedMessages.length > 0
+        || (messageList.count > 0 && !messageList.followOutput)
+
     focus: visible
     property bool settingsOpen: false
     property bool historyOpen: false
