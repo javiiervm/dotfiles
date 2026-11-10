@@ -499,6 +499,7 @@ ShellRoot {
 
     Process {
         id: colorMonitorProc
+        running: root.showCavaVisualizer
         command: [
             "bash", "-c", 
             "touch /tmp/current_wallpaper; " + 
@@ -507,7 +508,6 @@ ShellRoot {
             "  python3 /home/javier/.config/quickshell/scripts/cava_color.py \"$(cat /tmp/current_wallpaper)\"; " +
             "done"
         ]
-        running: true
         stdout: SplitParser {
             onRead: (data) => {
                 var hexColor = data.trim();
