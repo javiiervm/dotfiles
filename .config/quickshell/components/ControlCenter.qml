@@ -278,6 +278,35 @@ PanelWindow {
     property bool volumeApplyPending: false
     property bool brightnessApplyPending: false
 
+    // Datos recibidos de los servicios compartidos.
+    // Estas propiedades no se modifican desde los sliders.
+    property real sharedAudioVolume: 0.0
+    property bool sharedAudioMuted: false
+    property bool sharedAudioReady: false
+
+    property real sharedBrightnessLevel: 0.0
+    property bool sharedBrightnessReady: false
+
+    // Sincronizar los controles con el estado real del sistema.
+    // Durante un arrastre conservamos la posición del usuario.
+    function syncSharedMediaState() {
+        if (sharedAudioReady && !volumeDragging) {
+            volumeLevel = clamp01(sharedAudioVolume);
+            volumeMuted = sharedAudioMuted;
+        }
+
+        if (sharedBrightnessReady && !brightnessDragging) {
+            brightnessLevel = clamp01(sharedBrightnessLevel);
+        }
+    }
+
+    onSharedAudioVolumeChanged: syncSharedMediaState()
+    onSharedAudioMutedChanged: syncSharedMediaState()
+    onSharedAudioReadyChanged: syncSharedMediaState()
+
+    onSharedBrightnessLevelChanged: syncSharedMediaState()
+    onSharedBrightnessReadyChanged: syncSharedMediaState()
+
     function clamp01(value) {
         return Math.max(0.0, Math.min(1.0, value))
     }
@@ -346,51 +375,6 @@ PanelWindow {
 
     Process {
         id: volumeMuteProc
-    }
-
-    // Event-driven monitor, deliberately alive only while the Notification
-    // Center is open. It performs one initial read and then sleeps until
-    // PipeWire/PulseAudio or the kernel backlight emits a change event.
-    Process {
-        id: mediaControlsMonitor
-        running: ncWindow.visible_state
-        command: [
-            "bash", "-c",
-            "LC_ALL=C; " +
-            "F=\"${XDG_RUNTIME_DIR:-/tmp}/qs_nc_media_$$\"; " +
-            "rm -f \"$F\"; mkfifo \"$F\"; exec 3<>\"$F\"; " +
-            "pactl subscribe 2>/dev/null | grep --line-buffered -E '(sink|server)' | while read -r _; do echo SND >&3; done & " +
-            "udevadm monitor --subsystem-match=backlight 2>/dev/null | grep --line-buffered 'change' | while read -r _; do echo BRI >&3; done & " +
-            "trap 'kill $(jobs -p) 2>/dev/null; rm -f \"$F\"' EXIT; " +
-            "read_values() { " +
-            "  vf=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || echo 'Volume: 0'); " +
-            "  vol=${vf#* }; vol=${vol% \\[MUTED\\]}; " +
-            "  [[ \"$vf\" == *MUTED* ]] && muted=1 || muted=0; " +
-            "  b_raw=$(brightnessctl -m 2>/dev/null || echo 'backlight,backlight,0,0%'); " +
-            "  IFS=, read -r _ _ _ pct _ <<< \"$b_raw\"; bri=${pct%%%}; " +
-            "  echo \"$vol;$muted;$bri\"; " +
-            "}; " +
-            "read_values; while read -r _ <&3; do read_values; done"
-        ]
-
-        stdout: SplitParser {
-            onRead: function(data) {
-                var fields = data.trim().split(";")
-                if (fields.length < 3)
-                    return
-
-                var newVolume = parseFloat(fields[0])
-                var newBrightness = parseFloat(fields[2]) / 100.0
-
-                if (!ncWindow.volumeDragging && !isNaN(newVolume))
-                    ncWindow.volumeLevel = ncWindow.clamp01(newVolume)
-
-                ncWindow.volumeMuted = fields[1] === "1"
-
-                if (!ncWindow.brightnessDragging && !isNaN(newBrightness))
-                    ncWindow.brightnessLevel = ncWindow.clamp01(newBrightness)
-            }
-        }
     }
 
     // These timers only exist while the user is actively dragging a slider.
@@ -493,6 +477,8 @@ PanelWindow {
 
     onVisible_stateChanged: {
         if (visible_state) {
+            syncSharedMediaState()
+
             var now = new Date()
             currentLocalDay = now
             calendarTile.today = now
@@ -500,13 +486,12 @@ PanelWindow {
             closeTimer.stop()
             isReallyVisible = true
         } else {
-            // The temperature slider is transient UI: always collapse it as
-            // soon as the Control Center begins closing.
             nightLightTemperatureOpen = false
             brightnessTemperatureMode = false
             closeTimer.start()
         }
     }
+
 
     Timer {
         id: calendarDayRefresh

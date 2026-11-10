@@ -1085,6 +1085,10 @@ PanelWindow {
     property bool lastMicMuted: false
     property bool firstReadComplete: false
 
+    // Estado del brillo disponible para otros componentes.
+    property real sharedBrightnessLevel: 0.0
+    property bool sharedBrightnessReady: false
+
     // 1. OSD de volumen mediante el backend compartido.
     function checkVolumeOsd() {
         if (!audioReady)
@@ -1183,10 +1187,18 @@ PanelWindow {
                 if (p.length >= 4) {
                     var mic = parseFloat(p[0]) || 0;
                     var micMuted = p[1] === "1";
+                    
                     var brightness =
                         (parseFloat(p[2]) || 0) / 100;
 
                     globalMicActive = parseInt(p[3]) > 0;
+
+                    // Compartir el brillo con el Control Center.
+                    // La isla sigue siendo responsable de leerlo.
+                    islandWindow.sharedBrightnessLevel =
+                        Math.max(0, Math.min(1, brightness));
+
+                    islandWindow.sharedBrightnessReady = true;
 
                     if (firstReadComplete) {
                         if (Math.abs(brightness - lastBri) > 0.005) {

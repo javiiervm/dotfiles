@@ -572,6 +572,16 @@ ShellRoot {
 
     ControlCenter {
         id: controlCenterPanel
+
+        // Audio compartido desde el backend principal.
+        sharedAudioVolume: root.vol / 100.0
+        sharedAudioMuted: root.volMute
+        sharedAudioReady: root.audioStateReady
+
+        // Brillo compartido desde la isla dinámica.
+        sharedBrightnessLevel: islandWidget.sharedBrightnessLevel
+        sharedBrightnessReady: islandWidget.sharedBrightnessReady
+
         screen: root.primaryUiScreen
 
         // Laptop keeps the original position. The HDMI value is used only
