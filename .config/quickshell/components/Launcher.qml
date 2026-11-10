@@ -1318,53 +1318,99 @@ PanelWindow {
             }
 
             // ------------------------------------------
-            // Embedded Settings: inherits the same Theme/Glass as Launcher.
-            SettingsPanel {
+            // SETTINGS: CARGA DIFERIDA
+            // ------------------------------------------
+            // Solo se instancia mientras el usuario
+            // está utilizando Settings (modo 13).
+            Loader {
                 id: settingsPanel
-                width: parent.width
-                visible: launcherWindow.currentMode === 13
-                networkModel: filteredModel
-                wifiEnabled: launcherWindow.isWifiEnabled
-                btEnabled: launcherWindow.isBtEnabled
-                wifiLoading: launcherWindow.isWifiLoading
-                btLoading: launcherWindow.isBtLoading
-                onRequestBack: showApps()
-                onRequestNetworkData: (kind) => {
-                    loadTabData(kind === "wifi" ? "--wifi" : "--bt")
+
+                active: launcherWindow.currentMode === 13
+                visible: active
+                asynchronous: false
+
+                // Compatibilidad con las referencias existentes
+                // en los proveedores Wi-Fi y Bluetooth.
+                readonly property int selectedTab:
+                    item ? item.selectedTab : -1
+
+                // SettingsPanel.openPanel() ya reinicializa
+                // todos los estados al entrar en Settings.
+                onLoaded: {
+                    if (item)
+                        item.openPanel()
                 }
-                onRequestNetworkRescan: (kind) => {
-                    if (kind === "bt") {
-                        // provider.sh runs a bounded 4-second scan.
-                        // Do not leave a long-running bluetoothctl scan alive.
-                        loadTabData("--bt")
-                    } else {
+
+                sourceComponent: SettingsPanel {
+                    // Loader adopta las dimensiones del
+                    // componente cuando no tiene tamaño propio.
+                    width: contentColumn.width
+
+                    networkModel: filteredModel
+                    wifiEnabled: launcherWindow.isWifiEnabled
+                    btEnabled: launcherWindow.isBtEnabled
+                    wifiLoading: launcherWindow.isWifiLoading
+                    btLoading: launcherWindow.isBtLoading
+
+                    onRequestBack: showApps()
+
+                    onRequestNetworkData: (kind) => {
+                        loadTabData(
+                            kind === "wifi" ? "--wifi" : "--bt"
+                        )
+                    }
+
+                    onRequestNetworkRescan: (kind) => {
+                        if (kind === "bt") {
+                            loadTabData("--bt")
+                        } else {
+                            execProc.running = false
+                            execProc.command = [
+                                "nmcli", "device", "wifi", "rescan"
+                            ]
+                            execProc.running = true
+                            refreshTimer.restart()
+                        }
+                    }
+
+                    onRequestNetworkPower: (kind, enable) => {
                         execProc.running = false
-                        execProc.command = ["nmcli", "device", "wifi", "rescan"]
+
+                        if (kind === "wifi") {
+                            launcherWindow.isWifiLoading = true
+                            execProc.command = [
+                                "nmcli", "radio", "wifi",
+                                enable ? "on" : "off"
+                            ]
+                        } else {
+                            launcherWindow.isBtLoading = true
+                            execProc.command = [
+                                "/bin/bash", "-c",
+                                "rfkill unblock bluetooth; bluetoothctl power "
+                                + (enable ? "on" : "off")
+                            ]
+                        }
+
                         execProc.running = true
                         refreshTimer.restart()
                     }
-                }
-                onRequestNetworkPower: (kind, enable) => {
-                    execProc.running = false
-                    if (kind === "wifi") {
-                        launcherWindow.isWifiLoading = true
-                        execProc.command = ["nmcli", "radio", "wifi", enable ? "on" : "off"]
-                    } else {
-                        launcherWindow.isBtLoading = true
-                        execProc.command = ["/bin/bash", "-c",
-                            "rfkill unblock bluetooth; bluetoothctl power " + (enable ? "on" : "off")]
+
+                    onRequestNetworkAction: (command, name) =>
+                        executeApp(command, name)
+
+                    onRequestConnectWifi: (ssid, password) => {
+                        launcherWindow.requestIslandMsg(
+                            "", "white",
+                            "Trying to connect to " + ssid + "..."
+                        )
+
+                        netConnectProc.targetName = ssid
+                        netConnectProc.command = [
+                            "nmcli", "device", "wifi", "connect",
+                            ssid, "password", password
+                        ]
+                        netConnectProc.running = true
                     }
-                    execProc.running = true
-                    refreshTimer.restart()
-                }
-                onRequestNetworkAction: (command, name) => executeApp(command, name)
-                onRequestConnectWifi: (ssid, password) => {
-                    launcherWindow.requestIslandMsg("", "white",
-                                                    "Trying to connect to " + ssid + "...")
-                    netConnectProc.targetName = ssid
-                    netConnectProc.command = ["nmcli", "device", "wifi", "connect",
-                                              ssid, "password", password]
-                    netConnectProc.running = true
                 }
             }
 
@@ -3119,14 +3165,14 @@ PanelWindow {
 
         // Every selectable launcher entry participates in Recent.
         rememberRecent(name);
-
+        
         if (cmd === "qs_settings") {
             launcherWindow.currentMode = 13;
             launcherWindow.activeHeaderButton = 0;
             searchInput.text = "";
-            settingsPanel.openPanel();
             return;
         }
+
         if (cmd === "qs_sys") { launcherWindow.currentMode = 4; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--system"); return; }
         if (cmd === "qs_wifi") { launcherWindow.currentMode = 5; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--wifi"); return; }
         if (cmd === "qs_bt") { launcherWindow.currentMode = 6; launcherWindow.activeHeaderButton = 0; searchInput.text = ""; loadTabData("--bt"); return; }
