@@ -70,7 +70,7 @@ hl.env("QT_QPA_PLATFORMTHEME", "qt5ct")
 hl.env("GDK_WAYLAND_DISABLE", "ext_background_effect_manager_v1")
 
 hl.on("hyprland.start", function ()
-	hl.exec_cmd("hyprpm reload && hyprctl reload")
+    hl.exec_cmd("hyprpm reload && hyprctl reload && ~/.config/hypr/scripts/toggle_macos.sh --restore-session")
     -- macOS mode is validated synchronously later in this file.
     -- Do not clear its state asynchronously here.
 

@@ -10,6 +10,7 @@
 #
 # macOS mode:
 #   - Uses manually tunable margins.
+#   - Compensates for the Hyprbars titlebar ABOVE the client.
 #   - Press SUPER + D again to restore the previous geometry.
 # ============================================================
 
@@ -22,8 +23,17 @@ set -u
 
 MARGIN_LEFT=14
 MARGIN_RIGHT=14
+
+# This is the desired margin between the SCREEN TOP and the
+# TOP EDGE OF THE TITLEBAR (not the application's content).
+# Quickshell reserves 44 logical pixels for the laptop top bar.
 MARGIN_TOP=48
+
 MARGIN_BOTTOM=86
+
+# Matches bar_height in toggle_macos.sh. Used only as a fallback
+# if Hyprland cannot report the actual plugin configuration.
+HYPRBARS_FALLBACK_HEIGHT=34
 
 
 # ============================================================
@@ -35,7 +45,7 @@ MAX_STATE_DIR="/tmp/hypr_macos_maximize"
 
 
 # ============================================================
-# Helper
+# Helpers
 # ============================================================
 
 dispatch() {
@@ -55,6 +65,33 @@ macos_mode_active() {
 
     [ -n "$saved_instance" ] || return 1
     [ "$saved_instance" = "$current_instance" ]
+}
+
+
+# Hyprbars paints its bar ABOVE the client window geometry.
+# Therefore setting the client top to 48 would place the actual
+# decoration at about 48 - 34 = 14, overlapping Quickshell.
+#
+# Only while Hyprbars is loaded, add its real height to the
+# client's top margin. This leaves the visible bar at 48 and
+# keeps the original bottom margin unchanged.
+hyprbars_titlebar_height() {
+    if ! hyprctl plugin list 2>/dev/null | grep -qi 'Plugin hyprbars'; then
+        printf '0\n'
+        return
+    fi
+
+    local height
+    height=$(
+        hyprctl -j getoption plugin:hyprbars:bar_height 2>/dev/null |
+            jq -r '.int // empty' 2>/dev/null
+    )
+
+    case "$height" in
+        ''|*[!0-9]*) height="$HYPRBARS_FALLBACK_HEIGHT" ;;
+    esac
+
+    printf '%s\n' "$height"
 }
 
 
@@ -111,7 +148,6 @@ if [ -f "$STATE_KEY" ]; then
     w=$(jq -r '.w' <<< "$prev")
     h=$(jq -r '.h' <<< "$prev")
 
-
     dispatch \
         "hl.dsp.window.resize({
             x = $w,
@@ -120,7 +156,6 @@ if [ -f "$STATE_KEY" ]; then
             window = 'address:$addr'
         })"
 
-
     dispatch \
         "hl.dsp.window.move({
             x = $x,
@@ -128,7 +163,6 @@ if [ -f "$STATE_KEY" ]; then
             relative = false,
             window = 'address:$addr'
         })"
-
 
     rm -f "$STATE_KEY"
 
@@ -145,7 +179,6 @@ cur_y=$(jq -r '.at[1]' <<< "$win")
 
 cur_w=$(jq -r '.size[0]' <<< "$win")
 cur_h=$(jq -r '.size[1]' <<< "$win")
-
 
 printf \
     '{"x":%d,"y":%d,"w":%d,"h":%d}\n' \
@@ -166,11 +199,9 @@ monitor=$(hyprctl monitors -j 2>/dev/null |
     jq -c --argjson id "$monitor_id" \
         '.[] | select(.id == $id)')
 
-
 if [ -z "$monitor" ]; then
     exit 1
 fi
-
 
 MONITOR_X=$(jq -r '.x' <<< "$monitor")
 MONITOR_Y=$(jq -r '.y' <<< "$monitor")
@@ -196,15 +227,22 @@ LOGICAL_HEIGHT=$(awk \
 # Calculate target geometry from margins
 # ============================================================
 
+# This extra is zero without Hyprbars, so the old behavior
+# is preserved if the plugin is unavailable or unloaded.
+TITLEBAR_HEIGHT=$(hyprbars_titlebar_height)
+
+# The client must start LOWER to leave room for its decoration.
+EFFECTIVE_MARGIN_TOP=$((MARGIN_TOP + TITLEBAR_HEIGHT))
+
 TARGET_X=$((MONITOR_X + MARGIN_LEFT))
-TARGET_Y=$((MONITOR_Y + MARGIN_TOP))
+TARGET_Y=$((MONITOR_Y + EFFECTIVE_MARGIN_TOP))
 
 TARGET_WIDTH=$((LOGICAL_WIDTH - MARGIN_LEFT - MARGIN_RIGHT))
-TARGET_HEIGHT=$((LOGICAL_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM))
+TARGET_HEIGHT=$((LOGICAL_HEIGHT - EFFECTIVE_MARGIN_TOP - MARGIN_BOTTOM))
 
-
-# Prevent invalid geometry
+# Prevent invalid geometry.
 if [ "$TARGET_WIDTH" -lt 1 ] || [ "$TARGET_HEIGHT" -lt 1 ]; then
+    rm -f "$STATE_KEY"
     exit 1
 fi
 
@@ -220,7 +258,6 @@ dispatch \
         relative = false,
         window = 'address:$addr'
     })"
-
 
 dispatch \
     "hl.dsp.window.move({
