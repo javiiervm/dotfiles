@@ -2,7 +2,7 @@
 """On-demand local Blip adapter for the Quickshell Dynamic Island.
 
 Uses Blip's current local state format and the --peer/--file CLI observed
-on Blip 1.2.3 for Linux. Both are undocumented implementation details.
+on Blip for Linux. Both are undocumented implementation details.
 No credentials or raw state bytes are printed or stored by this adapter.
 """
 
@@ -111,40 +111,40 @@ def send_files(device_id, file_urls):
     if target is None:
         raise BlipError("Destination device is no longer in Blip's local state.")
 
-    # Validate every file before starting any transfer to avoid predictable
-    # partial batches when one of the dropped paths no longer exists.
-    paths = [resolve_local_file(file_url) for file_url in file_urls]
-    total = len(paths)
-    for index, file_path in enumerate(paths, start=1):
-        try:
-            result = subprocess.run(
-                ["blip", f"--peer={user_id}:{target['id']}", f"--file={file_path}"],
-                capture_output=True,
-                timeout=25,
-                check=False,
-            )
-        except FileNotFoundError as exc:
-            raise BlipError("Blip is not installed or is missing from PATH.") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise BlipError(
-                f"Blip did not respond for file {index}/{total}; "
-                f"{index - 1} request(s) were sent."
-            ) from exc
-        if result.returncode != 0:
-            raise BlipError(
-                f"Blip rejected file {index}/{total}; "
-                f"{index - 1} request(s) were sent."
-            )
-        respond(ok=True, status="progress", completed=index, total=total)
+    # Validate ALL paths before requesting the batch. Also prevent duplicate
+    # items when a file appears more than once in the drop payload.
+    paths = list(dict.fromkeys(resolve_local_file(url) for url in file_urls))
 
-    respond(ok=True, status="dispatched", device=target["name"], count=total)
+    # Pass every file to a SINGLE Blip process so it can create ONE transfer
+    # containing the selected files. Never dispatch one process per file.
+    command = ["blip", "--peer", f"{user_id}:{target['id']}"]
+    for path in paths:
+        command.extend(["--file", str(path)])
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            timeout=25,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise BlipError("Blip is not installed or is missing from PATH.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise BlipError("Blip did not respond to the batch transfer request.") from exc
+
+    if result.returncode != 0:
+        raise BlipError("Blip rejected the batch transfer request.")
+
+    # Dispatch accepted, not necessarily delivered or downloaded.
+    respond(ok=True, status="dispatched", device=target["name"], count=len(paths))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("list", help="List device records cached by Blip")
-    send = sub.add_parser("send", help="Request one or more file transfers")
+    send = sub.add_parser("send", help="Request a single transfer with one or more files")
     send.add_argument("device_id", help="Target device UUID")
     send.add_argument("file_urls", nargs="+", help="Local file paths or file:// URLs")
     args = parser.parse_args()
