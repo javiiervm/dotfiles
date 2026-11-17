@@ -132,10 +132,11 @@ ShellRoot {
     property int altTabCurrentIndex: 0
 
     // --- ESTADOS DE PANTALLA COMPLETA ---
-    // Native reactive state from Quickshell.Hyprland.
+    // Detect real fullscreen, not maximized windows.
+    // Native Wayland state: reactive, without polling.
     readonly property bool isFullscreen:
-        Hyprland.focusedWorkspace
-        ? Hyprland.focusedWorkspace.hasFullscreen
+        ToplevelManager.activeToplevel
+        ? ToplevelManager.activeToplevel.fullscreen
         : false
 
     property bool isTopHovered: false
