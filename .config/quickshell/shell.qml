@@ -1602,6 +1602,12 @@ ShellRoot {
         }
     }
 
+    CavaOverlay {
+        allowed: root.audioStateReady
+            && (root.perfMode === "balanced"
+                || root.perfMode === "performance")
+    }
+
     WallpaperCarousel {
         id: wallCarouselWidget
         screen: root.primaryUiScreen
