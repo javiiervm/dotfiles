@@ -1670,7 +1670,10 @@ ShellRoot {
 
         Region {
             id: dockInputRegion
-            item: dockGlass
+            x: 0
+            y: 0
+            width: dockVisual.width
+            height: dockVisual.height
             radius: dockGlass.radius
         }
 
@@ -1678,11 +1681,15 @@ ShellRoot {
             id: emptyDockInputRegion
         }
 
-        BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
+        // BackgroundEffect.blurRegion: Glass.blurEnabled ? dockBlurRegion : null
+        BackgroundEffect.blurRegion: (Glass.blurEnabled && dockVisual.showDock) ? dockBlurRegion : null
 
         Region {
             id: dockBlurRegion
-            item: dockGlass
+            x: 0
+            y: 0
+            width: dockVisual.width
+            height: dockVisual.height
             radius: dockGlass.radius
         }
 
@@ -1690,7 +1697,8 @@ ShellRoot {
             id: dockVisual
             anchors.fill: parent
 
-            property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
+            // property bool showDock: root.isMacosMode || root.isWorkspaceEmpty || root.isDockHovered
+            property bool showDock: root.isMacosMode && !root.isFullscreen
 
             opacity: showDock ? 1 : 0
             visible: opacity > 0
