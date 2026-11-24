@@ -521,16 +521,31 @@ ShellRoot {
 
     Timer { id: closeTimer; interval: 300; onTriggered: root.isMenuVisible = false }
 
-    Launcher { 
+    
+    Launcher {
         id: mainLauncher
-        screen: root.primaryUiScreen
+
+        screen: {
+            var screens = Quickshell.screens;
+            var targetName = mainLauncher.openingMonitorName;
+
+            for (var i = 0; i < screens.length; ++i) {
+                if (screens[i].name === targetName)
+                    return screens[i];
+            }
+
+            return root.primaryUiScreen;
+        }
+
         xavionService: xavionService
+
         onRequestIslandMsg: function(icon, color, text) {
             if (typeof islandWidget !== "undefined") {
                 islandWidget.triggerMsg(icon, color, text);
             }
         }
     }
+
 
     // --- XAVION CHAT ---
     XavionService {

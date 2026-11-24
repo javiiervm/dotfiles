@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import ".."
 
 PanelWindow {
@@ -12,6 +13,7 @@ PanelWindow {
     // ==========================================
     property bool visible_state: false
     property bool isReallyVisible: false
+    property string openingMonitorName: ""
 
     // One shared Xavion backend for the Launcher and its embedded chat.
     required property var xavionService
@@ -3553,17 +3555,21 @@ PanelWindow {
             openXavion("");
     }
 
+    
     function toggle() {
         if (visible_state) {
-            // Hide immediately, but also clear transient modal state so it can
-            // never survive into the next opening.
+            // Hide immediately and clear transient modal state.
             visible_state = false;
             launcherWindow.cleanupConfirmVisible = false;
             launcherWindow.cleanupConfirmSelection = 0;
             closeTimer.start();
         } else {
-            // Every fresh opening starts from the normal applications view,
-            // even if the previous session was closed from Cleanup/Wi-Fi/etc.
+            // Select the currently focused monitor before opening.
+            launcherWindow.openingMonitorName = Hyprland.focusedMonitor
+                ? Hyprland.focusedMonitor.name
+                : "";
+
+            // Every fresh opening starts from the normal applications view.
             closeTimer.stop();
             launcherWindow.currentMode = 0;
             launcherWindow.activeHeaderButton = 0;
@@ -3577,18 +3583,16 @@ PanelWindow {
             searchInput.text = "";
             launcherWindow.calcResult = "";
 
-            // La vista de apps ya se precarga al iniciar y también al terminar
-            // el cierre. No volvemos a lanzar provider.sh aquí: evita carreras,
-            // duplicados y hace que el launcher reaparezca de forma inmediata.
+            // Reuse the already cached applications.
             updateFilter();
 
             isReallyVisible = true;
             visible_state = true;
             WlrLayershell.keyboardFocus = WlrLayershell.OnDemand;
 
-            // App grid and Recent row are already cached in memory.
             rebuildRecentModel();
             searchInput.forceActiveFocus();
         }
     }
+
 }
