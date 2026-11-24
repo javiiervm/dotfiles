@@ -1383,7 +1383,7 @@ PanelWindow {
                 width: parent.width
                 height: Math.round(width * 0.80)
                 glassRadius: 22
-                glassOpacity: calendarMouse.containsMouse ? 0.42 : 0.34
+                glassOpacity: calendarMouse.hovered ? 0.42 : 0.34
                 clip: true
 
                 property date today: new Date()
@@ -1495,6 +1495,7 @@ PanelWindow {
                         }
                     }
 
+                    
                     MonthGrid {
                         id: compactMonthGrid
                         width: parent.width
@@ -1511,6 +1512,34 @@ PanelWindow {
                             property var dayEvents: ncWindow.getEventsForDate(model.date)
                             property bool hasEvents: dayEvents.length > 0
 
+                            // Animated hover halo
+                            Rectangle {
+                                id: dayHoverHalo
+                                anchors.centerIn: parent
+                                width: todaySelectionHalo.width
+                                height: width
+                                radius: width / 2
+                                color: Theme.white
+
+                                opacity: dayHover.hovered && !model.today ? 0.18 : 0.0
+                                scale: dayHover.hovered && !model.today ? 1.0 : 0.82
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+
+                                Behavior on scale {
+                                    NumberAnimation {
+                                        duration: 150
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+
+                            // Current day halo
                             Rectangle {
                                 id: todaySelectionHalo
                                 anchors.centerIn: parent
@@ -1524,25 +1553,21 @@ PanelWindow {
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 anchors.verticalCenter: parent.verticalCenter
-                                // Keep the day number in its original position; the event dot
-                                // fits inside the enlarged selection circle without moving it.
                                 anchors.verticalCenterOffset: -2
                                 text: model.day
                                 color: model.today
-                                       ? Theme.bg0
-                                       : Qt.alpha(Theme.white, 0.82)
+                                    ? Theme.bg0
+                                    : Qt.alpha(Theme.white, 0.82)
                                 font.family: Theme.fontMain
                                 font.pixelSize: Math.max(12, Math.min(15, Math.round(compactMonthGrid.width / 27)))
                                 font.bold: model.today || hasEvents
                             }
 
-                            // For today, the event dot sits *inside* the selected-day halo.
-                            // All other event dots retain their original position below the date.
                             Rectangle {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: model.today
-                                   ? Math.round(parent.height / 2 + todaySelectionHalo.height * 0.24)
-                                   : parent.height - height - 1
+                                ? Math.round(parent.height / 2 + todaySelectionHalo.height * 0.24)
+                                : parent.height - height - 1
                                 width: 4.5
                                 height: width
                                 radius: width / 2
@@ -1551,16 +1576,21 @@ PanelWindow {
                             }
 
                             MouseArea {
+                                id: dayMouse
                                 anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
 
                                 onClicked: {
                                     ncWindow.selectAgendaDate(model.date)
                                 }
                             }
+
+                            HoverHandler {
+                                id: dayHover
+                                cursorShape: Qt.PointingHandCursor
+                            }
                         }
                     }
+
                 }
 
                 // ---------------- DAILY AGENDA VIEW ----------------
@@ -1711,11 +1741,8 @@ PanelWindow {
                     }
                 }
 
-                MouseArea {
+                HoverHandler {
                     id: calendarMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    acceptedButtons: Qt.NoButton
                 }
             }
 
