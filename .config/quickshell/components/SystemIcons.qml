@@ -1,25 +1,49 @@
+
 import QtQuick
 import QtQuick.Layouts
 import ".."
 
 Row {
     id: iconsRoot
-    property var rootRef 
-    
+    property var rootRef
+
     property string ssid: ""
-    property string wifiSignal: "" 
+    property string wifiSignal: ""
     property string freq: ""
     property bool btOn: false
     property string btDev: ""
-    property int vol: 0 
+    property int vol: 0
     property bool volMute: false
     property string volDesc: ""
     property string perf: ""
-    
-    spacing: 8 
+
+    spacing: 8
+
+    // Disable hover menus while the Control Center is open.
+    readonly property bool hoverAllowed:
+        !!rootRef && !rootRef.isNotifOpen
+
+    // Immediately dismiss existing menus when opening the Control Center.
+    Connections {
+        target: iconsRoot.rootRef || null
+
+        function onIsNotifOpenChanged() {
+            if (!iconsRoot.rootRef.isNotifOpen)
+                return;
+
+            iconsRoot.rootRef.isMenuOpen = false;
+            iconsRoot.rootRef.isMenuVisible = false;
+
+            iconsRoot.rootRef.isClipMenuOpen = false;
+            iconsRoot.rootRef.isClipIconHovered = false;
+            iconsRoot.rootRef.isClipMenuHovered = false;
+        }
+    }
 
     function updateMenu(open, title, info1, info2, color, offset) {
-        if (!rootRef) return;
+        if (!rootRef || !hoverAllowed)
+            return;
+
         rootRef.activeMenuTitle = title;
         rootRef.activeMenuInfo1 = info1;
         rootRef.activeMenuInfo2 = info2;
@@ -28,75 +52,135 @@ Row {
         rootRef.isMenuOpen = open;
     }
 
-    // --- Wi-Fi () ---
+    // --- Wi-Fi ---
     Item {
-        width: 20; height: 44
+        width: 20
+        height: 44
+
         Text {
             anchors.centerIn: parent
-            text: "" 
-            color: (ssid === "Disconnected" || ssid === "") ? "#8c8c8c" : "#ffffff"
+            text: ""
+            color: (ssid === "Disconnected" || ssid === "")
+                ? "#8c8c8c"
+                : "#ffffff"
             font.family: Theme.fontIcons
-            font.pixelSize: 14 
+            font.pixelSize: 14
         }
-        MouseArea { 
+
+        MouseArea {
             anchors.fill: parent
-            hoverEnabled: true 
-            onEntered: iconsRoot.updateMenu(true, "Wi-Fi Network", "SSID: " + ssid, "Signal: " + wifiSignal + "%", "#3498db", 142)
-            onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 142)
+            enabled: iconsRoot.hoverAllowed
+            hoverEnabled: true
+
+            onEntered: iconsRoot.updateMenu(
+                true,
+                "Wi-Fi Network",
+                "SSID: " + ssid,
+                "Signal: " + wifiSignal + "%",
+                "#3498db",
+                142
+            )
+
+            onExited: iconsRoot.updateMenu(
+                false, "", "", "", "#ffffff", 142
+            )
         }
     }
 
-    // --- Bluetooth () ---
+    // --- Bluetooth ---
     Item {
-        width: 20; height: 44
+        width: 20
+        height: 44
+
         Text {
             anchors.centerIn: parent
-            text: "" 
+            text: ""
             color: btOn ? "#ffffff" : "#8c8c8c"
             font.family: Theme.fontIcons
             font.pixelSize: 16
         }
-        MouseArea { 
+
+        MouseArea {
             anchors.fill: parent
-            hoverEnabled: true 
-            onEntered: iconsRoot.updateMenu(true, "Bluetooth", btOn ? "Active" : "Off", "Device: " + btDev, "#3b82f6", 112)
-            onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 112)
+            enabled: iconsRoot.hoverAllowed
+            hoverEnabled: true
+
+            onEntered: iconsRoot.updateMenu(
+                true,
+                "Bluetooth",
+                btOn ? "Active" : "Off",
+                "Device: " + btDev,
+                "#3b82f6",
+                112
+            )
+
+            onExited: iconsRoot.updateMenu(
+                false, "", "", "", "#ffffff", 112
+            )
         }
     }
 
-    // --- Volumen (Mute a 0) ---
+    // --- Volume ---
     Item {
-        width: 20; height: 44
+        width: 20
+        height: 44
+
         Text {
             anchors.centerIn: parent
+
             text: {
                 if (volMute || vol === 0) return "󰝟";
+
                 var d = volDesc.toLowerCase();
-                if (d.includes("bluez") || d.includes("buds") || d.includes("headphone")) return "󰋋";
+
+                if (d.includes("bluez") ||
+                    d.includes("buds") ||
+                    d.includes("headphone")) return "󰋋";
+
                 if (vol >= 66) return "󰕾";
                 if (vol >= 33) return "󰖀";
+
                 return "󰕿";
             }
-            color: (volMute || vol === 0) ? "#8c8c8c" : "#ffffff"
+
+            color: (volMute || vol === 0)
+                ? "#8c8c8c"
+                : "#ffffff"
+
             font.family: Theme.fontIcons
             font.pixelSize: 16
         }
-        MouseArea { 
+
+        MouseArea {
             anchors.fill: parent
-            hoverEnabled: true 
-            onEntered: iconsRoot.updateMenu(true, "Audio", (volMute || vol === 0) ? "Muted" : "Level: " + vol + "%", "Output: " + volDesc, "#e74c3c", 82)
-            onExited: iconsRoot.updateMenu(false, "", "", "", "#ffffff", 82)
+            enabled: iconsRoot.hoverAllowed
+            hoverEnabled: true
+
+            onEntered: iconsRoot.updateMenu(
+                true,
+                "Audio",
+                (volMute || vol === 0) ? "Muted" : "Level: " + vol + "%",
+                "Output: " + volDesc,
+                "#e74c3c",
+                82
+            )
+
+            onExited: iconsRoot.updateMenu(
+                false, "", "", "", "#ffffff", 82
+            )
         }
     }
 
-    // --- Rendimiento (Color Dinámico) ---
+    // --- Power Mode ---
     Item {
-        width: 20; height: 44
-        
+        width: 20
+        height: 44
+
         readonly property color currentPerfColor: {
-            if (perf === "power-saver") return "#2ecc71"; 
-            if (perf === "performance") return "#f39c12"; 
-            return "#ffffff"; 
+            if (perf === "power-saver") return "#2ecc71";
+            if (perf === "performance") return "#f39c12";
+
+            return "#ffffff";
         }
 
         Text {
@@ -106,35 +190,60 @@ Row {
             font.family: Theme.fontIcons
             font.pixelSize: 16
         }
-        MouseArea { 
+
+        MouseArea {
             anchors.fill: parent
-            hoverEnabled: true 
+            enabled: iconsRoot.hoverAllowed
+            hoverEnabled: true
+
             onEntered: {
-                iconsRoot.updateMenu(true, "Power Mode", "Profile: " + perf, "Mode: System Controlled", parent.currentPerfColor, 52);
+                iconsRoot.updateMenu(
+                    true,
+                    "Power Mode",
+                    "Profile: " + perf,
+                    "Mode: System Controlled",
+                    parent.currentPerfColor,
+                    52
+                );
             }
+
             onExited: {
-                iconsRoot.updateMenu(false, "", "", "", "#ffffff", 52);
+                iconsRoot.updateMenu(
+                    false, "", "", "", "#ffffff", 52
+                );
             }
         }
     }
 
-    // --- Portapapeles (󰅍) ---
+    // --- Clipboard ---
     Item {
-        width: 20; height: 44
+        width: 20
+        height: 44
 
         Text {
             anchors.centerIn: parent
             text: "󰅍"
-            color: (rootRef && rootRef.isClipMenuOpen) ? Theme.blue : Theme.white
+            color: (rootRef && rootRef.isClipMenuOpen)
+                ? Theme.blue
+                : Theme.white
             font.family: Theme.fontIcons
             font.pixelSize: 16
         }
 
         MouseArea {
             anchors.fill: parent
+            enabled: iconsRoot.hoverAllowed
             hoverEnabled: true
-            onEntered: if (rootRef) rootRef.enterClipIcon()
-            onExited: if (rootRef) rootRef.startClipHideTimer()
+
+            onEntered: {
+                if (iconsRoot.hoverAllowed)
+                    iconsRoot.rootRef.enterClipIcon();
+            }
+
+            onExited: {
+                if (iconsRoot.hoverAllowed)
+                    iconsRoot.rootRef.startClipHideTimer();
+            }
         }
     }
 }
