@@ -681,6 +681,25 @@ if macos_mode_valid then
         rules_file:close()
         dofile(macos_rules_path)
     end
+
+        -- macOS window management
+
+    local wm = "~/.config/hypr/scripts/macos_window_manager.sh"
+
+    -- Window snapping
+    hl.bind("SUPER + SHIFT + left", hl.dsp.exec_cmd(wm .. " snap left"))
+    hl.bind("SUPER + SHIFT + right", hl.dsp.exec_cmd(wm .. " snap right"))
+    hl.bind("SUPER + SHIFT + up", hl.dsp.exec_cmd(wm .. " snap up"))
+    hl.bind("SUPER + SHIFT + down", hl.dsp.exec_cmd(wm .. " snap down"))
+
+    -- Directional window swapping
+    hl.bind("SUPER + ALT + left", hl.dsp.exec_cmd(wm .. " swap left"))
+    hl.bind("SUPER + ALT + right", hl.dsp.exec_cmd(wm .. " swap right"))
+    hl.bind("SUPER + ALT + up", hl.dsp.exec_cmd(wm .. " swap up"))
+    hl.bind("SUPER + ALT + down", hl.dsp.exec_cmd(wm .. " swap down"))
+
+    -- Center window
+    hl.bind("SUPER + SHIFT + C", hl.dsp.exec_cmd(wm .. " center"))
 else
     -- Never let state from an older Hyprland instance leak into
     -- the new session.
