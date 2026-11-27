@@ -101,7 +101,12 @@ PanelWindow {
     // Observar cuándo se abre/cierra Launcher y cuándo
     // el usuario cambia de pantalla.
     onVisible_stateChanged: updateXavionIdleUnload()
-    onCurrentModeChanged: updateXavionIdleUnload()
+    onCurrentModeChanged: {
+        updateXavionIdleUnload()
+
+        if (currentMode !== 11)
+            recordingMonitorMenu = false
+    }
 
     property string calcResult: "" 
     
@@ -143,6 +148,8 @@ PanelWindow {
     property string pendingRecordingCapture: ""
     property string pendingRecordingAudio: ""
     property bool pendingRecordingCamera: false
+    property bool recordingMonitorMenu: false
+    property string pendingRecordingOutput: ""
 
     // Focus Timer launcher panel.
     // 0=5m, 1=15m, 2=25m, 3=60m, 4=90m, 5=Custom.
@@ -266,20 +273,32 @@ PanelWindow {
         id: recordingStartTimer
         interval: 420
         repeat: false
+
         onTriggered: {
             var capture = launcherWindow.pendingRecordingCapture;
             var audio = launcherWindow.pendingRecordingAudio;
             var camera = launcherWindow.pendingRecordingCamera;
+            var output = launcherWindow.pendingRecordingOutput;
+
             launcherWindow.pendingRecordingCapture = "";
             launcherWindow.pendingRecordingAudio = "";
             launcherWindow.pendingRecordingCamera = false;
-            if (capture === "" || audio === "") return;
+            launcherWindow.pendingRecordingOutput = "";
+
+            if (capture === "" || audio === "")
+                return;
 
             execProc.running = false;
+
             execProc.command = [
                 "/home/javier/.config/quickshell/scripts/screen_record.sh",
-                "start", capture, audio, camera ? "1" : "0"
+                "start",
+                capture,
+                audio,
+                camera ? "1" : "0",
+                output
             ];
+
             execProc.startDetached();
         }
     }
@@ -470,6 +489,7 @@ PanelWindow {
             if (launcherWindow.currentMode === 10 || launcherWindow.currentMode === 11 || launcherWindow.currentMode === 12) return 620;
             if (launcherWindow.currentMode === 13 || launcherWindow.currentMode === launcherWindow.xavionMode) return 740;
             if (launcherWindow.currentMode === 9) return 320; 
+            if (launcherWindow.currentMode === 11 && launcherWindow.recordingMonitorMenu) return 420;
             return 720; 
         }
 
@@ -1381,6 +1401,11 @@ PanelWindow {
                                     launcherWindow.activeHeaderButton = 1
                             }
                             onClicked: {
+                                if (launcherWindow.currentMode === 11
+                                    && launcherWindow.recordingMonitorMenu) {
+                                    launcherWindow.cancelRecordingMonitorSelection();
+                                    return;
+                                }
                                 launcherWindow.currentMode = 0;
                                 launcherWindow.activeHeaderButton = 0;
                                 launcherWindow.cleanupSelection = 1;
@@ -1395,7 +1420,10 @@ PanelWindow {
                     Text {
                         text: launcherWindow.currentMode === 1 ? "File Search Results"
                             : (launcherWindow.currentMode === 10 ? "Cleanup"
-                            : (launcherWindow.currentMode === 11 ? "Screen Recording"
+                            : (launcherWindow.currentMode === 11
+                                ? (launcherWindow.recordingMonitorMenu
+                                    ? "Select monitor"
+                                    : "Screen Recording")
                             : (launcherWindow.currentMode === 12 ? "Focus Timer"
                             : (launcherWindow.currentMode === 13 ? "Settings" : "System Options"))))
                         color: Theme.white; font.pixelSize: 16; font.bold: true
@@ -1953,11 +1981,36 @@ PanelWindow {
             // ------------------------------------------
             // 3. SCREEN RECORDING (Modo 11)
             // ------------------------------------------
+            RecordingMonitorSelector {
+                id: recordingMonitorSelector
+
+                width: parent.width
+
+                availableHeight: Math.max(
+                    160,
+                    launcherWindow.height - 130
+                )
+
+                visible: launcherWindow.currentMode === 11
+                        && launcherWindow.recordingMonitorMenu
+
+                onSelected: function(capture, output) {
+                    launcherWindow.launchScreenRecording(
+                        capture,
+                        output
+                    )
+                }
+
+                onCanceled: launcherWindow.cancelRecordingMonitorSelection()
+            }
+
             Column {
                 id: recordingPanel
                 width: parent.width
                 spacing: 14
+
                 visible: launcherWindow.currentMode === 11
+                        && !launcherWindow.recordingMonitorMenu
 
                 Text {
                     width: parent.width
@@ -3468,10 +3521,56 @@ PanelWindow {
     }
 
     function startScreenRecording() {
-        launcherWindow.pendingRecordingCapture = launcherWindow.recordingCapture;
-        launcherWindow.pendingRecordingAudio = launcherWindow.recordingAudio;
-        launcherWindow.pendingRecordingCamera = launcherWindow.recordingCamera;
-        // Close first so the Launcher never appears inside slurp or the recording.
+        if (launcherWindow.recordingCapture === "screen") {
+            var screens = Quickshell.screens;
+
+            if (screens.length === 0) {
+                launcherWindow.requestIslandMsg(
+                    "󰍹",
+                    "#ff453a",
+                    "No monitors found"
+                );
+                return;
+            }
+
+            if (screens.length > 1) {
+                launcherWindow.recordingMonitorMenu = true;
+                launcherWindow.activeHeaderButton = 0;
+
+                Qt.callLater(function() {
+                    recordingMonitorSelector.activate();
+                });
+
+                return;
+            }
+
+            launchScreenRecording("screen", screens[0].name);
+            return;
+        }
+
+        launchScreenRecording("area", "");
+    }
+
+    function cancelRecordingMonitorSelection() {
+        launcherWindow.recordingMonitorMenu = false;
+        launcherWindow.activeHeaderButton = 0;
+        launcherWindow.recordingSelection = 8;
+
+        Qt.callLater(function() {
+            searchInput.forceActiveFocus();
+        });
+    }
+
+    function launchScreenRecording(capture, output) {
+        launcherWindow.pendingRecordingCapture = capture;
+        launcherWindow.pendingRecordingAudio =
+            launcherWindow.recordingAudio;
+
+        launcherWindow.pendingRecordingCamera =
+            launcherWindow.recordingCamera;
+
+        launcherWindow.pendingRecordingOutput = output;
+
         toggle();
         recordingStartTimer.restart();
     }
